@@ -118,7 +118,8 @@ func (op *MergeOperator) compact() error {
 	}
 	// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
 	// here. When compaction happens, all the older merged entries will be removed.
-	return op.db.batchSetAsync(entries, func(err error) {
+	// todo check if val threshold is right or not
+	return op.db.batchSetAsync(entries, op.db.vlog.valueThreshold(), func(err error) {
 		if err != nil {
 			op.db.opt.Errorf("failed to insert the result of merge compaction: %s", err)
 		}

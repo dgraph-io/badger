@@ -907,8 +907,8 @@ func (db *DB) batchSet(entries []*Entry, threshold int64) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
-	req, err := db.sendToWriteCh(entries)
+func (db *DB) batchSetAsync(entries []*Entry, valThreshold int64, f func(error)) error {
+	req, err := db.sendToWriteChWithThreshold(entries, valThreshold)
 	if err != nil {
 		return err
 	}
