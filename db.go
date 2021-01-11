@@ -756,6 +756,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.opt.Debugf("writeRequests called. Writing to value log")
+	db.validateRequests(reqs)
 	err := db.vlog.write(reqs)
 	if err != nil {
 		done(err)
@@ -1719,6 +1720,27 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 		}
 	}
 	return filtered, nil
+}
+
+func (db *DB) BanPrefix(prefix []byte) error {
+	if err := db.manifest.addChanges(nil, prefix); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) validateRequests(reqs []*request) error {
+	// TODO(Naman): We need to take lock over the manifest here.
+	for _, prefix := range db.manifest.manifest.BannedPrefixes {
+		for _, req := range reqs {
+			for _, entry := range req.Entries {
+				if bytes.HasPrefix(entry.Key, prefix) {
+					return errors.Errorf("writing banned prefix")
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // KVList contains a list of key-value pairs.

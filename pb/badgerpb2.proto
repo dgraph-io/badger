@@ -45,6 +45,7 @@ message KVList {
 message ManifestChangeSet {
   // A set of changes that are applied atomically.
   repeated ManifestChange changes = 1;
+  repeated bytes prefixes = 2;
 }
 
 enum EncryptionAlgo {

@@ -443,7 +443,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		Level:       uint32(lhandler.level),
 		Compression: uint32(tbl.CompressionType()),
 	}
-	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
+	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}, nil); err != nil {
 		return err
 	}
 

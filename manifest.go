@@ -50,13 +50,17 @@ type Manifest struct {
 	// whether it'd be useful to rewrite the manifest.
 	Creations int
 	Deletions int
+
+	// Contains the list of banned prefixes.
+	BannedPrefixes [][]byte
 }
 
 func createManifest() Manifest {
 	levels := make([]levelManifest, 0)
 	return Manifest{
-		Levels: levels,
-		Tables: make(map[uint64]TableManifest),
+		Levels:         levels,
+		Tables:         make(map[uint64]TableManifest),
+		BannedPrefixes: make([][]byte, 0),
 	}
 }
 
@@ -102,18 +106,18 @@ const (
 
 // asChanges returns a sequence of changes that could be used to recreate the Manifest in its
 // present state.
-func (m *Manifest) asChanges() []*pb.ManifestChange {
+func (m *Manifest) asChanges() *pb.ManifestChangeSet {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
 		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID, tm.Compression))
 	}
-	return changes
+	return &pb.ManifestChangeSet{Changes: changes, BannedPrefixes: m.BannedPrefixes}
 }
 
 func (m *Manifest) clone() Manifest {
-	changeSet := pb.ManifestChangeSet{Changes: m.asChanges()}
+	changeSet := m.asChanges()
 	ret := createManifest()
-	y.Check(applyChangeSet(&ret, &changeSet))
+	y.Check(applyChangeSet(&ret, changeSet))
 	return ret
 }
 
@@ -196,11 +200,11 @@ func (mf *manifestFile) close() error {
 // we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
-func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
+func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange, prefix []byte) error {
 	if mf.inMemory {
 		return nil
 	}
-	changes := pb.ManifestChangeSet{Changes: changesParam}
+	changes := pb.ManifestChangeSet{Changes: changesParam, BannedPrefixes: [][]byte{prefix}}
 	buf, err := proto.Marshal(&changes)
 	if err != nil {
 		return err
@@ -253,10 +257,9 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
 
 	netCreations := len(m.Tables)
-	changes := m.asChanges()
-	set := pb.ManifestChangeSet{Changes: changes}
+	changeSet := m.asChanges()
 
-	changeBuf, err := proto.Marshal(&set)
+	changeBuf, err := proto.Marshal(changeSet)
 	if err != nil {
 		fp.Close()
 		return nil, 0, err
@@ -451,6 +454,7 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 			return err
 		}
 	}
+	build.BannedPrefixes = append(build.BannedPrefixes, changeSet.BannedPrefixes...)
 	return nil
 }
 
