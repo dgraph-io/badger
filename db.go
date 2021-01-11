@@ -1723,15 +1723,19 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 }
 
 func (db *DB) BanPrefix(prefix []byte) error {
-	if err := db.manifest.addChanges(nil, prefix); err != nil {
+	if err := db.manifest.banPrefix(prefix); err != nil {
 		return err
 	}
 	return nil
 }
 
+func (db *DB) GetBannedPrefixes() [][]byte {
+	return db.manifest.manifest.getBannedPrefixes()
+}
+
 func (db *DB) validateRequests(reqs []*request) error {
-	// TODO(Naman): We need to take lock over the manifest here.
-	for _, prefix := range db.manifest.manifest.BannedPrefixes {
+	bannedPrefixes := db.GetBannedPrefixes()
+	for _, prefix := range bannedPrefixes {
 		for _, req := range reqs {
 			for _, entry := range req.Entries {
 				if bytes.HasPrefix(entry.Key, prefix) {

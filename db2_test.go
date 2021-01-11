@@ -498,7 +498,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 		Level:       level,
 		Compression: uint32(tab.CompressionType()),
 	}
-	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}, nil),
+	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
 		"unable to add to manifest")
 }
 

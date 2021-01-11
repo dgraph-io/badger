@@ -52,7 +52,8 @@ type Manifest struct {
 	Deletions int
 
 	// Contains the list of banned prefixes.
-	BannedPrefixes [][]byte
+	bannedPrefixes [][]byte
+	prefixLock     *sync.RWMutex
 }
 
 func createManifest() Manifest {
@@ -60,7 +61,8 @@ func createManifest() Manifest {
 	return Manifest{
 		Levels:         levels,
 		Tables:         make(map[uint64]TableManifest),
-		BannedPrefixes: make([][]byte, 0),
+		bannedPrefixes: make([][]byte, 0),
+		prefixLock:     &sync.RWMutex{},
 	}
 }
 
@@ -111,7 +113,13 @@ func (m *Manifest) asChanges() *pb.ManifestChangeSet {
 	for id, tm := range m.Tables {
 		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID, tm.Compression))
 	}
-	return &pb.ManifestChangeSet{Changes: changes, BannedPrefixes: m.BannedPrefixes}
+	return &pb.ManifestChangeSet{Changes: changes, Prefixes: m.getBannedPrefixes()}
+}
+
+func (m *Manifest) getBannedPrefixes() [][]byte {
+	m.prefixLock.RLock()
+	defer m.prefixLock.RUnlock()
+	return m.bannedPrefixes
 }
 
 func (m *Manifest) clone() Manifest {
@@ -196,23 +204,30 @@ func (mf *manifestFile) close() error {
 	return mf.fp.Close()
 }
 
-// addChanges writes a batch of changes, atomically, to the file.  By "atomically" that means when
-// we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
-// this depends on the filesystem -- some might append garbage data if a system crash happens at
-// the wrong time.)
-func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange, prefix []byte) error {
+func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
+	return mf.updateManifest(pb.ManifestChangeSet{Changes: changesParam})
+}
+
+func (mf *manifestFile) banPrefix(prefix []byte) error {
+	return mf.updateManifest(pb.ManifestChangeSet{Prefixes: [][]byte{prefix}})
+}
+
+// updateManifest writes a batch of changes, atomically, to the file.  By "atomically" that means
+// when we replay the MANIFEST file, we'll either replay all the changes or none of them.
+// (The truth of this depends on the filesystem -- some might append garbage data if a system crash
+// happens at the wrong time.)
+func (mf *manifestFile) updateManifest(changeSet pb.ManifestChangeSet) error {
 	if mf.inMemory {
 		return nil
 	}
-	changes := pb.ManifestChangeSet{Changes: changesParam, BannedPrefixes: [][]byte{prefix}}
-	buf, err := proto.Marshal(&changes)
+	buf, err := proto.Marshal(&changeSet)
 	if err != nil {
 		return err
 	}
 
 	// Maybe we could use O_APPEND instead (on certain file systems)
 	mf.appendLock.Lock()
-	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
+	if err := applyChangeSet(&mf.manifest, &changeSet); err != nil {
 		mf.appendLock.Unlock()
 		return err
 	}
@@ -454,7 +469,10 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 			return err
 		}
 	}
-	build.BannedPrefixes = append(build.BannedPrefixes, changeSet.BannedPrefixes...)
+
+	build.prefixLock.Lock()
+	defer build.prefixLock.Unlock()
+	build.bannedPrefixes = append(build.bannedPrefixes, changeSet.Prefixes...)
 	return nil
 }
 

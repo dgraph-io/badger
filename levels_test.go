@@ -55,7 +55,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	}
 	if err := db.manifest.addChanges([]*pb.ManifestChange{
 		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
-	}, nil); err != nil {
+	}); err != nil {
 		panic(err)
 	}
 	db.lc.levels[level].Lock()
@@ -1202,7 +1202,7 @@ func TestStaleDataCleanup(t *testing.T) {
 			tab := buildStaleTable(i)
 			require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
 				newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
-			}, nil))
+			}))
 			tab.CreatedAt = time.Now().Add(-10 * time.Hour)
 			// Add table to the given level.
 			lh.addTable(tab)

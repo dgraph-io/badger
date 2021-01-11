@@ -225,7 +225,7 @@ func TestManifestRewrite(t *testing.T) {
 
 	err = mf.addChanges([]*pb.ManifestChange{
 		newCreateChange(0, 0, 0, 0),
-	}, nil)
+	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
@@ -233,7 +233,7 @@ func TestManifestRewrite(t *testing.T) {
 			newCreateChange(i+1, 0, 0, 0),
 			newDeleteChange(i),
 		}
-		err := mf.addChanges(ch, nil)
+		err := mf.addChanges(ch)
 		require.NoError(t, err)
 	}
 	err = mf.close()

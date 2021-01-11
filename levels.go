@@ -236,7 +236,7 @@ func (s *levelsController) dropTree() (int, error) {
 		}
 	}
 	changeSet := pb.ManifestChangeSet{Changes: changes}
-	if err := s.kv.manifest.addChanges(changeSet.Changes, nil); err != nil {
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return 0, err
 	}
 
@@ -870,7 +870,7 @@ func (s *levelsController) compactBuildTables(
 		len(topTables), len(botTables))
 
 	// We can delete the banned prefixes as well.
-	cd.dropPrefixes = append(cd.dropPrefixes, s.kv.manifest.manifest.BannedPrefixes...)
+	cd.dropPrefixes = append(cd.dropPrefixes, s.kv.manifest.manifest.bannedPrefixes...)
 
 	keepTable := func(t *table.Table) bool {
 		for _, prefix := range cd.dropPrefixes {
@@ -1429,7 +1429,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)
-	if err := s.kv.manifest.addChanges(changeSet.Changes, nil); err != nil {
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return err
 	}
 
@@ -1539,7 +1539,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// deletes the table.)
 		err := s.kv.manifest.addChanges([]*pb.ManifestChange{
 			newCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
-		}, nil)
+		})
 		if err != nil {
 			return err
 		}
