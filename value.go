@@ -1116,11 +1116,11 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 }
 
 type vlogThreshold struct {
-	opt *Options
-	valueThreshold *int64
+	opt                   *Options
+	valueThreshold        *int64
 	dynamicValueThreshold bool
-	valueCh        chan *request
-	vCloser        *z.Closer
+	valueCh               chan *request
+	vCloser               *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics *z.HistogramData
 }
@@ -1128,7 +1128,7 @@ type vlogThreshold struct {
 func initVlogThreshold(opt *Options) *vlogThreshold {
 	if !opt.DynamicValueThreshold {
 		return &vlogThreshold{
-			opt: opt,
+			opt:            opt,
 			valueThreshold: &opt.ValueThreshold,
 		}
 	}
@@ -1154,17 +1154,19 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 	}
 
 	return &vlogThreshold{
-		opt: opt,
+		opt:                   opt,
 		dynamicValueThreshold: opt.DynamicValueThreshold,
-		valueThreshold: &opt.ValueThreshold,
-		valueCh:        make(chan *request, 1000),
-		vCloser:        z.NewCloser(1),
-		vlMetrics:      z.NewHistogramData(getBounds()),
+		valueThreshold:        &opt.ValueThreshold,
+		valueCh:               make(chan *request, 1000),
+		vCloser:               z.NewCloser(1),
+		vlMetrics:             z.NewHistogramData(getBounds()),
 	}
 }
 
 func (v *vlogThreshold) close() {
-	if !v.dynamicValueThreshold { return }
+	if !v.dynamicValueThreshold {
+		return
+	}
 	v.vCloser.SignalAndWait()
 }
 
@@ -1175,7 +1177,7 @@ func (v *vlogThreshold) update(request *request) {
 	v.valueCh <- request
 }
 
-func (v *vlogThreshold)  listenForValueThresholdUpdate() {
+func (v *vlogThreshold) listenForValueThresholdUpdate() {
 	// dynamic value threshold is set to false, return, no need to listen
 	if !v.dynamicValueThreshold {
 		return
