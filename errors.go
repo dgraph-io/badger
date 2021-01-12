@@ -55,6 +55,9 @@ var (
 	// reserved for internal usage.
 	ErrInvalidKey = errors.New("Key is using a reserved !badger! prefix")
 
+	// ErrBannedKey is returned if the read/write key is prefixed by any banned prefix.
+	ErrBannedKey = errors.New("Key is using the banned prefix")
+
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
 	ErrThresholdZero = errors.New(

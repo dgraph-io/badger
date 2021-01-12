@@ -1739,7 +1739,7 @@ func (db *DB) validateRequests(reqs []*request) error {
 		for _, req := range reqs {
 			for _, entry := range req.Entries {
 				if bytes.HasPrefix(entry.Key, prefix) {
-					return errors.Errorf("writing banned prefix")
+					return ErrBannedKey
 				}
 			}
 		}
