@@ -34,6 +34,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+type lockedKeys struct {
+	sync.RWMutex
+	prefixes [][]byte
+}
+
 // Manifest represents the contents of the MANIFEST file in a Badger store.
 //
 // The MANIFEST file describes the startup state of the db -- all LSM files and what level they're
@@ -52,17 +57,14 @@ type Manifest struct {
 	Deletions int
 
 	// Contains the list of banned prefixes.
-	bannedPrefixes [][]byte
-	prefixLock     *sync.RWMutex
+	banned lockedKeys
 }
 
 func createManifest() Manifest {
 	levels := make([]levelManifest, 0)
 	return Manifest{
-		Levels:         levels,
-		Tables:         make(map[uint64]TableManifest),
-		bannedPrefixes: make([][]byte, 0),
-		prefixLock:     &sync.RWMutex{},
+		Levels: levels,
+		Tables: make(map[uint64]TableManifest),
 	}
 }
 
@@ -117,9 +119,9 @@ func (m *Manifest) asChanges() *pb.ManifestChangeSet {
 }
 
 func (m *Manifest) getBannedPrefixes() [][]byte {
-	m.prefixLock.RLock()
-	defer m.prefixLock.RUnlock()
-	return m.bannedPrefixes
+	m.banned.RLock()
+	defer m.banned.RUnlock()
+	return m.banned.prefixes
 }
 
 func (m *Manifest) clone() Manifest {
@@ -470,9 +472,12 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 		}
 	}
 
-	build.prefixLock.Lock()
-	defer build.prefixLock.Unlock()
-	build.bannedPrefixes = append(build.bannedPrefixes, changeSet.Prefixes...)
+	build.banned.Lock()
+	defer build.banned.Unlock()
+	if build.banned.prefixes == nil {
+		build.banned.prefixes = make([][]byte, 0)
+	}
+	build.banned.prefixes = append(build.banned.prefixes, changeSet.Prefixes...)
 	return nil
 }
 
