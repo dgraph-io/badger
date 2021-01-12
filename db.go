@@ -217,16 +217,17 @@ func Open(opt Options) (*DB, error) {
 	}()
 
 	db := &DB{
-		imm:           make([]*memTable, 0, opt.NumMemtables),
-		flushChan:     make(chan flushTask, opt.NumMemtables),
-		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           opt,
-		manifest:      manifestFile,
-		dirLockGuard:  dirLockGuard,
-		valueDirGuard: valueDirLockGuard,
-		orc:           newOracle(opt),
-		pub:           newPublisher(),
-		allocPool:     z.NewAllocatorPool(8),
+		imm:            make([]*memTable, 0, opt.NumMemtables),
+		flushChan:      make(chan flushTask, opt.NumMemtables),
+		writeCh:        make(chan *request, kvWriteChCapacity),
+		opt:            opt,
+		manifest:       manifestFile,
+		dirLockGuard:   dirLockGuard,
+		valueDirGuard:  valueDirLockGuard,
+		orc:            newOracle(opt),
+		pub:            newPublisher(),
+		allocPool:      z.NewAllocatorPool(8),
+		bannedPrefixes: lockedKeys{},
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -390,9 +391,9 @@ func (db *DB) setBannedPrefixes() error {
 		}
 		encoded = buf
 	}
-	db.bannedPrefixes = lockedKeys{
-		keys: decodePrefixes(encoded),
-	}
+	db.bannedPrefixes.Lock()
+	defer db.bannedPrefixes.Unlock()
+	db.bannedPrefixes.keys = decodePrefixes(encoded)
 	return nil
 }
 
@@ -832,8 +833,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 func (db *DB) validateEntries(entries []*Entry) error {
-	bannedPrefixes := db.GetBannedPrefixes()
-	for _, prefix := range bannedPrefixes {
+	for _, prefix := range db.GetBannedPrefixes() {
 		for _, entry := range entries {
 			if bytes.HasPrefix(entry.Key, prefix) {
 				return ErrBannedKey
@@ -1831,9 +1831,16 @@ func (db *DB) BanPrefix(prefix []byte) error {
 
 // GetBannedPrefixes returns the list of prefixes banned for DB.
 func (db *DB) GetBannedPrefixes() [][]byte {
+	copyPrefixes := func(src [][]byte) [][]byte {
+		var dst [][]byte
+		for _, k := range src {
+			dst = append(dst, y.SafeCopy(nil, k))
+		}
+		return dst
+	}
 	db.bannedPrefixes.RLock()
 	defer db.bannedPrefixes.RUnlock()
-	return db.bannedPrefixes.keys
+	return copyPrefixes(db.bannedPrefixes.keys)
 }
 
 // KVList contains a list of key-value pairs.
