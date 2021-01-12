@@ -438,19 +438,11 @@ func (txn *Txn) Delete(key []byte) error {
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
-	isBanned := func() bool {
-		for _, prefix := range txn.db.GetBannedPrefixes() {
-			if bytes.HasPrefix(key, prefix) {
-				return true
-			}
-		}
-		return false
-	}
 	if len(key) == 0 {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
 		return nil, ErrDiscardedTxn
-	} else if isBanned() {
+	} else if txn.db.isBanned(key) {
 		return nil, ErrBannedKey
 	}
 

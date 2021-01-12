@@ -237,6 +237,11 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				continue
 			}
 
+			// Do not send the keys which are banned.
+			if st.db.isBanned(item.Key()) {
+				continue
+			}
+
 			// Now convert to key value.
 			itr.Alloc.Reset()
 			list, err := st.KeyToList(item.KeyCopy(nil), itr)

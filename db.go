@@ -1735,6 +1735,16 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
+func (db *DB) isBanned(key []byte) bool {
+	for _, prefix := range db.GetBannedPrefixes() {
+		if bytes.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// BanPrefix bans a prefix. Read/write to such keys is denied.
 func (db *DB) BanPrefix(prefix []byte) error {
 	if err := db.manifest.banPrefix(prefix); err != nil {
 		return err
@@ -1742,6 +1752,7 @@ func (db *DB) BanPrefix(prefix []byte) error {
 	return nil
 }
 
+// GetBannedPrefixes returns the list of prefixes banned for DB.
 func (db *DB) GetBannedPrefixes() [][]byte {
 	return db.manifest.manifest.getBannedPrefixes()
 }
