@@ -756,7 +756,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.opt.Debugf("writeRequests called. Writing to value log")
-	db.validateRequests(reqs)
 	err := db.vlog.write(reqs)
 	if err != nil {
 		done(err)
@@ -796,10 +795,24 @@ func (db *DB) writeRequests(reqs []*request) error {
 	db.opt.Debugf("%d entries written", count)
 	return nil
 }
+func (db *DB) validateEntries(entries []*Entry) error {
+	bannedPrefixes := db.GetBannedPrefixes()
+	for _, prefix := range bannedPrefixes {
+		for _, entry := range entries {
+			if bytes.HasPrefix(entry.Key, prefix) {
+				return ErrBannedKey
+			}
+		}
+	}
+	return nil
+}
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
+	}
+	if err := db.validateEntries(entries); err != nil {
+		return nil, err
 	}
 	var count, size int64
 	for _, e := range entries {
@@ -1731,20 +1744,6 @@ func (db *DB) BanPrefix(prefix []byte) error {
 
 func (db *DB) GetBannedPrefixes() [][]byte {
 	return db.manifest.manifest.getBannedPrefixes()
-}
-
-func (db *DB) validateRequests(reqs []*request) error {
-	bannedPrefixes := db.GetBannedPrefixes()
-	for _, prefix := range bannedPrefixes {
-		for _, req := range reqs {
-			for _, entry := range req.Entries {
-				if bytes.HasPrefix(entry.Key, prefix) {
-					return ErrBannedKey
-				}
-			}
-		}
-	}
-	return nil
 }
 
 // KVList contains a list of key-value pairs.

@@ -2308,30 +2308,21 @@ func TestBannedPrefixes(t *testing.T) {
 		return false
 	}
 	validate := func() {
-		// Validate read.
-		require.NoError(t, db.View(func(txn *Txn) error {
-			for _, key := range keys {
-				_, err := txn.Get(key)
-				if isBanned(key) {
-					require.Error(t, ErrBannedKey, err)
-				} else {
-					require.NoError(t, err)
-				}
-			}
-			return nil
-		}))
-		// Validate write.
+		// Validate read/write.
 		for _, key := range keys {
-			var err error
+			var rerr, werr error
 			txn := db.NewTransaction(true)
-			if err = txn.Set(key, []byte("value")); err != nil {
-				err = txn.Commit()
+			_, rerr = txn.Get(key)
+			if werr = txn.Set(key, []byte("value")); err == nil {
+				werr = txn.Commit()
 			}
 			txn.Discard()
 			if isBanned(key) {
-				require.Error(t, ErrBannedKey, err)
+				require.Equal(t, ErrBannedKey, rerr)
+				require.Equal(t, ErrBannedKey, werr)
 			} else {
-				require.NoError(t, err)
+				require.NoError(t, rerr)
+				require.NoError(t, werr)
 			}
 		}
 	}
@@ -2346,7 +2337,7 @@ func TestBannedPrefixes(t *testing.T) {
 	}
 	validate()
 
-	// Ban a couple of keys and validate that we should not be able to read them.
+	// Ban a couple of prefix and validate that we should not be able to read/write them.
 	prefix := []byte(fmt.Sprintf("key%02d", 1))
 	bannedPrefixes = append(bannedPrefixes, prefix)
 	require.NoError(t, db.BanPrefix(prefix))
