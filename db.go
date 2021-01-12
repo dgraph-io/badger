@@ -45,7 +45,7 @@ import (
 var (
 	badgerPrefix    = []byte("!badger!")       // Prefix for internal keys used by badger.
 	txnKey          = []byte("!badger!txn")    // For indicating end of entries in txn.
-	bannedPrefixKey = []byte("!badger!prefix") // For indicating end of entries in txn.
+	bannedPrefixKey = []byte("!badger!prefix") // For storing the banned keys (used by Dgraph).
 )
 
 const (
@@ -342,15 +342,8 @@ func Open(opt Options) (*DB, error) {
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 
-	prefixKey := y.KeyWithTs(bannedPrefixKey, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	vs, err := db.get(prefixKey)
-	if err != nil {
-		return db, errors.Wrap(err, "Retrieving head")
-	}
-	// TODO: Handle case where keys are stored in vlog files and decoding vs is required.
-	db.bannedPrefixes = lockedKeys{
-		keys: decodePrefixes(vs.Value),
+	if err := db.setBannedPrefixes(); err != nil {
+		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -376,6 +369,31 @@ func Open(opt Options) (*DB, error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// setBannedPrefixes retrieves the banned keys from the DB and updates the in-memory structure.
+func (db *DB) setBannedPrefixes() error {
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	prefixKey := y.KeyWithTs(bannedPrefixKey, math.MaxUint64)
+	vs, err := db.get(prefixKey)
+	if err != nil {
+		return err
+	}
+	encoded := vs.Value
+	if vs.Meta&bitValuePointer > 0 {
+		var vptr valuePointer
+		vptr.Decode(vs.Value)
+		buf, cb, err := db.vlog.Read(vptr, nil)
+		cb()
+		if err != nil {
+			return err
+		}
+		encoded = buf
+	}
+	db.bannedPrefixes = lockedKeys{
+		keys: decodePrefixes(encoded),
+	}
+	return nil
 }
 
 func (db *DB) MaxVersion() uint64 {

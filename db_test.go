@@ -2294,8 +2294,13 @@ func TestBannedPrefixes(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	ops := getTestOptions(dir)
+	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
+	// restart.
+	ops.ValueThreshold = 0
+	ops.ValueLogMaxEntries = 2
 	db, err := Open(ops)
 	require.NoError(t, err)
+	require.Equal(t, 1, len(db.vlog.filesMap))
 
 	var keys [10][]byte
 	var bannedPrefixes [][]byte
@@ -2347,6 +2352,8 @@ func TestBannedPrefixes(t *testing.T) {
 	bannedPrefixes = append(bannedPrefixes, prefix)
 	require.NoError(t, db.BanPrefix(prefix))
 	validate()
+
+	require.Greater(t, len(db.vlog.filesMap), 1)
 
 	require.NoError(t, db.Close())
 
