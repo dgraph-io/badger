@@ -389,7 +389,7 @@ func (lf *logFile) encryptionEnabled() bool {
 }
 
 // Acquire lock on mmap/file if you are calling this
-func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
+func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 	var nbr int64
 	offset := p.Offset
 	// Do not convert size to uint32, because the lf.Data can be of size
