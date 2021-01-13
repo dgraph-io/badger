@@ -19,7 +19,7 @@ package table
 import (
 	"bytes"
 
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 // MergeIterator merges multiple iterators.
