@@ -184,7 +184,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	vlog.opt.Infof("Rewriting fid: %d", f.fid)
 	wb := make([]*Entry, 0, 1000)
-	valThreshold := vlog.valueThreshold()
+	valThreshold := vlog.db.valueThreshold()
 	var size int64
 
 	y.AssertTrue(vlog.db != nil)
@@ -439,8 +439,8 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
-func (vlog *valueLog) valueThreshold() int64 {
-	return atomic.LoadInt64(vlog.threshold.valueThreshold)
+func (db *DB) valueThreshold() int64 {
+	return atomic.LoadInt64(&db.threshold.valueThreshold)
 }
 
 type valueLog struct {
@@ -461,8 +461,6 @@ type valueLog struct {
 
 	garbageCh    chan struct{}
 	discardStats *discardStats
-
-	threshold *vlogThreshold
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -551,14 +549,12 @@ func errFile(err error, path string, msg string) error {
 func (vlog *valueLog) init(db *DB) {
 	vlog.opt = db.opt
 	vlog.db = db
-	vlog.threshold = initVlogThreshold(&db.opt)
 	// We don't need to open any vlog files or collect stats for GC if DB is opened
 	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
 	if vlog.opt.InMemory {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.threshold.listenForValueThresholdUpdate()
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	lf, err := initDiscardStats(vlog.opt)
@@ -637,7 +633,6 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-	vlog.threshold.close()
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -897,7 +892,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
-		vlog.threshold.update(b)
+		vlog.db.threshold.update(b)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
@@ -1116,21 +1111,17 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 }
 
 type vlogThreshold struct {
-	opt                   *Options
-	valueThreshold        *int64
-	dynamicValueThreshold bool
-	valueCh               chan *request
-	vCloser               *z.Closer
+	valueThreshold int64
+	opt            *Options
+	valueCh        chan *request
+	closer         *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics *z.HistogramData
 }
 
 func initVlogThreshold(opt *Options) *vlogThreshold {
 	if !opt.DynamicValueThreshold {
-		return &vlogThreshold{
-			opt:            opt,
-			valueThreshold: &opt.ValueThreshold,
-		}
+		return nil
 	}
 
 	getBounds := func() []float64 {
@@ -1154,57 +1145,52 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 	}
 
 	return &vlogThreshold{
-		opt:                   opt,
-		dynamicValueThreshold: opt.DynamicValueThreshold,
-		valueThreshold:        &opt.ValueThreshold,
-		valueCh:               make(chan *request, 1000),
-		vCloser:               z.NewCloser(1),
-		vlMetrics:             z.NewHistogramData(getBounds()),
+		valueThreshold: opt.ValueThreshold,
+		valueCh:        make(chan *request, 1000),
+		closer:         z.NewCloser(1),
+		vlMetrics:      z.NewHistogramData(getBounds()),
 	}
-}
-
-func (v *vlogThreshold) close() {
-	if !v.dynamicValueThreshold {
-		return
-	}
-	v.vCloser.SignalAndWait()
 }
 
 func (v *vlogThreshold) update(request *request) {
-	if !v.dynamicValueThreshold {
+	if v == nil {
 		return
 	}
 	v.valueCh <- request
 }
 
+func (v *vlogThreshold) close() {
+	if v == nil {
+		return
+	}
+	v.closer.SignalAndWait()
+}
+
 func (v *vlogThreshold) listenForValueThresholdUpdate() {
-	// dynamic value threshold is set to false, return, no need to listen
-	if !v.dynamicValueThreshold {
+	if v == nil {
 		return
 	}
 
-	go func() {
-		defer v.vCloser.Done()
-		for {
-			select {
-			case val := <-v.valueCh:
-				if val == nil || val.Entries == nil {
-					continue
-				}
-				for _, e := range val.Entries {
-					v.vlMetrics.Update(int64(len(e.Value)))
-				}
-				// we are making it to get 99 percentile so that only values
-				// in range of 1 percentile will make it to the value log
-				p := int64(v.vlMetrics.Percentile(0.99))
-				vt := atomic.LoadInt64(v.valueThreshold)
-				if vt != p {
-					v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
-					atomic.StoreInt64(v.valueThreshold, p)
-				}
-			case <-v.vCloser.HasBeenClosed():
-				return
+	defer v.closer.Done()
+	for {
+		select {
+		case <-v.closer.HasBeenClosed():
+			return
+		case val := <-v.valueCh:
+			if val == nil || val.Entries == nil {
+				continue
+			}
+			for _, e := range val.Entries {
+				v.vlMetrics.Update(int64(len(e.Value)))
+			}
+			// we are making it to get 99 percentile so that only values
+			// in range of 1 percentile will make it to the value log
+			p := int64(v.vlMetrics.Percentile(0.99))
+			vt := atomic.LoadInt64(&v.valueThreshold)
+			if vt != p {
+				v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
+				atomic.StoreInt64(&v.valueThreshold, p)
 			}
 		}
-	}()
+	}
 }

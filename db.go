@@ -89,7 +89,8 @@ type DB struct {
 	blockWrites int32
 	isClosed    uint32
 
-	orc *oracle
+	threshold *vlogThreshold
+	orc       *oracle
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -222,6 +223,7 @@ func Open(opt Options) (*DB, error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 		allocPool:     z.NewAllocatorPool(8),
+		threshold:     initVlogThreshold(&opt),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -344,6 +346,8 @@ func Open(opt Options) (*DB, error) {
 	// compaction when run in offline mode via the flatten tool.
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
+
+	go db.threshold.listenForValueThresholdUpdate()
 
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
@@ -572,6 +576,7 @@ func (db *DB) close() (err error) {
 	db.indexCache.Close()
 
 	atomic.StoreUint32(&db.isClosed, 1)
+	db.threshold.close()
 
 	if db.opt.InMemory {
 		return
@@ -794,9 +799,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 
-func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
-	return db.sendToWriteChWithThreshold(entries, db.vlog.valueThreshold())
-}
+// func (db *DB) sxendToWriteCh(entries []*Entry) (*request, error) {
+// 	return db.sendToWriteChWithThreshold(entries, db.valueThreshold())
+// }
 
 func (db *DB) sendToWriteChWithThreshold(entries []*Entry, threshold int64) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {

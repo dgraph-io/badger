@@ -134,7 +134,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			streamReqs[kv.StreamId] = req
 		}
 		req.Entries = append(req.Entries, e)
-		req.valueThreshold = sw.db.vlog.valueThreshold()
+		req.valueThreshold = sw.db.valueThreshold()
 		return nil
 	})
 	if err != nil {

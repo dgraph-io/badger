@@ -174,7 +174,7 @@ func (db *DB) NewKVLoader(maxPendingWrites int) *KVLoader {
 		db:             db,
 		throttle:       y.NewThrottle(maxPendingWrites),
 		entries:        make([]*Entry, 0, db.opt.maxBatchCount),
-		valueThreshold: db.vlog.valueThreshold(),
+		valueThreshold: db.valueThreshold(),
 	}
 }
 
@@ -222,7 +222,7 @@ func (l *KVLoader) send() error {
 	l.entries = make([]*Entry, 0, l.db.opt.maxBatchCount)
 	l.entriesSize = 0
 	l.totalSize = 0
-	l.valueThreshold = l.db.vlog.valueThreshold()
+	l.valueThreshold = l.db.valueThreshold()
 	return nil
 }
 

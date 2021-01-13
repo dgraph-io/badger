@@ -261,10 +261,10 @@ type Txn struct {
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
 	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
-	numIterators int32
-	discarded    bool
-	doneRead     bool
-	update       bool // update is used to conditionally keep track of reads.
+	numIterators   int32
+	discarded      bool
+	doneRead       bool
+	update         bool // update is used to conditionally keep track of reads.
 	valueThreshold int64
 }
 
@@ -766,11 +766,11 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	}
 
 	txn := &Txn{
-		update: update,
-		db:     db,
-		count:  1,                       // One extra entry for BitFin.
-		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
-		valueThreshold: db.vlog.valueThreshold(),
+		update:         update,
+		db:             db,
+		count:          1,                       // One extra entry for BitFin.
+		size:           int64(len(txnKey) + 10), // Some buffer for the extra entry.
+		valueThreshold: db.valueThreshold(),
 	}
 	if update {
 		if db.opt.DetectConflicts {
