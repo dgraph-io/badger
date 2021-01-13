@@ -385,7 +385,7 @@ func (db *DB) setBannedPrefixes() error {
 		var vptr valuePointer
 		vptr.Decode(vs.Value)
 		buf, cb, err := db.vlog.Read(vptr, nil)
-		cb()
+		runCallback(cb)
 		if err != nil {
 			return err
 		}
@@ -832,23 +832,10 @@ func (db *DB) writeRequests(reqs []*request) error {
 	db.opt.Debugf("%d entries written", count)
 	return nil
 }
-func (db *DB) validateEntries(entries []*Entry) error {
-	for _, prefix := range db.GetBannedPrefixes() {
-		for _, entry := range entries {
-			if bytes.HasPrefix(entry.Key, prefix) {
-				return ErrBannedKey
-			}
-		}
-	}
-	return nil
-}
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
-	}
-	if err := db.validateEntries(entries); err != nil {
-		return nil, err
 	}
 	var count, size int64
 	for _, e := range entries {
@@ -1771,7 +1758,7 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
-// encodePrefixes lays out the prefixes on byte array in format:
+// Encodes the prefixes by laying them out on byte array in format:
 // [len, prefix], [len, prefix], ...
 func encodePrefixes(prefixes [][]byte) []byte {
 	var encoded []byte
@@ -1784,6 +1771,7 @@ func encodePrefixes(prefixes [][]byte) []byte {
 	return encoded
 }
 
+// Decodes the banned prefixes from the encoded value.
 func decodePrefixes(encoded []byte) [][]byte {
 	if len(encoded) == 0 {
 		return make([][]byte, 0)
@@ -1798,6 +1786,7 @@ func decodePrefixes(encoded []byte) [][]byte {
 	return prefixes
 }
 
+// Checks if the key is prefixed with any banned prefix. Expects that the key is without the ts.
 func (db *DB) isBanned(key []byte) bool {
 	for _, prefix := range db.GetBannedPrefixes() {
 		if bytes.HasPrefix(key, prefix) {

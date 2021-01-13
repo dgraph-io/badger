@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2313,14 +2314,12 @@ func TestBannedPrefixes(t *testing.T) {
 		return false
 	}
 	validate := func() {
+		require.Equal(t, bannedPrefixes, db.GetBannedPrefixes())
 		// Validate read/write.
 		for _, key := range keys {
-			var rerr, werr error
 			txn := db.NewTransaction(true)
-			_, rerr = txn.Get(key)
-			if werr = txn.Set(key, []byte("value")); err == nil {
-				werr = txn.Commit()
-			}
+			_, rerr := txn.Get(key)
+			werr := txn.Set(key, []byte("value"))
 			txn.Discard()
 			if isBanned(key) {
 				require.Equal(t, ErrBannedKey, rerr)
@@ -2354,10 +2353,92 @@ func TestBannedPrefixes(t *testing.T) {
 	validate()
 
 	require.Greater(t, len(db.vlog.filesMap), 1)
-
 	require.NoError(t, db.Close())
 
 	db, err = Open(ops)
 	require.NoError(t, err)
 	validate()
+	require.NoError(t, db.Close())
+}
+
+// Tests that the iterator skips the banned prefixes.
+func TestIterateWithBanned(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		bkey := func(prefix string, i int) []byte {
+			return []byte(fmt.Sprintf("%s%09d", prefix, i))
+		}
+
+		N := 100
+		var keys [][]byte
+		for i := 0; i < 26; i++ {
+			prefix := strings.Repeat(fmt.Sprintf("%c", i+97), 5)
+			for j := 0; j < N; j++ {
+				keys = append(keys, bkey(prefix, j))
+			}
+		}
+		for _, key := range keys {
+			txnSet(t, db, key, key, 0)
+		}
+		require.NoError(t, db.View(func(txn *Txn) error {
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			defer itr.Close()
+			idx := 0
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				require.Equal(t, keys[idx], itr.Item().Key())
+				idx++
+			}
+			require.Equal(t, 26*N, idx)
+			return nil
+		}))
+
+		isBanned := func(key []byte) bool {
+			for _, prefix := range db.GetBannedPrefixes() {
+				if bytes.HasPrefix(key, prefix) {
+					return true
+				}
+			}
+			return false
+		}
+
+		// Validate that we don't see the banned keys in iterating. Also validate the value of idx
+		// after iteration to confirm that we saw all the expected keys.
+		validate := func(iopts IteratorOptions, idx, end int) {
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			itr := txn.NewIterator(iopts)
+			defer itr.Close()
+			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
+				// Iterator should skip the banned keys, so should we.
+				if isBanned(keys[idx]) {
+					idx += N
+				}
+				require.Equal(t, keys[idx], itr.Item().Key())
+				idx++
+			}
+			require.Equal(t, end, idx)
+		}
+
+		iopts := DefaultIteratorOptions
+		validate(iopts, 0, 26*N)
+
+		db.BanPrefix([]byte("aaaaa"))
+		validate(iopts, 1*N, 26*N)
+
+		db.BanPrefix([]byte("bbbbb"))
+		validate(iopts, 2*N, 26*N)
+
+		db.BanPrefix([]byte("ddddd"))
+		iopts.Prefix = []byte("fffff")
+		validate(iopts, 5*N, 6*N)
+
+		db.BanPrefix([]byte("ggggg"))
+		validate(iopts, 5*N, 6*N)
+
+		iopts.Prefix = nil
+		db.BanPrefix([]byte("rrrrr"))
+		validate(iopts, 2*N, 26*N)
+
+		db.BanPrefix([]byte("zzzzz"))
+		validate(iopts, 2*N, 25*N)
+	})
 }

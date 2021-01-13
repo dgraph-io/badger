@@ -381,6 +381,9 @@ func (txn *Txn) modify(e *Entry) error {
 		return exceedsSize("Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	}
 
+	if txn.db.isBanned(e.Key) {
+		return ErrBannedKey
+	}
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}

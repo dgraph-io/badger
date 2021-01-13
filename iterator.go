@@ -427,7 +427,8 @@ type Iterator struct {
 	data  list
 	waste list
 
-	lastKey []byte // Used to skip over multiple versions of the same key.
+	lastKey []byte   // Used to skip over multiple versions of the same key.
+	banned  [][]byte // List of banned prefixes. Iterator will skip them.
 
 	closed  bool
 	scanned int // Used to estimate the size of data scanned by iterator.
@@ -480,6 +481,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),
 		opt:    opt,
 		readTs: txn.readTs,
+		banned: txn.db.GetBannedPrefixes(),
 	}
 	return res
 }
@@ -594,12 +596,41 @@ func (it *Iterator) parseItem() bool {
 	mi := it.iitr
 	key := mi.Key()
 
+	isBanned := func(key []byte) []byte {
+		for _, prefix := range it.banned {
+			if bytes.HasPrefix(key, prefix) {
+				return prefix
+			}
+		}
+		return nil
+	}
+
 	setItem := func(item *Item) {
 		if it.item == nil {
 			it.item = item
 		} else {
 			it.data.push(item)
 		}
+	}
+
+	// Skip keys with banned prefixes.
+	for mi.Valid() {
+		key = mi.Key()
+		if prefix := isBanned(y.ParseKey(key)); prefix != nil {
+			// Avoid calling isBanned() by checking with the found prefix.
+			mi.Next()
+			for mi.Valid() {
+				key = mi.Key()
+				if !bytes.HasPrefix(y.ParseKey(key), prefix) {
+					break
+				}
+				mi.Next()
+			}
+			continue
+		}
+	}
+	if !mi.Valid() {
+		return true
 	}
 
 	// Skip badger keys.
