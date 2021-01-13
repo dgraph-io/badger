@@ -9,7 +9,7 @@ require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/dgraph-io/ristretto v0.0.4-0.20201224172411-e860a6c48e8a
 	github.com/dustin/go-humanize v1.0.0
-	github.com/golang/protobuf v1.3.1
+	github.com/golang/protobuf v1.4.1
 	github.com/golang/snappy v0.0.1
 	github.com/google/flatbuffers v1.12.0
 	github.com/kr/pretty v0.1.0 // indirect
@@ -20,5 +20,6 @@ require (
 	go.opencensus.io v0.22.5
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974
 	golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f
+	google.golang.org/protobuf v1.25.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )

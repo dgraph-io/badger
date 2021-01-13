@@ -11,6 +11,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -299,7 +300,7 @@ func TestAllocatorReuse(t *testing.T) {
 			kv.Version = uint64(sz)
 			list.Kv = append(list.Kv, kv)
 		}
-		_, err := list.Marshal()
+		_, err := proto.Marshal(&list)
 		require.NoError(t, err)
 	}
 	t.Logf("Allocator: %s\n", a)
