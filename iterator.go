@@ -605,19 +605,6 @@ func (it *Iterator) parseItem() bool {
 		}
 	}
 
-	// Skip badger keys.
-	if !it.opt.InternalAccess && bytes.HasPrefix(key, badgerPrefix) {
-		mi.Next()
-		return false
-	}
-
-	// Skip any versions which are beyond the readTs.
-	version := y.ParseTs(key)
-	if version > it.readTs {
-		mi.Next()
-		return false
-	}
-
 	isBanned := func(key []byte) []byte {
 		for _, prefix := range it.banned {
 			if bytes.HasPrefix(key, prefix) {
@@ -626,6 +613,7 @@ func (it *Iterator) parseItem() bool {
 		}
 		return nil
 	}
+
 	// Skip keys with banned prefixes.
 	for mi.Valid() {
 		key = mi.Key()
@@ -645,6 +633,19 @@ func (it *Iterator) parseItem() bool {
 	}
 	if !mi.Valid() {
 		return true
+	}
+
+	// Skip badger keys.
+	if !it.opt.InternalAccess && bytes.HasPrefix(key, badgerPrefix) {
+		mi.Next()
+		return false
+	}
+
+	// Skip any versions which are beyond the readTs.
+	version := y.ParseTs(key)
+	if version > it.readTs {
+		mi.Next()
+		return false
 	}
 
 	if it.opt.AllVersions {
