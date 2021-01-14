@@ -589,21 +589,13 @@ func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
 // parseItem is a complex function because it needs to handle both forward and reverse iteration
 // implementation. We store keys such that their versions are sorted in descending order. This makes
 // forward iteration efficient, but revese iteration complicated. This tradeoff is better because
-// forward iteration is more common than reverse.
+// forward iteration is more common than reverse. It returns true, if either the iterator is invalid
+// or it has pushed an item into it.data list, else it returns false.
 //
 // This function advances the iterator.
 func (it *Iterator) parseItem() bool {
 	mi := it.iitr
 	key := mi.Key()
-
-	isBanned := func(key []byte) []byte {
-		for _, prefix := range it.banned {
-			if bytes.HasPrefix(key, prefix) {
-				return prefix
-			}
-		}
-		return nil
-	}
 
 	setItem := func(item *Item) {
 		if it.item == nil {
@@ -611,26 +603,6 @@ func (it *Iterator) parseItem() bool {
 		} else {
 			it.data.push(item)
 		}
-	}
-
-	// Skip keys with banned prefixes.
-	for mi.Valid() {
-		key = mi.Key()
-		if prefix := isBanned(y.ParseKey(key)); prefix != nil {
-			// Avoid calling isBanned() by checking with the found prefix.
-			mi.Next()
-			for mi.Valid() {
-				key = mi.Key()
-				if !bytes.HasPrefix(y.ParseKey(key), prefix) {
-					break
-				}
-				mi.Next()
-			}
-			continue
-		}
-	}
-	if !mi.Valid() {
-		return true
 	}
 
 	// Skip badger keys.
@@ -644,6 +616,35 @@ func (it *Iterator) parseItem() bool {
 	if version > it.readTs {
 		mi.Next()
 		return false
+	}
+
+	isBanned := func(key []byte) []byte {
+		for _, prefix := range it.banned {
+			if bytes.HasPrefix(key, prefix) {
+				return prefix
+			}
+		}
+		return nil
+	}
+	// Skip keys with banned prefixes.
+	for mi.Valid() {
+		key = mi.Key()
+		prefix := isBanned(y.ParseKey(key))
+		if prefix == nil {
+			// Break if the key is not banned.
+			break
+		}
+		mi.Next()
+		// Avoid calling isBanned(). Skip all the keys prefixed with the found banned prefix.
+		for ; mi.Valid(); mi.Next() {
+			key = mi.Key()
+			if !bytes.HasPrefix(y.ParseKey(key), prefix) {
+				break
+			}
+		}
+	}
+	if !mi.Valid() {
+		return true
 	}
 
 	if it.opt.AllVersions {
