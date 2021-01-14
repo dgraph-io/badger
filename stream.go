@@ -485,6 +485,6 @@ func BufferToKVList(buf *z.Buffer) (*pb.KVList, error) {
 
 func KVToBuffer(kv *pb.KV, buf *z.Buffer) {
 	out := buf.SliceAllocate(proto.Size(kv))
-	_, err := proto.MarshalOptions{}.MarshalAppend(out, kv)
-	y.Check(err)
+	out = out[:0]
+	y.Check2(proto.MarshalOptions{}.MarshalAppend(out, kv))
 }
