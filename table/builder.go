@@ -25,7 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/fb"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"

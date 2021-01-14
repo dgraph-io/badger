@@ -28,7 +28,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 const batchSize = 16 << 20 // 16 MB
@@ -484,9 +484,7 @@ func BufferToKVList(buf *z.Buffer) (*pb.KVList, error) {
 }
 
 func KVToBuffer(kv *pb.KV, buf *z.Buffer) {
-	tbuf, err := proto.Marshal(kv)
-	y.Check(err)
 	out := buf.SliceAllocate(proto.Size(kv))
-	y.AssertTrue(len(out) == len(tbuf))
-	copy(out, tbuf)
+	_, err := proto.MarshalOptions{}.MarshalAppend(out, kv)
+	y.Check(err)
 }
