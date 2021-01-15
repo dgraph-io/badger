@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [3.2011.0] - 2021-01-15
 
+This release is not backward compatible with Badger v2.2007.x.
+
+### Breaking:
+  - opt(compactions): Improve compaction performance (#1574)
+  - Change how Badger handles WAL (#1555)
+  - feat(index): Use flatbuffers instead of protobuf (#1546)
+
 ### Fixed:
   - Fix(GC): Set bits correctly for moved keys (#1619)
   - Fix(tableBuilding): reduce scope of valuePointer (#1617)
@@ -66,11 +73,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - Expose NumAlloc metrics via expvar (#1470)
   - Support fully disabling the bloom filter (#1319)
   - Add --enc-key flag in badger info tool (#1441)
-
-### Breaking:
-  - opt(compactions): Improve compaction performance (#1574)
-  - Change how Badger handles WAL (#1555)
-  - feat(index): Use flatbuffers instead of protobuf (#1546)
 
 ### New APIs
 - Badger.DB
