@@ -19,7 +19,7 @@
 // versions:
 // 	protoc-gen-go v1.25.0
 // 	protoc        v3.14.0
-// source: badgerpb2.proto
+// source: badgerpb3.proto
 
 package pb
 
@@ -69,11 +69,11 @@ func (x EncryptionAlgo) String() string {
 }
 
 func (EncryptionAlgo) Descriptor() protoreflect.EnumDescriptor {
-	return file_badgerpb2_proto_enumTypes[0].Descriptor()
+	return file_badgerpb3_proto_enumTypes[0].Descriptor()
 }
 
 func (EncryptionAlgo) Type() protoreflect.EnumType {
-	return &file_badgerpb2_proto_enumTypes[0]
+	return &file_badgerpb3_proto_enumTypes[0]
 }
 
 func (x EncryptionAlgo) Number() protoreflect.EnumNumber {
@@ -82,7 +82,7 @@ func (x EncryptionAlgo) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EncryptionAlgo.Descriptor instead.
 func (EncryptionAlgo) EnumDescriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{0}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{0}
 }
 
 type ManifestChange_Operation int32
@@ -115,11 +115,11 @@ func (x ManifestChange_Operation) String() string {
 }
 
 func (ManifestChange_Operation) Descriptor() protoreflect.EnumDescriptor {
-	return file_badgerpb2_proto_enumTypes[1].Descriptor()
+	return file_badgerpb3_proto_enumTypes[1].Descriptor()
 }
 
 func (ManifestChange_Operation) Type() protoreflect.EnumType {
-	return &file_badgerpb2_proto_enumTypes[1]
+	return &file_badgerpb3_proto_enumTypes[1]
 }
 
 func (x ManifestChange_Operation) Number() protoreflect.EnumNumber {
@@ -128,7 +128,7 @@ func (x ManifestChange_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ManifestChange_Operation.Descriptor instead.
 func (ManifestChange_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{3, 0}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{3, 0}
 }
 
 type Checksum_Algorithm int32
@@ -161,11 +161,11 @@ func (x Checksum_Algorithm) String() string {
 }
 
 func (Checksum_Algorithm) Descriptor() protoreflect.EnumDescriptor {
-	return file_badgerpb2_proto_enumTypes[2].Descriptor()
+	return file_badgerpb3_proto_enumTypes[2].Descriptor()
 }
 
 func (Checksum_Algorithm) Type() protoreflect.EnumType {
-	return &file_badgerpb2_proto_enumTypes[2]
+	return &file_badgerpb3_proto_enumTypes[2]
 }
 
 func (x Checksum_Algorithm) Number() protoreflect.EnumNumber {
@@ -174,7 +174,7 @@ func (x Checksum_Algorithm) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Checksum_Algorithm.Descriptor instead.
 func (Checksum_Algorithm) EnumDescriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{4, 0}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{4, 0}
 }
 
 type KV struct {
@@ -197,7 +197,7 @@ type KV struct {
 func (x *KV) Reset() {
 	*x = KV{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[0]
+		mi := &file_badgerpb3_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -210,7 +210,7 @@ func (x *KV) String() string {
 func (*KV) ProtoMessage() {}
 
 func (x *KV) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[0]
+	mi := &file_badgerpb3_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +223,7 @@ func (x *KV) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KV.ProtoReflect.Descriptor instead.
 func (*KV) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{0}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *KV) GetKey() []byte {
@@ -295,7 +295,7 @@ type KVList struct {
 func (x *KVList) Reset() {
 	*x = KVList{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[1]
+		mi := &file_badgerpb3_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -308,7 +308,7 @@ func (x *KVList) String() string {
 func (*KVList) ProtoMessage() {}
 
 func (x *KVList) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[1]
+	mi := &file_badgerpb3_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -321,7 +321,7 @@ func (x *KVList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVList.ProtoReflect.Descriptor instead.
 func (*KVList) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{1}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *KVList) GetKv() []*KV {
@@ -350,7 +350,7 @@ type ManifestChangeSet struct {
 func (x *ManifestChangeSet) Reset() {
 	*x = ManifestChangeSet{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[2]
+		mi := &file_badgerpb3_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -363,7 +363,7 @@ func (x *ManifestChangeSet) String() string {
 func (*ManifestChangeSet) ProtoMessage() {}
 
 func (x *ManifestChangeSet) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[2]
+	mi := &file_badgerpb3_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +376,7 @@ func (x *ManifestChangeSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestChangeSet.ProtoReflect.Descriptor instead.
 func (*ManifestChangeSet) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{2}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ManifestChangeSet) GetChanges() []*ManifestChange {
@@ -392,17 +392,17 @@ type ManifestChange struct {
 	unknownFields protoimpl.UnknownFields
 
 	Id             uint64                   `protobuf:"varint,1,opt,name=Id,proto3" json:"Id,omitempty"` // Table ID.
-	Op             ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=badgerpb2.ManifestChange_Operation" json:"Op,omitempty"`
+	Op             ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=badgerpb3.ManifestChange_Operation" json:"Op,omitempty"`
 	Level          uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"` // Only used for CREATE.
 	KeyId          uint64                   `protobuf:"varint,4,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
-	EncryptionAlgo EncryptionAlgo           `protobuf:"varint,5,opt,name=encryption_algo,json=encryptionAlgo,proto3,enum=badgerpb2.EncryptionAlgo" json:"encryption_algo,omitempty"`
+	EncryptionAlgo EncryptionAlgo           `protobuf:"varint,5,opt,name=encryption_algo,json=encryptionAlgo,proto3,enum=badgerpb3.EncryptionAlgo" json:"encryption_algo,omitempty"`
 	Compression    uint32                   `protobuf:"varint,6,opt,name=compression,proto3" json:"compression,omitempty"` // Only used for CREATE Op.
 }
 
 func (x *ManifestChange) Reset() {
 	*x = ManifestChange{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[3]
+		mi := &file_badgerpb3_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -415,7 +415,7 @@ func (x *ManifestChange) String() string {
 func (*ManifestChange) ProtoMessage() {}
 
 func (x *ManifestChange) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[3]
+	mi := &file_badgerpb3_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +428,7 @@ func (x *ManifestChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestChange.ProtoReflect.Descriptor instead.
 func (*ManifestChange) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{3}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ManifestChange) GetId() uint64 {
@@ -478,14 +478,14 @@ type Checksum struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Algo Checksum_Algorithm `protobuf:"varint,1,opt,name=algo,proto3,enum=badgerpb2.Checksum_Algorithm" json:"algo,omitempty"` // For storing type of Checksum algorithm used
+	Algo Checksum_Algorithm `protobuf:"varint,1,opt,name=algo,proto3,enum=badgerpb3.Checksum_Algorithm" json:"algo,omitempty"` // For storing type of Checksum algorithm used
 	Sum  uint64             `protobuf:"varint,2,opt,name=sum,proto3" json:"sum,omitempty"`
 }
 
 func (x *Checksum) Reset() {
 	*x = Checksum{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[4]
+		mi := &file_badgerpb3_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -498,7 +498,7 @@ func (x *Checksum) String() string {
 func (*Checksum) ProtoMessage() {}
 
 func (x *Checksum) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[4]
+	mi := &file_badgerpb3_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -511,7 +511,7 @@ func (x *Checksum) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Checksum.ProtoReflect.Descriptor instead.
 func (*Checksum) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{4}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Checksum) GetAlgo() Checksum_Algorithm {
@@ -542,7 +542,7 @@ type DataKey struct {
 func (x *DataKey) Reset() {
 	*x = DataKey{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_badgerpb2_proto_msgTypes[5]
+		mi := &file_badgerpb3_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -555,7 +555,7 @@ func (x *DataKey) String() string {
 func (*DataKey) ProtoMessage() {}
 
 func (x *DataKey) ProtoReflect() protoreflect.Message {
-	mi := &file_badgerpb2_proto_msgTypes[5]
+	mi := &file_badgerpb3_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -568,7 +568,7 @@ func (x *DataKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataKey.ProtoReflect.Descriptor instead.
 func (*DataKey) Descriptor() ([]byte, []int) {
-	return file_badgerpb2_proto_rawDescGZIP(), []int{5}
+	return file_badgerpb3_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DataKey) GetKeyId() uint64 {
@@ -599,11 +599,11 @@ func (x *DataKey) GetCreatedAt() int64 {
 	return 0
 }
 
-var File_badgerpb2_proto protoreflect.FileDescriptor
+var File_badgerpb3_proto protoreflect.FileDescriptor
 
-var file_badgerpb2_proto_rawDesc = []byte{
-	0x0a, 0x0f, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x12, 0x09, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x22, 0xd4, 0x01, 0x0a,
+var file_badgerpb3_proto_rawDesc = []byte{
+	0x0a, 0x0f, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x12, 0x09, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x22, 0xd4, 0x01, 0x0a,
 	0x02, 0x4b, 0x56, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c,
 	0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02,
 	0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x75,
@@ -619,24 +619,24 @@ var file_badgerpb2_proto_rawDesc = []byte{
 	0x65, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x44,
 	0x6f, 0x6e, 0x65, 0x22, 0x44, 0x0a, 0x06, 0x4b, 0x56, 0x4c, 0x69, 0x73, 0x74, 0x12, 0x1d, 0x0a,
 	0x02, 0x6b, 0x76, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x0d, 0x2e, 0x62, 0x61, 0x64, 0x67,
-	0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x4b, 0x56, 0x52, 0x02, 0x6b, 0x76, 0x12, 0x1b, 0x0a, 0x09,
+	0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x4b, 0x56, 0x52, 0x02, 0x6b, 0x76, 0x12, 0x1b, 0x0a, 0x09,
 	0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x0a, 0x20, 0x01, 0x28, 0x04, 0x52,
 	0x08, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x52, 0x65, 0x66, 0x22, 0x48, 0x0a, 0x11, 0x4d, 0x61, 0x6e,
 	0x69, 0x66, 0x65, 0x73, 0x74, 0x43, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x53, 0x65, 0x74, 0x12, 0x33,
 	0x0a, 0x07, 0x63, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32,
-	0x19, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x4d, 0x61, 0x6e, 0x69,
+	0x19, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x4d, 0x61, 0x6e, 0x69,
 	0x66, 0x65, 0x73, 0x74, 0x43, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x52, 0x07, 0x63, 0x68, 0x61, 0x6e,
 	0x67, 0x65, 0x73, 0x22, 0x8d, 0x02, 0x0a, 0x0e, 0x4d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74,
 	0x43, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x12, 0x0e, 0x0a, 0x02, 0x49, 0x64, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x04, 0x52, 0x02, 0x49, 0x64, 0x12, 0x33, 0x0a, 0x02, 0x4f, 0x70, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x0e, 0x32, 0x23, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x4d,
+	0x28, 0x0e, 0x32, 0x23, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x4d,
 	0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x43, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x2e, 0x4f, 0x70,
 	0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x02, 0x4f, 0x70, 0x12, 0x14, 0x0a, 0x05, 0x4c,
 	0x65, 0x76, 0x65, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0d, 0x52, 0x05, 0x4c, 0x65, 0x76, 0x65,
 	0x6c, 0x12, 0x15, 0x0a, 0x06, 0x6b, 0x65, 0x79, 0x5f, 0x69, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28,
 	0x04, 0x52, 0x05, 0x6b, 0x65, 0x79, 0x49, 0x64, 0x12, 0x42, 0x0a, 0x0f, 0x65, 0x6e, 0x63, 0x72,
 	0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x61, 0x6c, 0x67, 0x6f, 0x18, 0x05, 0x20, 0x01, 0x28,
-	0x0e, 0x32, 0x19, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x45, 0x6e,
+	0x0e, 0x32, 0x19, 0x2e, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x45, 0x6e,
 	0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x41, 0x6c, 0x67, 0x6f, 0x52, 0x0e, 0x65, 0x6e,
 	0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x41, 0x6c, 0x67, 0x6f, 0x12, 0x20, 0x0a, 0x0b,
 	0x63, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x06, 0x20, 0x01, 0x28,
@@ -645,7 +645,7 @@ var file_badgerpb2_proto_rawDesc = []byte{
 	0x52, 0x45, 0x41, 0x54, 0x45, 0x10, 0x00, 0x12, 0x0a, 0x0a, 0x06, 0x44, 0x45, 0x4c, 0x45, 0x54,
 	0x45, 0x10, 0x01, 0x22, 0x76, 0x0a, 0x08, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x73, 0x75, 0x6d, 0x12,
 	0x31, 0x0a, 0x04, 0x61, 0x6c, 0x67, 0x6f, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x1d, 0x2e,
-	0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x32, 0x2e, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x73,
+	0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x70, 0x62, 0x33, 0x2e, 0x43, 0x68, 0x65, 0x63, 0x6b, 0x73,
 	0x75, 0x6d, 0x2e, 0x41, 0x6c, 0x67, 0x6f, 0x72, 0x69, 0x74, 0x68, 0x6d, 0x52, 0x04, 0x61, 0x6c,
 	0x67, 0x6f, 0x12, 0x10, 0x0a, 0x03, 0x73, 0x75, 0x6d, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04, 0x52,
 	0x03, 0x73, 0x75, 0x6d, 0x22, 0x25, 0x0a, 0x09, 0x41, 0x6c, 0x67, 0x6f, 0x72, 0x69, 0x74, 0x68,
@@ -660,41 +660,41 @@ var file_badgerpb2_proto_rawDesc = []byte{
 	0x2a, 0x19, 0x0a, 0x0e, 0x45, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x41, 0x6c,
 	0x67, 0x6f, 0x12, 0x07, 0x0a, 0x03, 0x61, 0x65, 0x73, 0x10, 0x00, 0x42, 0x23, 0x5a, 0x21, 0x67,
 	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x64, 0x67, 0x72, 0x61, 0x70, 0x68,
-	0x2d, 0x69, 0x6f, 0x2f, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x62,
+	0x2d, 0x69, 0x6f, 0x2f, 0x62, 0x61, 0x64, 0x67, 0x65, 0x72, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x62,
 	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
-	file_badgerpb2_proto_rawDescOnce sync.Once
-	file_badgerpb2_proto_rawDescData = file_badgerpb2_proto_rawDesc
+	file_badgerpb3_proto_rawDescOnce sync.Once
+	file_badgerpb3_proto_rawDescData = file_badgerpb3_proto_rawDesc
 )
 
-func file_badgerpb2_proto_rawDescGZIP() []byte {
-	file_badgerpb2_proto_rawDescOnce.Do(func() {
-		file_badgerpb2_proto_rawDescData = protoimpl.X.CompressGZIP(file_badgerpb2_proto_rawDescData)
+func file_badgerpb3_proto_rawDescGZIP() []byte {
+	file_badgerpb3_proto_rawDescOnce.Do(func() {
+		file_badgerpb3_proto_rawDescData = protoimpl.X.CompressGZIP(file_badgerpb3_proto_rawDescData)
 	})
-	return file_badgerpb2_proto_rawDescData
+	return file_badgerpb3_proto_rawDescData
 }
 
-var file_badgerpb2_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_badgerpb2_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_badgerpb2_proto_goTypes = []interface{}{
-	(EncryptionAlgo)(0),           // 0: badgerpb2.EncryptionAlgo
-	(ManifestChange_Operation)(0), // 1: badgerpb2.ManifestChange.Operation
-	(Checksum_Algorithm)(0),       // 2: badgerpb2.Checksum.Algorithm
-	(*KV)(nil),                    // 3: badgerpb2.KV
-	(*KVList)(nil),                // 4: badgerpb2.KVList
-	(*ManifestChangeSet)(nil),     // 5: badgerpb2.ManifestChangeSet
-	(*ManifestChange)(nil),        // 6: badgerpb2.ManifestChange
-	(*Checksum)(nil),              // 7: badgerpb2.Checksum
-	(*DataKey)(nil),               // 8: badgerpb2.DataKey
+var file_badgerpb3_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_badgerpb3_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_badgerpb3_proto_goTypes = []interface{}{
+	(EncryptionAlgo)(0),           // 0: badgerpb3.EncryptionAlgo
+	(ManifestChange_Operation)(0), // 1: badgerpb3.ManifestChange.Operation
+	(Checksum_Algorithm)(0),       // 2: badgerpb3.Checksum.Algorithm
+	(*KV)(nil),                    // 3: badgerpb3.KV
+	(*KVList)(nil),                // 4: badgerpb3.KVList
+	(*ManifestChangeSet)(nil),     // 5: badgerpb3.ManifestChangeSet
+	(*ManifestChange)(nil),        // 6: badgerpb3.ManifestChange
+	(*Checksum)(nil),              // 7: badgerpb3.Checksum
+	(*DataKey)(nil),               // 8: badgerpb3.DataKey
 }
-var file_badgerpb2_proto_depIdxs = []int32{
-	3, // 0: badgerpb2.KVList.kv:type_name -> badgerpb2.KV
-	6, // 1: badgerpb2.ManifestChangeSet.changes:type_name -> badgerpb2.ManifestChange
-	1, // 2: badgerpb2.ManifestChange.Op:type_name -> badgerpb2.ManifestChange.Operation
-	0, // 3: badgerpb2.ManifestChange.encryption_algo:type_name -> badgerpb2.EncryptionAlgo
-	2, // 4: badgerpb2.Checksum.algo:type_name -> badgerpb2.Checksum.Algorithm
+var file_badgerpb3_proto_depIdxs = []int32{
+	3, // 0: badgerpb3.KVList.kv:type_name -> badgerpb3.KV
+	6, // 1: badgerpb3.ManifestChangeSet.changes:type_name -> badgerpb3.ManifestChange
+	1, // 2: badgerpb3.ManifestChange.Op:type_name -> badgerpb3.ManifestChange.Operation
+	0, // 3: badgerpb3.ManifestChange.encryption_algo:type_name -> badgerpb3.EncryptionAlgo
+	2, // 4: badgerpb3.Checksum.algo:type_name -> badgerpb3.Checksum.Algorithm
 	5, // [5:5] is the sub-list for method output_type
 	5, // [5:5] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
@@ -702,13 +702,13 @@ var file_badgerpb2_proto_depIdxs = []int32{
 	0, // [0:5] is the sub-list for field type_name
 }
 
-func init() { file_badgerpb2_proto_init() }
-func file_badgerpb2_proto_init() {
-	if File_badgerpb2_proto != nil {
+func init() { file_badgerpb3_proto_init() }
+func file_badgerpb3_proto_init() {
+	if File_badgerpb3_proto != nil {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
-		file_badgerpb2_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*KV); i {
 			case 0:
 				return &v.state
@@ -720,7 +720,7 @@ func file_badgerpb2_proto_init() {
 				return nil
 			}
 		}
-		file_badgerpb2_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*KVList); i {
 			case 0:
 				return &v.state
@@ -732,7 +732,7 @@ func file_badgerpb2_proto_init() {
 				return nil
 			}
 		}
-		file_badgerpb2_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ManifestChangeSet); i {
 			case 0:
 				return &v.state
@@ -744,7 +744,7 @@ func file_badgerpb2_proto_init() {
 				return nil
 			}
 		}
-		file_badgerpb2_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ManifestChange); i {
 			case 0:
 				return &v.state
@@ -756,7 +756,7 @@ func file_badgerpb2_proto_init() {
 				return nil
 			}
 		}
-		file_badgerpb2_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*Checksum); i {
 			case 0:
 				return &v.state
@@ -768,7 +768,7 @@ func file_badgerpb2_proto_init() {
 				return nil
 			}
 		}
-		file_badgerpb2_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
+		file_badgerpb3_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DataKey); i {
 			case 0:
 				return &v.state
@@ -785,19 +785,19 @@ func file_badgerpb2_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_badgerpb2_proto_rawDesc,
+			RawDescriptor: file_badgerpb3_proto_rawDesc,
 			NumEnums:      3,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_badgerpb2_proto_goTypes,
-		DependencyIndexes: file_badgerpb2_proto_depIdxs,
-		EnumInfos:         file_badgerpb2_proto_enumTypes,
-		MessageInfos:      file_badgerpb2_proto_msgTypes,
+		GoTypes:           file_badgerpb3_proto_goTypes,
+		DependencyIndexes: file_badgerpb3_proto_depIdxs,
+		EnumInfos:         file_badgerpb3_proto_enumTypes,
+		MessageInfos:      file_badgerpb3_proto_msgTypes,
 	}.Build()
-	File_badgerpb2_proto = out.File
-	file_badgerpb2_proto_rawDesc = nil
-	file_badgerpb2_proto_goTypes = nil
-	file_badgerpb2_proto_depIdxs = nil
+	File_badgerpb3_proto = out.File
+	file_badgerpb3_proto_rawDesc = nil
+	file_badgerpb3_proto_goTypes = nil
+	file_badgerpb3_proto_depIdxs = nil
 }

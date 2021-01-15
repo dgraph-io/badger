@@ -17,9 +17,9 @@
 // Use protos/gen.sh to generate .pb.go files.
 syntax = "proto3";
 
-package badgerpb2;
+package badgerpb3;
 
-option go_package = "github.com/dgraph-io/badger/v2/pb";
+option go_package = "github.com/dgraph-io/badger/v3/pb";
 
 message KV {
   bytes key = 1;
