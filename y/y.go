@@ -324,7 +324,7 @@ func U64SliceToBytes(u64s []uint64) []byte {
 	return b
 }
 
-// BytesToU32Slice converts the given byte slice to uint32 slice
+// BytesToU64Slice converts the given byte slice to uint64 slice
 func BytesToU64Slice(b []byte) []uint64 {
 	if len(b) == 0 {
 		return nil

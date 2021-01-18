@@ -2322,7 +2322,6 @@ func TestBannedPrefixes(t *testing.T) {
 	}
 
 	validate := func() {
-		// require.Equal(t, bannedPrefixes, db.bannedPrefixes.keys)
 		// Validate read/write.
 		for _, key := range keys {
 			txn := db.NewTransaction(true)
@@ -2410,7 +2409,6 @@ func TestIterateWithBanned(t *testing.T) {
 			count := 0
 			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
 				// Iterator should skip the banned keys, so should we.
-				// fmt.Printf("%s\n", itr.Item().Key())
 				for db.isBanned(keys[idx]) {
 					incIdx()
 				}

@@ -605,11 +605,6 @@ func (it *Iterator) parseItem() bool {
 		}
 	}
 
-	if it.db.isBanned(key) {
-		mi.Next()
-		return false
-	}
-
 	// Skip badger keys.
 	if !it.opt.InternalAccess && bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
@@ -619,6 +614,12 @@ func (it *Iterator) parseItem() bool {
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
 	if version > it.readTs {
+		mi.Next()
+		return false
+	}
+
+	// Skip banned keys.
+	if it.db.isBanned(key) {
 		mi.Next()
 		return false
 	}

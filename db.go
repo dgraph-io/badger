@@ -1782,7 +1782,7 @@ func (db *DB) isBannedHelper(key uint64) bool {
 	return banned
 }
 
-// Checks if the key is prefixed with any banned prefix.
+// Returns true, if the key is prefixed with any banned prefix.
 func (db *DB) isBanned(key []byte) bool {
 	if !db.opt.DgraphMode {
 		return false
