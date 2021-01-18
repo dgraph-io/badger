@@ -420,7 +420,6 @@ var DefaultIteratorOptions = IteratorOptions{
 type Iterator struct {
 	iitr   y.Iterator
 	txn    *Txn
-	db     *DB
 	readTs uint64
 
 	opt   IteratorOptions
@@ -478,7 +477,6 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 
 	res := &Iterator{
 		txn:    txn,
-		db:     txn.db,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),
 		opt:    opt,
 		readTs: txn.readTs,
@@ -619,7 +617,7 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	// Skip banned keys.
-	if it.db.isBanned(key) {
+	if it.txn.db.isBanned(key) {
 		mi.Next()
 		return false
 	}
