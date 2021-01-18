@@ -31,6 +31,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	humanize "github.com/dustin/go-humanize"
@@ -38,17 +39,18 @@ import (
 )
 
 type flagOptions struct {
-	showTables    bool
-	showHistogram bool
-	showKeys      bool
-	withPrefix    string
-	keyLookup     string
-	itemMeta      bool
-	keyHistory    bool
-	showInternal  bool
-	readOnly      bool
-	truncate      bool
-	encryptionKey string
+	showTables               bool
+	showHistogram            bool
+	showKeys                 bool
+	withPrefix               string
+	keyLookup                string
+	itemMeta                 bool
+	keyHistory               bool
+	showInternal             bool
+	readOnly                 bool
+	truncate                 bool
+	encryptionKey            string
+	checksumVerificationMode string
 }
 
 var (
@@ -76,6 +78,8 @@ func init() {
 	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
 		"truncation of value log files if they have corrupt data.")
 	infoCmd.Flags().StringVar(&opt.encryptionKey, "enc-key", "", "Use the provided encryption key")
+	infoCmd.Flags().StringVar(&opt.checksumVerificationMode, "cv-mode", "none",
+		"[none, table, block, tableAndBlock] Specifies when the db should verify checksum for SST.")
 }
 
 var infoCmd = &cobra.Command{
@@ -95,13 +99,15 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
+	cvMode := checksumVerificationMode(opt.checksumVerificationMode)
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
-		WithEncryptionKey([]byte(opt.encryptionKey)))
+		WithEncryptionKey([]byte(opt.encryptionKey)).
+		WithChecksumVerificationMode(cvMode))
 	if err != nil {
 		return y.Wrap(err, "failed to open database")
 	}
@@ -476,4 +482,21 @@ func pluralFiles(count int) string {
 		return "file"
 	}
 	return "files"
+}
+
+func checksumVerificationMode(cvMode string) options.ChecksumVerificationMode {
+	switch cvMode {
+	case "none":
+		return options.NoVerification
+	case "table":
+		return options.OnTableRead
+	case "block":
+		return options.OnBlockRead
+	case "tableAndblock":
+		return options.OnTableAndBlockRead
+	default:
+		fmt.Printf("Invalid checksum verification mode: %s\n", cvMode)
+		os.Exit(1)
+	}
+	return options.NoVerification
 }
