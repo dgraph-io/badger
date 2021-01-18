@@ -39,18 +39,18 @@ import (
 )
 
 type flagOptions struct {
-	showTables       bool
-	showHistogram    bool
-	showKeys         bool
-	withPrefix       string
-	keyLookup        string
-	itemMeta         bool
-	keyHistory       bool
-	showInternal     bool
-	readOnly         bool
-	truncate         bool
-	encryptionKey    string
-	verificationMode string
+	showTables               bool
+	showHistogram            bool
+	showKeys                 bool
+	withPrefix               string
+	keyLookup                string
+	itemMeta                 bool
+	keyHistory               bool
+	showInternal             bool
+	readOnly                 bool
+	truncate                 bool
+	encryptionKey            string
+	checksumVerificationMode string
 }
 
 var (
@@ -78,7 +78,7 @@ func init() {
 	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
 		"truncation of value log files if they have corrupt data.")
 	infoCmd.Flags().StringVar(&opt.encryptionKey, "enc-key", "", "Use the provided encryption key")
-	infoCmd.Flags().StringVar(&opt.verificationMode, "verification-mode", "none",
+	infoCmd.Flags().StringVar(&opt.checksumVerificationMode, "cv-mode", "none",
 		"[none, table, block, tableAndBlock] Specifies when the db should verify checksum for SST.")
 }
 
@@ -99,7 +99,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
-	cvMode, err := checksumVerificationMode(opt.verificationMode)
+	cvMode, err := checksumVerificationMode(opt.checksumVerificationMode)
 	if err != nil {
 		return err
 	}
