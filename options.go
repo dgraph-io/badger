@@ -98,6 +98,9 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
+	// DgraphMode determines whether db should expect namespace in the first 8 bytes of the keys.
+	DgraphMode bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.

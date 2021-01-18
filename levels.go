@@ -870,7 +870,7 @@ func (s *levelsController) compactBuildTables(
 		len(topTables), len(botTables))
 
 	// We can delete the banned prefixes as well.
-	cd.dropPrefixes = append(cd.dropPrefixes, s.kv.GetBannedPrefixes()...)
+	cd.dropPrefixes = append(cd.dropPrefixes)
 
 	keepTable := func(t *table.Table) bool {
 		for _, prefix := range cd.dropPrefixes {

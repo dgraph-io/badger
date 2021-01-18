@@ -64,7 +64,7 @@ type closers struct {
 
 type lockedKeys struct {
 	sync.RWMutex
-	keys [][]byte
+	keys map[uint64]struct{}
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -96,7 +96,7 @@ type DB struct {
 	isClosed    uint32
 
 	orc            *oracle
-	bannedPrefixes lockedKeys
+	bannedPrefixes *lockedKeys
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -227,7 +227,7 @@ func Open(opt Options) (*DB, error) {
 		orc:            newOracle(opt),
 		pub:            newPublisher(),
 		allocPool:      z.NewAllocatorPool(8),
-		bannedPrefixes: lockedKeys{},
+		bannedPrefixes: &lockedKeys{keys: make(map[uint64]struct{})},
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -391,9 +391,11 @@ func (db *DB) setBannedPrefixes() error {
 		}
 		encoded = buf
 	}
-	db.bannedPrefixes.Lock()
-	defer db.bannedPrefixes.Unlock()
-	db.bannedPrefixes.keys = decodePrefixes(encoded)
+	db.bannedPrefixes.update(func(keys map[uint64]struct{}) {
+		for _, k := range y.BytesToU64Slice(encoded) {
+			keys[k] = struct{}{}
+		}
+	})
 	return nil
 }
 
@@ -1758,52 +1760,50 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
-// Encodes the prefixes by laying them out on byte array in format:
-// [len, prefix], [len, prefix], ...
-func encodePrefixes(prefixes [][]byte) []byte {
-	var encoded []byte
-	for _, prefix := range prefixes {
-		var sz [4]byte
-		binary.BigEndian.PutUint32(sz[:], uint32(len(prefix)))
-		encoded = append(encoded, sz[:]...)
-		encoded = append(encoded, prefix...)
-	}
-	return encoded
+func (lk *lockedKeys) update(fn func(keys map[uint64]struct{})) {
+	lk.Lock()
+	defer lk.Unlock()
+	fn(lk.keys)
 }
 
-// Decodes the banned prefixes from the encoded value.
-func decodePrefixes(encoded []byte) [][]byte {
-	if len(encoded) == 0 {
-		return make([][]byte, 0)
-	}
-	var prefixes [][]byte
-	for len(encoded) > 0 {
-		sz := binary.BigEndian.Uint32(encoded[:4])
-		encoded = encoded[4:]
-		prefixes = append(prefixes, encoded[:sz])
-		encoded = encoded[sz:]
-	}
-	return prefixes
+func (lk *lockedKeys) view(fn func(keys map[uint64]struct{})) {
+	lk.RLock()
+	defer lk.RUnlock()
+	fn(lk.keys)
 }
 
-// Checks if the key is prefixed with any banned prefix. Expects that the key is without the ts.
-func (db *DB) isBanned(key []byte) bool {
-	for _, prefix := range db.GetBannedPrefixes() {
-		if bytes.HasPrefix(key, prefix) {
-			return true
+func (db *DB) isBannedHelper(key uint64) bool {
+	banned := false
+	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
+		if _, ok := keys[key]; ok {
+			banned = true
 		}
+	})
+	return banned
+}
+
+// Checks if the key is prefixed with any banned prefix.
+func (db *DB) isBanned(key []byte) bool {
+	if !db.opt.DgraphMode {
+		return false
 	}
-	return false
+	return db.isBannedHelper(y.BytesToU64(key[:8]))
 }
 
 // BanPrefix bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
-func (db *DB) BanPrefix(prefix []byte) error {
-	db.opt.Infof("Banning prefix: %s", prefix)
+func (db *DB) BanPrefix(prefix uint64) error {
+	if !db.opt.DgraphMode {
+		return ErrDgraphMode
+	}
+	db.opt.Infof("Banning prefix: %d", prefix)
 	// First set the banned prefixes in DB and then update the in-memory structure.
+	if db.isBannedHelper(prefix) {
+		return nil
+	}
 	prefixes := append(db.GetBannedPrefixes(), prefix)
 	entries := []*Entry{{
 		Key:   y.KeyWithTs(bannedPrefixKey, 1),
-		Value: encodePrefixes(prefixes),
+		Value: y.U64SliceToBytes(prefixes),
 	}}
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
@@ -1812,24 +1812,21 @@ func (db *DB) BanPrefix(prefix []byte) error {
 	if err := req.Wait(); err != nil {
 		return err
 	}
-	db.bannedPrefixes.Lock()
-	defer db.bannedPrefixes.Unlock()
-	db.bannedPrefixes.keys = append(db.bannedPrefixes.keys, prefix)
+	db.bannedPrefixes.update(func(keys map[uint64]struct{}) {
+		keys[prefix] = struct{}{}
+	})
 	return nil
 }
 
 // GetBannedPrefixes returns the list of prefixes banned for DB.
-func (db *DB) GetBannedPrefixes() [][]byte {
-	copyPrefixes := func(src [][]byte) [][]byte {
-		var dst [][]byte
-		for _, k := range src {
-			dst = append(dst, y.SafeCopy(nil, k))
+func (db *DB) GetBannedPrefixes() []uint64 {
+	var prefixes []uint64
+	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
+		for k := range keys {
+			prefixes = append(prefixes, k)
 		}
-		return dst
-	}
-	db.bannedPrefixes.RLock()
-	defer db.bannedPrefixes.RUnlock()
-	return copyPrefixes(db.bannedPrefixes.keys)
+	})
+	return prefixes
 }
 
 // KVList contains a list of key-value pairs.

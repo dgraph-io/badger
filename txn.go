@@ -384,6 +384,7 @@ func (txn *Txn) modify(e *Entry) error {
 	if txn.db.isBanned(e.Key) {
 		return ErrBannedKey
 	}
+
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}
@@ -445,7 +446,9 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
 		return nil, ErrDiscardedTxn
-	} else if txn.db.isBanned(key) {
+	}
+
+	if txn.db.isBanned(key) {
 		return nil, ErrBannedKey
 	}
 

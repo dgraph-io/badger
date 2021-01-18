@@ -29,7 +29,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2299,22 +2298,31 @@ func TestBannedPrefixes(t *testing.T) {
 	// restart.
 	ops.ValueThreshold = 0
 	ops.ValueLogMaxEntries = 2
+	ops.DgraphMode = true
 	db, err := Open(ops)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(db.vlog.filesMap))
 
-	var keys [10][]byte
-	var bannedPrefixes [][]byte
+	var keys [][]byte
+	var allPrefixes []uint64 = []uint64{1234, 3456, 5678, 7890, 901234}
+	for _, p := range allPrefixes {
+		prefix := y.U64ToBytes(p)
+		for i := 0; i < 10; i++ {
+			keys = append(keys, []byte(fmt.Sprintf("%s-key%02d", prefix, i)))
+		}
+	}
+
+	bannedPrefixes := make(map[uint64]struct{})
 	isBanned := func(key []byte) bool {
-		for _, prefix := range bannedPrefixes {
-			if bytes.HasPrefix(key, prefix) {
-				return true
-			}
+		prefix := y.BytesToU64(key[:8])
+		if _, ok := bannedPrefixes[prefix]; ok {
+			return true
 		}
 		return false
 	}
+
 	validate := func() {
-		require.Equal(t, bannedPrefixes, db.GetBannedPrefixes())
+		// require.Equal(t, bannedPrefixes, db.bannedPrefixes.keys)
 		// Validate read/write.
 		for _, key := range keys {
 			txn := db.NewTransaction(true)
@@ -2331,9 +2339,6 @@ func TestBannedPrefixes(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 10; i++ {
-		keys[i] = []byte(fmt.Sprintf("key%02d", i))
-	}
 	for _, key := range keys {
 		require.NoError(t, db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte(key), []byte("value")))
@@ -2342,14 +2347,12 @@ func TestBannedPrefixes(t *testing.T) {
 	validate()
 
 	// Ban a couple of prefix and validate that we should not be able to read/write them.
-	prefix := []byte(fmt.Sprintf("key%02d", 1))
-	bannedPrefixes = append(bannedPrefixes, prefix)
-	require.NoError(t, db.BanPrefix(prefix))
+	require.NoError(t, db.BanPrefix(1234))
+	bannedPrefixes[1234] = struct{}{}
 	validate()
 
-	prefix = []byte(fmt.Sprintf("key%02d", 5))
-	bannedPrefixes = append(bannedPrefixes, prefix)
-	require.NoError(t, db.BanPrefix(prefix))
+	require.NoError(t, db.BanPrefix(5678))
+	bannedPrefixes[5678] = struct{}{}
 	validate()
 
 	require.Greater(t, len(db.vlog.filesMap), 1)
@@ -2364,10 +2367,11 @@ func TestBannedPrefixes(t *testing.T) {
 // Tests that the iterator skips the banned prefixes.
 func TestIterateWithBanned(t *testing.T) {
 	opt := DefaultOptions("")
+	opt.DgraphMode = true
 	opt.NumVersionsToKeep = math.MaxInt64
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		bkey := func(prefix string, i int) []byte {
-			return []byte(fmt.Sprintf("%s%04d", prefix, i))
+		bkey := func(prefix uint64, i int) []byte {
+			return []byte(fmt.Sprintf("%s-%04d", y.U64ToBytes(prefix), i))
 		}
 
 		N := 100
@@ -2376,24 +2380,14 @@ func TestIterateWithBanned(t *testing.T) {
 		// Generate 26*N keys, each with V versions (versions set by txnSet())
 		var keys [][]byte
 		for i := 'a'; i <= 'z'; i++ {
-			prefix := strings.Repeat(string(i), 5)
 			for j := 0; j < N; j++ {
 				for v := 0; v < V; v++ {
-					keys = append(keys, bkey(prefix, j))
+					keys = append(keys, bkey(uint64(i*1000), j))
 				}
 			}
 		}
 		for _, key := range keys {
 			txnSet(t, db, key, key, 0)
-		}
-
-		isBanned := func(key []byte) bool {
-			for _, prefix := range db.GetBannedPrefixes() {
-				if bytes.HasPrefix(key, prefix) {
-					return true
-				}
-			}
-			return false
 		}
 
 		// Validate that we don't see the banned keys in iterating.
@@ -2417,7 +2411,7 @@ func TestIterateWithBanned(t *testing.T) {
 			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
 				// Iterator should skip the banned keys, so should we.
 				// fmt.Printf("%s\n", itr.Item().Key())
-				for isBanned(keys[idx]) {
+				for db.isBanned(keys[idx]) {
 					incIdx()
 				}
 				count++
@@ -2428,42 +2422,37 @@ func TestIterateWithBanned(t *testing.T) {
 		}
 		validate(IteratorOptions{}, 0, 26*N)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 26*N*V)
-		validate(IteratorOptions{Prefix: append([]byte("fffff"))}, 5*N*V, N)
+		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000))}, 5*N*V, N)
 
-		require.NoError(t, db.BanPrefix([]byte("aaaaa")))
+		require.NoError(t, db.BanPrefix(uint64('a'*1000)))
 		validate(IteratorOptions{}, 1*N*V, 25*N)
 		validate(IteratorOptions{AllVersions: true}, 1*N*V, 25*N*V)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 25*N*V)
 
-		require.NoError(t, db.BanPrefix([]byte("bbbbb")))
+		require.NoError(t, db.BanPrefix(uint64('b'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 24*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 24*N*V)
 
-		require.NoError(t, db.BanPrefix([]byte("ddddd")))
+		require.NoError(t, db.BanPrefix(uint64('d'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 23*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 23*N*V)
-		validate(IteratorOptions{Prefix: []byte("fffff")}, 5*N*V, N)
-		validate(IteratorOptions{Prefix: []byte("fffff"), AllVersions: true}, 5*N*V, N*V)
+		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000))}, 5*N*V, N)
+		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000)), AllVersions: true}, 5*N*V, N*V)
 
-		require.NoError(t, db.BanPrefix([]byte("ggggg")))
+		require.NoError(t, db.BanPrefix(uint64('g')*1000))
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 22*N*V)
 
-		require.NoError(t, db.BanPrefix([]byte("rrrrr")))
+		require.NoError(t, db.BanPrefix(uint64('r'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 21*N)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 21*N*V)
 
 		// Iterate over the banned prefix. Passing -1 as we don't expect to access keys.
-		validate(IteratorOptions{Prefix: []byte("ggggg")}, -1, 0)
-		validate(IteratorOptions{Prefix: []byte("ggggg"), Reverse: true, AllVersions: true}, -1, 0)
+		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('g' * 1000))}, -1, 0)
+		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('g' * 1000)), Reverse: true, AllVersions: true}, -1, 0)
 
-		require.NoError(t, db.BanPrefix([]byte("zzzzz")))
+		require.NoError(t, db.BanPrefix(uint64('z'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 20*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 20*N*V)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 25*N*V-1, 20*N*V)
-
-		// 10 keys each having V versions will be invalidated.
-		require.NoError(t, db.BanPrefix([]byte("nnnnn001")))
-		validate(IteratorOptions{Prefix: []byte("nnnnn")}, 13*N*V, N-10)
-		validate(IteratorOptions{Prefix: []byte("nnnnn"), AllVersions: true}, 13*N*V, (N-10)*V)
 	})
 }

@@ -79,6 +79,11 @@ var (
 	ErrManagedTxn = errors.New(
 		"Invalid API request. Not allowed to perform this action using ManagedDB")
 
+	// ErrDgraphMode is returned if the user tries to use an API which isn't allowed in non-Dgraph
+	// mode.
+	ErrDgraphMode = errors.New(
+		"Invalid API request. Not allowed to perform this action when DgraphMode is not set.")
+
 	// ErrInvalidDump if a data dump made previously cannot be loaded into the database.
 	ErrInvalidDump = errors.New("Data dump cannot be read")
 
