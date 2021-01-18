@@ -99,10 +99,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
-	cvMode, err := checksumVerificationMode(opt.checksumVerificationMode)
-	if err != nil {
-		return err
-	}
+	cvMode := checksumVerificationMode(opt.checksumVerificationMode)
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
@@ -487,16 +484,19 @@ func pluralFiles(count int) string {
 	return "files"
 }
 
-func checksumVerificationMode(cvMode string) (options.ChecksumVerificationMode, error) {
+func checksumVerificationMode(cvMode string) options.ChecksumVerificationMode {
 	switch cvMode {
 	case "none":
-		return options.NoVerification, nil
+		return options.NoVerification
 	case "table":
-		return options.OnTableRead, nil
+		return options.OnTableRead
 	case "block":
-		return options.OnBlockRead, nil
+		return options.OnBlockRead
 	case "tableAndblock":
-		return options.OnTableAndBlockRead, nil
+		return options.OnTableAndBlockRead
+	default:
+		fmt.Printf("Invalid checksum verification mode: %s\n", cvMode)
+		os.Exit(1)
 	}
-	return options.NoVerification, errors.Errorf("Invalid checksum verification mode %s", cvMode)
+	return options.NoVerification
 }
