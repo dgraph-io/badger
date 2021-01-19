@@ -1772,32 +1772,28 @@ func (lk *lockedKeys) view(fn func(keys map[uint64]struct{})) {
 	fn(lk.keys)
 }
 
-func (db *DB) isBannedHelper(key uint64) bool {
+// Returns true, if the key is prefixed with any banned prefix.
+func (db *DB) isBanned(key []byte) bool {
+	if !db.opt.Uint64PrefixKeys {
+		return false
+	}
 	banned := false
 	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
-		if _, ok := keys[key]; ok {
+		if _, ok := keys[y.BytesToU64(key)]; ok {
 			banned = true
 		}
 	})
 	return banned
 }
 
-// Returns true, if the key is prefixed with any banned prefix.
-func (db *DB) isBanned(key []byte) bool {
-	if !db.opt.DgraphMode {
-		return false
-	}
-	return db.isBannedHelper(y.BytesToU64(key[:8]))
-}
-
 // BanPrefix bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
 func (db *DB) BanPrefix(prefix uint64) error {
-	if !db.opt.DgraphMode {
-		return ErrDgraphMode
+	if !db.opt.Uint64PrefixKeys {
+		return ErrUint64PrefixKeys
 	}
 	db.opt.Infof("Banning prefix: %d", prefix)
 	// First set the banned prefixes in DB and then update the in-memory structure.
-	if db.isBannedHelper(prefix) {
+	if db.isBanned(y.U64ToBytes(prefix)) {
 		return nil
 	}
 	prefixes := append(db.GetBannedPrefixes(), prefix)

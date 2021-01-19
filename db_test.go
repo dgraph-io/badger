@@ -2298,7 +2298,7 @@ func TestBannedPrefixes(t *testing.T) {
 	// restart.
 	ops.ValueThreshold = 0
 	ops.ValueLogMaxEntries = 2
-	ops.DgraphMode = true
+	ops.Uint64PrefixKeys = true
 	db, err := Open(ops)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(db.vlog.filesMap))
@@ -2366,7 +2366,7 @@ func TestBannedPrefixes(t *testing.T) {
 // Tests that the iterator skips the banned prefixes.
 func TestIterateWithBanned(t *testing.T) {
 	opt := DefaultOptions("")
-	opt.DgraphMode = true
+	opt.Uint64PrefixKeys = true
 	opt.NumVersionsToKeep = math.MaxInt64
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		bkey := func(prefix uint64, i int) []byte {
