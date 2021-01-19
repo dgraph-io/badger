@@ -1792,10 +1792,14 @@ func (db *DB) BanPrefix(prefix uint64) error {
 		return ErrUint64PrefixKeys
 	}
 	db.opt.Infof("Banning prefix: %d", prefix)
-	// First set the banned prefixes in DB and then update the in-memory structure.
 	if db.isBanned(y.U64ToBytes(prefix)) {
 		return nil
 	}
+	// Do not allow banning badger's internal prefix.
+	if prefix == y.BytesToU64(badgerPrefix[:8]) {
+		return errors.Errorf("Cannot ban a prefix internal to badger.")
+	}
+	// First set the banned prefixes in DB and then update the in-memory structure.
 	prefixes := append(db.GetBannedPrefixes(), prefix)
 	entries := []*Entry{{
 		Key:   y.KeyWithTs(bannedPrefixKey, 1),
