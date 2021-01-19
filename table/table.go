@@ -32,7 +32,7 @@ import (
 	"time"
 	"unsafe"
 
-	"google.golang.org/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 

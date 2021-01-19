@@ -26,7 +26,6 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
-	"google.golang.org/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -97,7 +96,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 
 	err := buf.SliceIterate(func(s []byte) error {
 		var kv pb.KV
-		if err := proto.Unmarshal(s, &kv); err != nil {
+		if err := kv.Unmarshal(s); err != nil {
 			return err
 		}
 		if kv.StreamDone {

@@ -34,7 +34,6 @@ import (
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"google.golang.org/protobuf/proto"
 	"github.com/spf13/cobra"
 )
 
@@ -503,7 +502,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				stream.Send = func(buf *z.Buffer) error {
 					err := buf.SliceIterate(func(s []byte) error {
 						var kv pb.KV
-						if err := proto.Unmarshal(s, &kv); err != nil {
+						if err := kv.Unmarshal(s); err != nil {
 							return err
 						}
 						return batch.Set(kv.Key, kv.Value)

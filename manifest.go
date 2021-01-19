@@ -30,8 +30,8 @@ import (
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 // Manifest represents the contents of the MANIFEST file in a Badger store.

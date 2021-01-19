@@ -25,7 +25,6 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
-	"google.golang.org/protobuf/proto"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
@@ -214,7 +213,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		}
 		err := buf.SliceIterate(func(s []byte) error {
 			var kv pb.KV
-			if err := proto.Unmarshal(s, &kv); err != nil {
+			if err := kv.Unmarshal(s); err != nil {
 				return err
 			}
 			keys = append(keys, kv.Key)

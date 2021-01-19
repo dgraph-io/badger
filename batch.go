@@ -23,7 +23,6 @@ import (
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"google.golang.org/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -113,7 +112,7 @@ func (wb *WriteBatch) Write(buf *z.Buffer) error {
 
 	err := buf.SliceIterate(func(s []byte) error {
 		kv := &pb.KV{}
-		if err := proto.Unmarshal(s, kv); err != nil {
+		if err := kv.Unmarshal(s); err != nil {
 			return err
 		}
 		return wb.writeKV(kv)
