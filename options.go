@@ -85,7 +85,7 @@ type Options struct {
 	EncryptionKey                 []byte        // encryption key
 	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
-	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
+	// BypassLockGuard will bypass the lock guard on badger. Bypassing lock
 	// guard can cause data corruption if multiple badger instances are using
 	// the same directory. Use this options with caution.
 	BypassLockGuard bool

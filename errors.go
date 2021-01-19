@@ -82,10 +82,6 @@ var (
 	// ErrZeroBandwidth is returned if the user passes in zero bandwidth for sequence.
 	ErrZeroBandwidth = errors.New("Bandwidth must be greater than zero")
 
-	// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
-	// within the valid range
-	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
-
 	// ErrWindowsNotSupported is returned when opt.ReadOnly is used on Windows
 	ErrWindowsNotSupported = errors.New("Read-only mode is not supported on Windows")
 
