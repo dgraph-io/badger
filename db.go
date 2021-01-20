@@ -344,10 +344,6 @@ func Open(opt Options) (*DB, error) {
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 
-	if err := db.setBannedPrefixes(); err != nil {
-		return db, errors.Wrapf(err, "While setting banned keys")
-	}
-
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
 	db.orc.txnMark.Done(db.orc.nextTxnTs)
@@ -355,6 +351,10 @@ func Open(opt Options) (*DB, error) {
 	// compaction when run in offline mode via the flatten tool.
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
+
+	if err := db.setBannedPrefixes(); err != nil {
+		return db, errors.Wrapf(err, "While setting banned keys")
+	}
 
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
@@ -376,24 +376,20 @@ func Open(opt Options) (*DB, error) {
 // setBannedPrefixes retrieves the banned keys from the DB and updates the in-memory structure.
 func (db *DB) setBannedPrefixes() error {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	prefixKey := y.KeyWithTs(bannedPrefixKey, math.MaxUint64)
-	vs, err := db.get(prefixKey)
-	if err != nil {
-		return err
-	}
-	encoded := vs.Value
-	if vs.Meta&bitValuePointer > 0 {
-		var vptr valuePointer
-		vptr.Decode(vs.Value)
-		buf, cb, err := db.vlog.Read(vptr, nil)
-		runCallback(cb)
-		if err != nil {
-			return err
+	var prefixes []uint64
+	db.View(func(txn *Txn) error {
+		iopts := DefaultIteratorOptions
+		iopts.Prefix = bannedPrefixKey
+		iopts.InternalAccess = true
+		itr := txn.NewIterator(iopts)
+		defer itr.Close()
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			prefixes = append(prefixes, y.BytesToU64(itr.Item().Key()[len(bannedPrefixKey):]))
 		}
-		encoded = buf
-	}
+		return nil
+	})
 	db.bannedPrefixes.update(func(keys map[uint64]struct{}) {
-		for _, k := range y.BytesToU64Slice(encoded) {
+		for _, k := range prefixes {
 			keys[k] = struct{}{}
 		}
 	})
@@ -1803,16 +1799,13 @@ func (db *DB) BanPrefix(prefix uint64) error {
 		return ErrUint64PrefixKeys
 	}
 	db.opt.Infof("Banning prefix: %d", prefix)
-	if db.isBannedInternal(append(make([]byte, u64PrefixOffset), y.U64ToBytes(prefix)...)) {
-		return nil
-	}
 	// First set the banned prefixes in DB and then update the in-memory structure.
-	prefixes := append(db.GetBannedPrefixes(), prefix)
-	entries := []*Entry{{
-		Key:   y.KeyWithTs(bannedPrefixKey, 1),
-		Value: y.U64SliceToBytes(prefixes),
+	key := y.KeyWithTs(append(bannedPrefixKey, y.U64ToBytes(prefix)...), 1)
+	entry := []*Entry{{
+		Key:   key,
+		Value: nil,
 	}}
-	req, err := db.sendToWriteCh(entries)
+	req, err := db.sendToWriteCh(entry)
 	if err != nil {
 		return err
 	}
