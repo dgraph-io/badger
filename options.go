@@ -98,9 +98,12 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
-	// Uint64PrefixKeys determines whether db should expect a special prefix in the first 8 bytes of
-	// the keys. Used by Dgraph to store the namespace information.
-	Uint64PrefixKeys bool
+	// NamespaceMode determines whether db should expect a special prefix in the 8 bytes starting
+	// from namespaceOffset of the key. Used by Dgraph to store the namespace information.
+	NamespaceMode bool
+	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
+	// Valid only when NamespaceMode is set.
+	NamespaceOffset int
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -577,6 +580,23 @@ func (opt Options) WithIndexCacheSize(size int64) Options {
 // The default value of Detect conflicts is True.
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
+	return opt
+}
+
+// WithNamespaceMode returns a new Options value with NamespaceMode set the given value.
+//
+// The default value for Namespace Mode is False.
+func (opt Options) WithNamespaceMode(b bool) Options {
+	opt.NamespaceMode = b
+	return opt
+}
+
+// WithNamespaceOffset returns a new Options value with NamespaceOffset set to the given value. DB
+// will expect the namespace in each key at the 8 bytes starting from NamespaceOffset.
+//
+// The default value for NamespaceMode is 0. This option is only valid when NamespaceMode is set.
+func (opt Options) WithNamespaceOffset(offset int) Options {
+	opt.NamespaceOffset = offset
 	return opt
 }
 

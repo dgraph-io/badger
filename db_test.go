@@ -2293,12 +2293,11 @@ func TestBannedPrefixes(t *testing.T) {
 	require.NoError(t, err, "temp dir for badger count not be created")
 	defer os.RemoveAll(dir)
 
-	ops := getTestOptions(dir)
+	ops := getTestOptions(dir).WithNamespaceMode(true).WithNamespaceOffset(3)
 	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
 	// restart.
 	ops.ValueThreshold = 0
 	ops.ValueLogMaxEntries = 2
-	ops.Uint64PrefixKeys = true
 	db, err := Open(ops)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(db.vlog.filesMap))
@@ -2309,7 +2308,7 @@ func TestBannedPrefixes(t *testing.T) {
 		prefix := y.U64ToBytes(p)
 		for i := 0; i < 10; i++ {
 			// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
-			key := append(make([]byte, u64PrefixOffset),
+			key := append(make([]byte, db.opt.NamespaceOffset),
 				[]byte(fmt.Sprintf("%s-key%02d", prefix, i))...)
 			keys = append(keys, key)
 		}
@@ -2349,11 +2348,11 @@ func TestBannedPrefixes(t *testing.T) {
 	validate()
 
 	// Ban a couple of prefix and validate that we should not be able to read/write them.
-	require.NoError(t, db.BanPrefix(1234))
+	require.NoError(t, db.BanNamespace(1234))
 	bannedPrefixes[1234] = struct{}{}
 	validate()
 
-	require.NoError(t, db.BanPrefix(5678))
+	require.NoError(t, db.BanNamespace(5678))
 	bannedPrefixes[5678] = struct{}{}
 	validate()
 
@@ -2368,13 +2367,12 @@ func TestBannedPrefixes(t *testing.T) {
 
 // Tests that the iterator skips the banned prefixes.
 func TestIterateWithBanned(t *testing.T) {
-	opt := DefaultOptions("")
-	opt.Uint64PrefixKeys = true
+	opt := DefaultOptions("").WithNamespaceMode(true).WithNamespaceOffset(3)
 	opt.NumVersionsToKeep = math.MaxInt64
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		bkey := func(prefix uint64, i int) []byte {
 			// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
-			return append(make([]byte, u64PrefixOffset),
+			return append(make([]byte, db.opt.NamespaceOffset),
 				[]byte(fmt.Sprintf("%s-%04d", y.U64ToBytes(prefix), i))...)
 		}
 
@@ -2425,32 +2423,32 @@ func TestIterateWithBanned(t *testing.T) {
 		}
 
 		getIterablePrefix := func(i int) []byte {
-			return append(make([]byte, u64PrefixOffset),
+			return append(make([]byte, db.opt.NamespaceOffset),
 				[]byte(fmt.Sprintf("%s", y.U64ToBytes(uint64(i*1000))))...)
 		}
 		validate(IteratorOptions{}, 0, 26*N)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 26*N*V)
 		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
 
-		require.NoError(t, db.BanPrefix(uint64('a'*1000)))
+		require.NoError(t, db.BanNamespace(uint64('a'*1000)))
 		validate(IteratorOptions{}, 1*N*V, 25*N)
 		validate(IteratorOptions{AllVersions: true}, 1*N*V, 25*N*V)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 25*N*V)
 
-		require.NoError(t, db.BanPrefix(uint64('b'*1000)))
+		require.NoError(t, db.BanNamespace(uint64('b'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 24*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 24*N*V)
 
-		require.NoError(t, db.BanPrefix(uint64('d'*1000)))
+		require.NoError(t, db.BanNamespace(uint64('d'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 23*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 23*N*V)
 		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
 		validate(IteratorOptions{Prefix: getIterablePrefix('f'), AllVersions: true}, 5*N*V, N*V)
 
-		require.NoError(t, db.BanPrefix(uint64('g')*1000))
+		require.NoError(t, db.BanNamespace(uint64('g')*1000))
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 22*N*V)
 
-		require.NoError(t, db.BanPrefix(uint64('r'*1000)))
+		require.NoError(t, db.BanNamespace(uint64('r'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 21*N)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 21*N*V)
 
@@ -2458,7 +2456,7 @@ func TestIterateWithBanned(t *testing.T) {
 		validate(IteratorOptions{Prefix: getIterablePrefix('g')}, -1, 0)
 		validate(IteratorOptions{Prefix: getIterablePrefix('g'), Reverse: true, AllVersions: true}, -1, 0)
 
-		require.NoError(t, db.BanPrefix(uint64('z'*1000)))
+		require.NoError(t, db.BanNamespace(uint64('z'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 20*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 20*N*V)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 25*N*V-1, 20*N*V)

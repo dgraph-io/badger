@@ -43,14 +43,13 @@ import (
 )
 
 var (
-	badgerPrefix    = []byte("!badger!")       // Prefix for internal keys used by badger.
-	txnKey          = []byte("!badger!txn")    // For indicating end of entries in txn.
-	bannedPrefixKey = []byte("!badger!prefix") // For storing the banned keys (used by Dgraph).
+	badgerPrefix = []byte("!badger!")       // Prefix for internal keys used by badger.
+	txnKey       = []byte("!badger!txn")    // For indicating end of entries in txn.
+	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces (used by Dgraph).
 )
 
 const (
-	maxNumSplits    = 128
-	u64PrefixOffset = 3
+	maxNumSplits = 128
 )
 
 type closers struct {
@@ -66,6 +65,18 @@ type closers struct {
 type lockedKeys struct {
 	sync.RWMutex
 	keys map[uint64]struct{}
+}
+
+func (lk *lockedKeys) update(fn func(keys map[uint64]struct{})) {
+	lk.Lock()
+	defer lk.Unlock()
+	fn(lk.keys)
+}
+
+func (lk *lockedKeys) view(fn func(keys map[uint64]struct{})) {
+	lk.RLock()
+	defer lk.RUnlock()
+	fn(lk.keys)
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -96,8 +107,8 @@ type DB struct {
 	blockWrites int32
 	isClosed    uint32
 
-	orc            *oracle
-	bannedPrefixes *lockedKeys
+	orc              *oracle
+	bannedNamespaces *lockedKeys
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -218,17 +229,17 @@ func Open(opt Options) (*DB, error) {
 	}()
 
 	db := &DB{
-		imm:            make([]*memTable, 0, opt.NumMemtables),
-		flushChan:      make(chan flushTask, opt.NumMemtables),
-		writeCh:        make(chan *request, kvWriteChCapacity),
-		opt:            opt,
-		manifest:       manifestFile,
-		dirLockGuard:   dirLockGuard,
-		valueDirGuard:  valueDirLockGuard,
-		orc:            newOracle(opt),
-		pub:            newPublisher(),
-		allocPool:      z.NewAllocatorPool(8),
-		bannedPrefixes: &lockedKeys{keys: make(map[uint64]struct{})},
+		imm:              make([]*memTable, 0, opt.NumMemtables),
+		flushChan:        make(chan flushTask, opt.NumMemtables),
+		writeCh:          make(chan *request, kvWriteChCapacity),
+		opt:              opt,
+		manifest:         manifestFile,
+		dirLockGuard:     dirLockGuard,
+		valueDirGuard:    valueDirLockGuard,
+		orc:              newOracle(opt),
+		pub:              newPublisher(),
+		allocPool:        z.NewAllocatorPool(8),
+		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -352,7 +363,7 @@ func Open(opt Options) (*DB, error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	if err := db.setBannedPrefixes(); err != nil {
+	if err := db.setBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
@@ -374,22 +385,23 @@ func Open(opt Options) (*DB, error) {
 }
 
 // setBannedPrefixes retrieves the banned keys from the DB and updates the in-memory structure.
-func (db *DB) setBannedPrefixes() error {
+func (db *DB) setBannedNamespaces() error {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	var prefixes []uint64
+	var namespaces []uint64
 	db.View(func(txn *Txn) error {
 		iopts := DefaultIteratorOptions
-		iopts.Prefix = bannedPrefixKey
+		iopts.Prefix = bannedNsKey
+		iopts.PrefetchValues = false
 		iopts.InternalAccess = true
 		itr := txn.NewIterator(iopts)
 		defer itr.Close()
 		for itr.Rewind(); itr.Valid(); itr.Next() {
-			prefixes = append(prefixes, y.BytesToU64(itr.Item().Key()[len(bannedPrefixKey):]))
+			namespaces = append(namespaces, y.BytesToU64(itr.Item().Key()[len(bannedNsKey):]))
 		}
 		return nil
 	})
-	db.bannedPrefixes.update(func(keys map[uint64]struct{}) {
-		for _, k := range prefixes {
+	db.bannedNamespaces.update(func(keys map[uint64]struct{}) {
+		for _, k := range namespaces {
 			keys[k] = struct{}{}
 		}
 	})
@@ -1757,26 +1769,14 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
-func (lk *lockedKeys) update(fn func(keys map[uint64]struct{})) {
-	lk.Lock()
-	defer lk.Unlock()
-	fn(lk.keys)
-}
-
-func (lk *lockedKeys) view(fn func(keys map[uint64]struct{})) {
-	lk.RLock()
-	defer lk.RUnlock()
-	fn(lk.keys)
-}
-
 // Returns true, if the key is prefixed with any banned prefix.
 func (db *DB) isBannedInternal(key []byte) bool {
-	if !db.opt.Uint64PrefixKeys {
+	if !db.opt.NamespaceMode {
 		return false
 	}
 	banned := false
-	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
-		if _, ok := keys[y.BytesToU64(key[u64PrefixOffset:])]; ok {
+	db.bannedNamespaces.view(func(keys map[uint64]struct{}) {
+		if _, ok := keys[y.BytesToU64(key[db.opt.NamespaceOffset:])]; ok {
 			banned = true
 		}
 	})
@@ -1784,23 +1784,23 @@ func (db *DB) isBannedInternal(key []byte) bool {
 }
 
 func (db *DB) isBanned(key []byte) (bool, error) {
-	if !db.opt.Uint64PrefixKeys {
+	if !db.opt.NamespaceMode {
 		return false, nil
 	}
-	if len(key) <= u64PrefixOffset+8 {
+	if len(key) <= db.opt.NamespaceOffset+8 {
 		return true, ErrInvalidKey
 	}
 	return db.isBannedInternal(key), nil
 }
 
-// BanPrefix bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
-func (db *DB) BanPrefix(prefix uint64) error {
-	if !db.opt.Uint64PrefixKeys {
+// BanNamespace bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
+func (db *DB) BanNamespace(ns uint64) error {
+	if !db.opt.NamespaceMode {
 		return ErrUint64PrefixKeys
 	}
-	db.opt.Infof("Banning prefix: %d", prefix)
+	db.opt.Infof("Banning namespace: %d", ns)
 	// First set the banned prefixes in DB and then update the in-memory structure.
-	key := y.KeyWithTs(append(bannedPrefixKey, y.U64ToBytes(prefix)...), 1)
+	key := y.KeyWithTs(append(bannedNsKey, y.U64ToBytes(ns)...), 1)
 	entry := []*Entry{{
 		Key:   key,
 		Value: nil,
@@ -1812,8 +1812,8 @@ func (db *DB) BanPrefix(prefix uint64) error {
 	if err := req.Wait(); err != nil {
 		return err
 	}
-	db.bannedPrefixes.update(func(keys map[uint64]struct{}) {
-		keys[prefix] = struct{}{}
+	db.bannedNamespaces.update(func(keys map[uint64]struct{}) {
+		keys[ns] = struct{}{}
 	})
 	return nil
 }
@@ -1821,7 +1821,7 @@ func (db *DB) BanPrefix(prefix uint64) error {
 // GetBannedPrefixes returns the list of prefixes banned for DB.
 func (db *DB) GetBannedPrefixes() []uint64 {
 	var prefixes []uint64
-	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
+	db.bannedNamespaces.view(func(keys map[uint64]struct{}) {
 		for k := range keys {
 			prefixes = append(prefixes, k)
 		}

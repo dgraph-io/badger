@@ -79,8 +79,8 @@ var (
 	ErrManagedTxn = errors.New(
 		"Invalid API request. Not allowed to perform this action using ManagedDB")
 
-	// ErrUint64PrefixMode is returned if the user tries to use an API which isn't allowed in non-Dgraph
-	// mode.
+	// ErrUint64PrefixMode is returned if the user tries to use an API which isn't allowed when
+	// Uint64PrefixMode is not set.
 	ErrUint64PrefixKeys = errors.New(
 		"Invalid API request. Not allowed to perform this action when Uint64PrefixKeys is not set.")
 
