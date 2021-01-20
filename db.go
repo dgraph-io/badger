@@ -49,7 +49,8 @@ var (
 )
 
 const (
-	maxNumSplits = 128
+	maxNumSplits    = 128
+	u64PrefixOffset = 3
 )
 
 type closers struct {
@@ -1773,17 +1774,27 @@ func (lk *lockedKeys) view(fn func(keys map[uint64]struct{})) {
 }
 
 // Returns true, if the key is prefixed with any banned prefix.
-func (db *DB) isBanned(key []byte) bool {
+func (db *DB) isBannedInternal(key []byte) bool {
 	if !db.opt.Uint64PrefixKeys {
 		return false
 	}
 	banned := false
 	db.bannedPrefixes.view(func(keys map[uint64]struct{}) {
-		if _, ok := keys[y.BytesToU64(key)]; ok {
+		if _, ok := keys[y.BytesToU64(key[u64PrefixOffset:])]; ok {
 			banned = true
 		}
 	})
 	return banned
+}
+
+func (db *DB) isBanned(key []byte) (bool, error) {
+	if !db.opt.Uint64PrefixKeys {
+		return false, nil
+	}
+	if len(key) <= u64PrefixOffset+8 {
+		return true, ErrInvalidKey
+	}
+	return db.isBannedInternal(key), nil
 }
 
 // BanPrefix bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
@@ -1792,12 +1803,8 @@ func (db *DB) BanPrefix(prefix uint64) error {
 		return ErrUint64PrefixKeys
 	}
 	db.opt.Infof("Banning prefix: %d", prefix)
-	if db.isBanned(y.U64ToBytes(prefix)) {
+	if db.isBannedInternal(append(make([]byte, u64PrefixOffset), y.U64ToBytes(prefix)...)) {
 		return nil
-	}
-	// Do not allow banning badger's internal prefix.
-	if prefix == y.BytesToU64(badgerPrefix[:8]) {
-		return errors.Errorf("Cannot ban a prefix internal to badger.")
 	}
 	// First set the banned prefixes in DB and then update the in-memory structure.
 	prefixes := append(db.GetBannedPrefixes(), prefix)

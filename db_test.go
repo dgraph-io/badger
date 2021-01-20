@@ -2308,13 +2308,16 @@ func TestBannedPrefixes(t *testing.T) {
 	for _, p := range allPrefixes {
 		prefix := y.U64ToBytes(p)
 		for i := 0; i < 10; i++ {
-			keys = append(keys, []byte(fmt.Sprintf("%s-key%02d", prefix, i)))
+			// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
+			key := append(make([]byte, u64PrefixOffset),
+				[]byte(fmt.Sprintf("%s-key%02d", prefix, i))...)
+			keys = append(keys, key)
 		}
 	}
 
 	bannedPrefixes := make(map[uint64]struct{})
 	isBanned := func(key []byte) bool {
-		prefix := y.BytesToU64(key[:8])
+		prefix := y.BytesToU64(key[3:])
 		if _, ok := bannedPrefixes[prefix]; ok {
 			return true
 		}
@@ -2370,7 +2373,9 @@ func TestIterateWithBanned(t *testing.T) {
 	opt.NumVersionsToKeep = math.MaxInt64
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		bkey := func(prefix uint64, i int) []byte {
-			return []byte(fmt.Sprintf("%s-%04d", y.U64ToBytes(prefix), i))
+			// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
+			return append(make([]byte, u64PrefixOffset),
+				[]byte(fmt.Sprintf("%s-%04d", y.U64ToBytes(prefix), i))...)
 		}
 
 		N := 100
@@ -2409,7 +2414,7 @@ func TestIterateWithBanned(t *testing.T) {
 			count := 0
 			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
 				// Iterator should skip the banned keys, so should we.
-				for db.isBanned(keys[idx]) {
+				for db.isBannedInternal(keys[idx]) {
 					incIdx()
 				}
 				count++
@@ -2418,9 +2423,14 @@ func TestIterateWithBanned(t *testing.T) {
 			}
 			require.Equal(t, expected, count)
 		}
+
+		getIterablePrefix := func(i int) []byte {
+			return append(make([]byte, u64PrefixOffset),
+				[]byte(fmt.Sprintf("%s", y.U64ToBytes(uint64(i*1000))))...)
+		}
 		validate(IteratorOptions{}, 0, 26*N)
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 26*N*V)
-		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000))}, 5*N*V, N)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
 
 		require.NoError(t, db.BanPrefix(uint64('a'*1000)))
 		validate(IteratorOptions{}, 1*N*V, 25*N)
@@ -2434,8 +2444,8 @@ func TestIterateWithBanned(t *testing.T) {
 		require.NoError(t, db.BanPrefix(uint64('d'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 23*N)
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 23*N*V)
-		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000))}, 5*N*V, N)
-		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('f' * 1000)), AllVersions: true}, 5*N*V, N*V)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f'), AllVersions: true}, 5*N*V, N*V)
 
 		require.NoError(t, db.BanPrefix(uint64('g')*1000))
 		validate(IteratorOptions{AllVersions: true}, 2*N*V, 22*N*V)
@@ -2445,8 +2455,8 @@ func TestIterateWithBanned(t *testing.T) {
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 21*N*V)
 
 		// Iterate over the banned prefix. Passing -1 as we don't expect to access keys.
-		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('g' * 1000))}, -1, 0)
-		validate(IteratorOptions{Prefix: y.U64ToBytes(uint64('g' * 1000)), Reverse: true, AllVersions: true}, -1, 0)
+		validate(IteratorOptions{Prefix: getIterablePrefix('g')}, -1, 0)
+		validate(IteratorOptions{Prefix: getIterablePrefix('g'), Reverse: true, AllVersions: true}, -1, 0)
 
 		require.NoError(t, db.BanPrefix(uint64('z'*1000)))
 		validate(IteratorOptions{}, 2*N*V, 20*N)
