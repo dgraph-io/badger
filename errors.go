@@ -79,10 +79,10 @@ var (
 	ErrManagedTxn = errors.New(
 		"Invalid API request. Not allowed to perform this action using ManagedDB")
 
-	// ErrUint64PrefixMode is returned if the user tries to use an API which isn't allowed when
-	// Uint64PrefixMode is not set.
-	ErrUint64PrefixKeys = errors.New(
-		"Invalid API request. Not allowed to perform this action when Uint64PrefixKeys is not set.")
+	// ErrNamespaceMode is returned if the user tries to use an API which isn't allowed when
+	// DB is not open in NamespaceMode
+	ErrNamespaceMode = errors.New(
+		"Invalid API request. Not allowed to perform this action when NamespaceMode is not set.")
 
 	// ErrInvalidDump if a data dump made previously cannot be loaded into the database.
 	ErrInvalidDump = errors.New("Data dump cannot be read")

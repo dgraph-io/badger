@@ -1790,7 +1790,7 @@ func (db *DB) isBanned(key []byte) error {
 // BanNamespace bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
 func (db *DB) BanNamespace(ns uint64) error {
 	if !db.opt.NamespaceMode {
-		return ErrUint64PrefixKeys
+		return ErrNamespaceMode
 	}
 	db.opt.Infof("Banning namespace: %d", ns)
 	// First set the banned prefixes in DB and then update the in-memory structure.
