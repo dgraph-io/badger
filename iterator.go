@@ -617,7 +617,7 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	// Skip banned keys.
-	if it.txn.db.isBannedInternal(key) {
+	if err := it.txn.db.isBanned(key); err != nil {
 		mi.Next()
 		return false
 	}

@@ -2412,7 +2412,7 @@ func TestIterateWithBanned(t *testing.T) {
 			count := 0
 			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
 				// Iterator should skip the banned keys, so should we.
-				for db.isBannedInternal(keys[idx]) {
+				for db.isBanned(keys[idx]) != nil {
 					incIdx()
 				}
 				count++

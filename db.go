@@ -1769,28 +1769,22 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
-// Returns true, if the key is prefixed with any banned prefix.
-func (db *DB) isBannedInternal(key []byte) bool {
+// Checks if the key is banned. Returns the respective error is the key is prefixed by any of banned
+// prefix, or it is invalid. Else it returns nil.
+func (db *DB) isBanned(key []byte) error {
 	if !db.opt.NamespaceMode {
-		return false
-	}
-	banned := false
-	db.bannedNamespaces.view(func(keys map[uint64]struct{}) {
-		if _, ok := keys[y.BytesToU64(key[db.opt.NamespaceOffset:])]; ok {
-			banned = true
-		}
-	})
-	return banned
-}
-
-func (db *DB) isBanned(key []byte) (bool, error) {
-	if !db.opt.NamespaceMode {
-		return false, nil
+		return nil
 	}
 	if len(key) <= db.opt.NamespaceOffset+8 {
-		return true, ErrInvalidKey
+		return ErrInvalidKey
 	}
-	return db.isBannedInternal(key), nil
+	var err error
+	db.bannedNamespaces.view(func(keys map[uint64]struct{}) {
+		if _, ok := keys[y.BytesToU64(key[db.opt.NamespaceOffset:])]; ok {
+			err = ErrBannedKey
+		}
+	})
+	return err
 }
 
 // BanNamespace bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
