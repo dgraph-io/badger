@@ -424,7 +424,8 @@ func (s *levelsController) levelTargets() targets {
 	// If the base level is empty and the next level size is less than the
 	// target size, pick the next level as the base level.
 	b := t.baseLevel
-	if s.levels[b].getTotalSize() == 0 && s.levels[b+1].getTotalSize() < t.targetSz[b+1] {
+	lvl := s.levels
+	if b < len(lvl)-1 && lvl[b].getTotalSize() == 0 && lvl[b+1].getTotalSize() < t.targetSz[b+1] {
 		t.baseLevel++
 	}
 	return t
