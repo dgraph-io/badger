@@ -5,4 +5,4 @@
 
 # You might need to go get -v github.com/gogo/protobuf/...
 
-protoc --gogofaster_out=plugins=grpc:. --gogofaster_opt=paths=source_relative -I=. badgerpb3.proto
+protoc --gogofaster_out=. --gogofaster_opt=paths=source_relative -I=. badgerpb3.proto
