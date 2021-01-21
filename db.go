@@ -386,6 +386,9 @@ func Open(opt Options) (*DB, error) {
 
 // setBannedPrefixes retrieves the banned keys from the DB and updates the in-memory structure.
 func (db *DB) setBannedNamespaces() error {
+	if !db.opt.NamespaceMode {
+		return nil
+	}
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	var namespaces []uint64
 	db.View(func(txn *Txn) error {
