@@ -98,11 +98,8 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
-	// NamespaceMode determines whether db should expect a special prefix in the 8 bytes starting
-	// from namespaceOffset of the key. Used by Dgraph to store the namespace information.
-	NamespaceMode bool
 	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
-	// Valid only when NamespaceMode is set.
+	// The namespace is used by Dgraph for multi-tenency.
 	NamespaceOffset int
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -167,6 +164,7 @@ func DefaultOptions(path string) Options {
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
+		NamespaceOffset:               -1,
 	}
 }
 
@@ -583,18 +581,11 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 	return opt
 }
 
-// WithNamespaceMode returns a new Options value with NamespaceMode set the given value.
-//
-// The default value for Namespace Mode is False.
-func (opt Options) WithNamespaceMode(b bool) Options {
-	opt.NamespaceMode = b
-	return opt
-}
-
 // WithNamespaceOffset returns a new Options value with NamespaceOffset set to the given value. DB
-// will expect the namespace in each key at the 8 bytes starting from NamespaceOffset.
+// will expect the namespace in each key at the 8 bytes starting from NamespaceOffset. A negative
+// value means that namespace is not stored in the key.
 //
-// The default value for NamespaceMode is 0. This option is only valid when NamespaceMode is set.
+// The default value for NamespaceMode is -1.
 func (opt Options) WithNamespaceOffset(offset int) Options {
 	opt.NamespaceOffset = offset
 	return opt

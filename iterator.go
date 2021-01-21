@@ -603,8 +603,9 @@ func (it *Iterator) parseItem() bool {
 		}
 	}
 
+	isInternalKey := bytes.HasPrefix(key, badgerPrefix)
 	// Skip badger keys.
-	if !it.opt.InternalAccess && bytes.HasPrefix(key, badgerPrefix) {
+	if !it.opt.InternalAccess && isInternalKey {
 		mi.Next()
 		return false
 	}
@@ -617,7 +618,7 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	// Skip banned keys only if it does not have badger internal prefix.
-	if it.txn.db.isBanned(key) != nil && !bytes.HasPrefix(key, badgerPrefix) {
+	if it.txn.db.isBanned(key) != nil && !isInternalKey {
 		mi.Next()
 		return false
 	}

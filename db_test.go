@@ -2293,7 +2293,7 @@ func TestBannedPrefixes(t *testing.T) {
 	require.NoError(t, err, "temp dir for badger count not be created")
 	defer os.RemoveAll(dir)
 
-	ops := getTestOptions(dir).WithNamespaceMode(true).WithNamespaceOffset(3)
+	ops := getTestOptions(dir).WithNamespaceOffset(3)
 	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
 	// restart.
 	ops.ValueThreshold = 0
@@ -2367,7 +2367,7 @@ func TestBannedPrefixes(t *testing.T) {
 
 // Tests that the iterator skips the banned prefixes.
 func TestIterateWithBanned(t *testing.T) {
-	opt := DefaultOptions("").WithNamespaceMode(true).WithNamespaceOffset(3)
+	opt := DefaultOptions("").WithNamespaceOffset(3)
 	opt.NumVersionsToKeep = math.MaxInt64
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		bkey := func(prefix uint64, i int) []byte {
