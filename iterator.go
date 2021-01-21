@@ -616,8 +616,8 @@ func (it *Iterator) parseItem() bool {
 		return false
 	}
 
-	// Skip banned keys.
-	if err := it.txn.db.isBanned(key); err != nil {
+	// Skip banned keys only if it does not have badger internal prefix.
+	if it.txn.db.isBanned(key) != nil && !bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
 		return false
 	}
