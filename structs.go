@@ -189,6 +189,9 @@ func (e *Entry) skipVlog(threshold int64) bool {
 	case Greater:
 		return false
 	default:
+		// Default case has been added here for the completeness. With dynamic value threshold,
+		// Improper use of estimate size and skipVlog can lead to inconsistent result.
+		// Handle the entry struct carefully in those scenarios.
 		if v < threshold {
 			e.vtcr = Lesser
 			return true
