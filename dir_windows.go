@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 // FILE_ATTRIBUTE_TEMPORARY - A file that is being used for temporary storage.

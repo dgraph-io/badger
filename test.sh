@@ -7,7 +7,7 @@ go version
 # Run `go list` BEFORE setting GOFLAGS so that the output is in the right
 # format for grep.
 # export packages because the test will run in a sub process.
-export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v2/")
+export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v3/")
 
 if [[ ! -z "$TEAMCITY_VERSION" ]]; then
   export GOFLAGS="-json"
@@ -87,7 +87,7 @@ manual() {
 
 root() {
   # Run the normal tests.
-  # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
+  # go test -timeout=25m -v -race github.com/dgraph-io/badger/v3/...
 
   echo "==> Running root level tests."
   set -e

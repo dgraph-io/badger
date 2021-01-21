@@ -35,9 +35,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/options"
+	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
