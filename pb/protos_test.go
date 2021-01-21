@@ -37,5 +37,5 @@ func TestProtosRegenerate(t *testing.T) {
 
 	generatedProtos := "badgerpb3.pb.go"
 	err = Exec("git", "diff", "--quiet", "--", generatedProtos)
-	require.NoError(t, err, "pb.pb.go changed after regenerating")
+	require.NoError(t, err, "badgerpb3.pb.go changed after regenerating")
 }
