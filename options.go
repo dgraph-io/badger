@@ -20,9 +20,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/options"
+	"github.com/dgraph-io/badger/v3/table"
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -86,7 +86,7 @@ type Options struct {
 	EncryptionKey                 []byte        // encryption key
 	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
-	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
+	// BypassLockGuard will bypass the lock guard on badger. Bypassing lock
 	// guard can cause data corruption if multiple badger instances are using
 	// the same directory. Use this options with caution.
 	BypassLockGuard bool

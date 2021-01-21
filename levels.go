@@ -32,9 +32,9 @@ import (
 
 	otrace "go.opencensus.io/trace"
 
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/table"
+	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
@@ -411,6 +411,22 @@ func (s *levelsController) levelTargets() targets {
 			tsz *= int64(s.kv.opt.TableSizeMultiplier)
 			t.fileSz[i] = tsz
 		}
+	}
+
+	// Bring the base level down to the last empty level.
+	for i := t.baseLevel + 1; i < len(s.levels)-1; i++ {
+		if s.levels[i].getTotalSize() > 0 {
+			break
+		}
+		t.baseLevel = i
+	}
+
+	// If the base level is empty and the next level size is less than the
+	// target size, pick the next level as the base level.
+	b := t.baseLevel
+	lvl := s.levels
+	if b < len(lvl)-1 && lvl[b].getTotalSize() == 0 && lvl[b+1].getTotalSize() < t.targetSz[b+1] {
+		t.baseLevel++
 	}
 	return t
 }

@@ -32,7 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 	otrace "go.opencensus.io/trace"
@@ -929,8 +929,8 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 
 // Read reads the value log at a given location.
 // TODO: Make this read private.
-func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
-	buf, lf, err := vlog.readValueBytes(vp, s)
+func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) {
+	buf, lf, err := vlog.readValueBytes(vp)
 	// log file is locked so, decide whether to lock immediately or let the caller to
 	// unlock it, after caller uses it.
 	cb := vlog.getUnlockCallback(lf)
@@ -979,13 +979,13 @@ func (vlog *valueLog) getUnlockCallback(lf *logFile) func() {
 
 // readValueBytes return vlog entry slice and read locked log file. Caller should take care of
 // logFile unlocking.
-func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logFile, error) {
+func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *logFile, error) {
 	lf, err := vlog.getFileRLocked(vp)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	buf, err := lf.read(vp, s)
+	buf, err := lf.read(vp)
 	return buf, lf, err
 }
 
