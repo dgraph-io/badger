@@ -35,7 +35,7 @@ func TestProtosRegenerate(t *testing.T) {
 	err := Exec("./gen.sh")
 	require.NoError(t, err, "Got error while regenerating protos: %v\n", err)
 
-	generatedProtos := "pb.pb.go"
+	generatedProtos := "badgerpb3.pb.go"
 	err = Exec("git", "diff", "--quiet", "--", generatedProtos)
 	require.NoError(t, err, "pb.pb.go changed after regenerating")
 }
