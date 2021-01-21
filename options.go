@@ -157,10 +157,10 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries:            1000000,
+		ValueLogMaxEntries: 1000000,
 
-		DynamicValueThreshold:         false,
-		ValueThreshold:                1 << 10, // 1 KB.
+		DynamicValueThreshold: false,
+		ValueThreshold:        1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},

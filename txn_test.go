@@ -645,7 +645,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 					Key:  y.KeyWithTs(item.key, item.version),
 					meta: bitDelete,
 				},
-			}, txn.db.opt.ValueThreshold)
+			})
 			require.NoError(t, err)
 			return err
 		})

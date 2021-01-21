@@ -104,7 +104,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&wo.sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&wo.showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().Int64VarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
-	writeBenchCmd.Flags().BoolVar(&wo.dynamicThreshold, "dynamic-th",  false,
+	writeBenchCmd.Flags().BoolVar(&wo.dynamicThreshold, "dynamic-th", false,
 		"Dynamic value threshold")
 	writeBenchCmd.Flags().IntVarP(&wo.numVersions, "num-version", "n", 1, "Number of versions to keep")
 	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 256,
@@ -154,7 +154,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 		var e *badger.Entry
 		p := rand.Intn(1000)
-		if p >=0 && p < 800 {
+		if p >= 0 && p < 800 {
 			vsz := rand.Intn(vsz80) + 1
 			e = badger.NewEntry(key, value[:vsz])
 		} else if p >= 800 && p < 990 {

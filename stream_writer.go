@@ -134,7 +134,6 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			streamReqs[kv.StreamId] = req
 		}
 		req.Entries = append(req.Entries, e)
-		req.valueThreshold = sw.db.valueThreshold()
 		return nil
 	})
 	if err != nil {
@@ -317,7 +316,7 @@ func (w *sortedWriter) handleRequests() {
 		for i, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
 			var vs y.ValueStruct
-			if w.db.vlog.skipVlog(e, req.valueThreshold) {
+			if e.skipVlog(w.db.valueThreshold()) {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,

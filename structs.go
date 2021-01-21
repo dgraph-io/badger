@@ -135,6 +135,14 @@ func (h *header) DecodeFrom(reader *hashReader) (int, error) {
 	return reader.bytesRead, nil
 }
 
+type valThreshComparison uint8
+
+const (
+	Unknown valThreshComparison = iota
+	Lesser
+	Greater
+)
+
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
 // the user to set data.
 type Entry struct {
@@ -147,7 +155,8 @@ type Entry struct {
 	meta      byte
 
 	// Fields maintained internally.
-	hlen int // Length of the header.
+	hlen int                 // Length of the header.
+	vtcr valThreshComparison // value threshold comparison result
 }
 
 func (e *Entry) isZero() bool {
@@ -157,10 +166,36 @@ func (e *Entry) isZero() bool {
 func (e *Entry) estimateSize(threshold int64) int64 {
 	k := int64(len(e.Key))
 	v := int64(len(e.Value))
-	if v < threshold {
-		return k + v + 2 // Meta, UserMeta
+	switch e.vtcr {
+	case Lesser:
+		return k + v + 2
+	case Greater:
+		return k + 12 + 2
+	default:
+		if v < threshold {
+			e.vtcr = Lesser
+			return k + v + 2 // Meta, UserMeta
+		}
+		e.vtcr = Greater
+		return k + 12 + 2
 	}
-	return k + 12 + 2 // 12 for ValuePointer, 2 for metas.
+}
+
+func (e *Entry) skipVlog(threshold int64) bool {
+	v := int64(len(e.Value))
+	switch e.vtcr {
+	case Lesser:
+		return true
+	case Greater:
+		return false
+	default:
+		if v < threshold {
+			e.vtcr = Lesser
+			return true
+		}
+		e.vtcr = Greater
+		return false
+	}
 }
 
 func (e Entry) print(prefix string) {

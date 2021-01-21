@@ -713,7 +713,7 @@ func (db *DB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		var err error
-		if db.vlog.skipVlog(entry, b.valueThreshold) {
+		if entry.skipVlog(db.valueThreshold()) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -799,17 +799,13 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 
-// func (db *DB) sxendToWriteCh(entries []*Entry) (*request, error) {
-// 	return db.sendToWriteChWithThreshold(entries, db.valueThreshold())
-// }
-
-func (db *DB) sendToWriteChWithThreshold(entries []*Entry, threshold int64) (*request, error) {
+func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += e.estimateSize(threshold)
+		size += e.estimateSize(db.valueThreshold())
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
@@ -820,7 +816,6 @@ func (db *DB) sendToWriteChWithThreshold(entries []*Entry, threshold int64) (*re
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
 	req.reset()
-	req.valueThreshold = threshold
 	req.Entries = entries
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
@@ -897,8 +892,8 @@ func (db *DB) doWrites(lc *z.Closer) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (db *DB) batchSet(entries []*Entry, threshold int64) error {
-	req, err := db.sendToWriteChWithThreshold(entries, threshold)
+func (db *DB) batchSet(entries []*Entry) error {
+	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
 	}
@@ -912,8 +907,8 @@ func (db *DB) batchSet(entries []*Entry, threshold int64) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (db *DB) batchSetAsync(entries []*Entry, valThreshold int64, f func(error)) error {
-	req, err := db.sendToWriteChWithThreshold(entries, valThreshold)
+func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
 	}
