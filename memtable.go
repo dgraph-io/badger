@@ -27,7 +27,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,7 +164,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 }
 
 func (db *DB) mtFilePath(fid int) string {
-	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
+	return filepath.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
 func (mt *memTable) SyncWAL() error {
