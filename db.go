@@ -82,7 +82,7 @@ func (lk *lockedKeys) has(key uint64) bool {
 
 func (lk *lockedKeys) all() []uint64 {
 	lk.RLock()
-	lk.RUnlock()
+	defer lk.RUnlock()
 	var keys []uint64
 	for key := range lk.keys {
 		keys = append(keys, key)
