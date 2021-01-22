@@ -27,7 +27,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sync"
@@ -73,7 +73,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	// Close the DB.
 	require.NoError(t, db.Close())
 	// We start value logs at 1.
-	require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), 4090))
+	require.NoError(t, os.Truncate(filepath.Join(dir, "000001.vlog"), 4090))
 
 	// Reopen and write some new data.
 	db, err = Open(opt)
