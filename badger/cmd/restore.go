@@ -20,7 +20,7 @@ import (
 	"errors"
 	"math"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/spf13/cobra"
@@ -56,7 +56,7 @@ func init() {
 
 func doRestore(cmd *cobra.Command, args []string) error {
 	// Check if the DB already exists
-	manifestFile := path.Join(sstDir, badger.ManifestFilename)
+	manifestFile := filepath.Join(sstDir, badger.ManifestFilename)
 	if _, err := os.Stat(manifestFile); err == nil { // No error. File already exists.
 		return errors.New("Cannot restore to an already existing database")
 	} else if os.IsNotExist(err) {

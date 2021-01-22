@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -248,7 +247,7 @@ func dur(src, dst time.Time) string {
 func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
 	fileName := table.IDToFilename(tid)
 	for _, fi := range fileInfos {
-		if path.Base(fi.Name()) == fileName {
+		if filepath.Base(fi.Name()) == fileName {
 			return fi.Size()
 		}
 	}
