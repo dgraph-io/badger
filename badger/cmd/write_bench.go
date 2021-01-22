@@ -50,36 +50,40 @@ var writeBenchCmd = &cobra.Command{
 }
 
 var (
-	keySz      int
-	valSz      int
-	numKeys    float64
-	syncWrites bool
-	force      bool
-	sorted     bool
-	showLogs   bool
+	wo = struct {
+		keySz      int
+		valSz      int
+		numKeys    float64
+		syncWrites bool
+		force      bool
+		sorted     bool
+		showLogs   bool
+
+		valueThreshold   int
+		numVersions      int
+		vlogMaxEntries   uint32
+		loadBloomsOnOpen bool
+		detectConflicts  bool
+		zstdComp         bool
+		showDir          bool
+		ttlDuration      string
+		encryptionKey    string
+		showKeysCount    bool
+		blockCacheSize   int64
+		indexCacheSize   int64
+
+		dropAllPeriod    string
+		dropPrefixPeriod string
+		gcPeriod         string
+		gcDiscardRatio   float64
+	}{}
 
 	sizeWritten    uint64
+	gcSuccess      uint64
+	sstCount       uint32
+	vlogCount      uint32
+	files          []string
 	entriesWritten uint64
-
-	valueThreshold   int
-	numVersions      int
-	vlogMaxEntries   uint32
-	loadBloomsOnOpen bool
-	detectConflicts  bool
-	zstdComp         bool
-	showDir          bool
-	ttlDuration      string
-	showKeysCount    bool
-
-	sstCount  uint32
-	vlogCount uint32
-	files     []string
-
-	dropAllPeriod    string
-	dropPrefixPeriod string
-	gcPeriod         string
-	gcDiscardRatio   float64
-	gcSuccess        uint64
 )
 
 const (
@@ -88,62 +92,60 @@ const (
 
 func init() {
 	benchCmd.AddCommand(writeBenchCmd)
-	writeBenchCmd.Flags().IntVarP(&keySz, "key-size", "k", 32, "Size of key")
-	writeBenchCmd.Flags().IntVar(&valSz, "val-size", 128, "Size of value")
-	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
+	writeBenchCmd.Flags().IntVarP(&wo.keySz, "key-size", "k", 32, "Size of key")
+	writeBenchCmd.Flags().IntVar(&wo.valSz, "val-size", 128, "Size of value")
+	writeBenchCmd.Flags().Float64VarP(&wo.numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
-	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", false,
+	writeBenchCmd.Flags().BoolVar(&wo.syncWrites, "sync", false,
 		"If true, sync writes to disk.")
-	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
+	writeBenchCmd.Flags().BoolVarP(&wo.force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
-	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
-	writeBenchCmd.Flags().BoolVarP(&showLogs, "verbose", "v", false, "Show Badger logs.")
-	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
-	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache-mb", 1024,
+	writeBenchCmd.Flags().BoolVarP(&wo.sorted, "sorted", "s", false, "Write keys in sorted order.")
+	writeBenchCmd.Flags().BoolVarP(&wo.showLogs, "verbose", "v", false, "Show Badger logs.")
+	writeBenchCmd.Flags().IntVarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
+	writeBenchCmd.Flags().IntVarP(&wo.numVersions, "num-version", "n", 1, "Number of versions to keep")
+	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 256,
 		"Size of block cache in MB")
-	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache-mb", 0,
+	writeBenchCmd.Flags().Int64Var(&wo.indexCacheSize, "index-cache-mb", 0,
 		"Size of index cache in MB.")
-	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
-	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
+	writeBenchCmd.Flags().Uint32Var(&wo.vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
+	writeBenchCmd.Flags().StringVarP(&wo.encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
-	writeBenchCmd.Flags().StringVar(&loadingMode, "loading-mode", "mmap",
-		"Mode for accessing SSTables")
-	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", true,
+	writeBenchCmd.Flags().BoolVar(&wo.loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
-	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
+	writeBenchCmd.Flags().BoolVar(&wo.detectConflicts, "conficts", false,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&zstdComp, "zstd", false,
+	writeBenchCmd.Flags().BoolVar(&wo.zstdComp, "zstd", false,
 		"If true, badger will use ZSTD mode. Otherwise, use default.")
-	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
+	writeBenchCmd.Flags().BoolVar(&wo.showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
-	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
+	writeBenchCmd.Flags().StringVar(&wo.dropAllPeriod, "dropall", "0s",
 		"If set, run dropAll periodically over given duration.")
-	writeBenchCmd.Flags().StringVar(&dropPrefixPeriod, "drop-prefix", "0s",
+	writeBenchCmd.Flags().StringVar(&wo.dropPrefixPeriod, "drop-prefix", "0s",
 		"If set, drop random prefixes periodically over given duration.")
-	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
+	writeBenchCmd.Flags().StringVar(&wo.ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
-	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0s", "GC Period.")
-	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
-	writeBenchCmd.Flags().BoolVar(&showKeysCount, "show-keys", false,
+	writeBenchCmd.Flags().StringVarP(&wo.gcPeriod, "gc-every", "g", "0s", "GC Period.")
+	writeBenchCmd.Flags().Float64VarP(&wo.gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
+	writeBenchCmd.Flags().BoolVar(&wo.showKeysCount, "show-keys", false,
 		"If true, the report will include the keys statistics")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
-	value := make([]byte, valSz)
+	value := make([]byte, wo.valSz)
 	y.Check2(rand.Read(value))
 
-	es := uint64(keySz + valSz) // entry size is keySz + valSz
+	es := uint64(wo.keySz + wo.valSz) // entry size is keySz + valSz
 	batch := db.NewManagedWriteBatch()
 
-	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+	ttlPeriod, errParse := time.ParseDuration(wo.ttlDuration)
 	y.Check(errParse)
 
 	for i := uint64(1); i <= num; i++ {
-		key := make([]byte, keySz)
+		key := make([]byte, wo.keySz)
 		y.Check2(rand.Read(key))
 
-		vsz := rand.Intn(valSz) + 1
+		vsz := rand.Intn(wo.valSz) + 1
 		e := badger.NewEntry(key, value[:vsz])
 
 		if ttlPeriod != 0 {
@@ -194,9 +196,9 @@ func readTest(db *badger.DB, dur time.Duration) {
 }
 
 func writeSorted(db *badger.DB, num uint64) error {
-	value := make([]byte, valSz)
+	value := make([]byte, wo.valSz)
 	y.Check2(rand.Read(value))
-	es := 8 + valSz // key size is 8 bytes and value size is valSz
+	es := 8 + wo.valSz // key size is 8 bytes and value size is valSz
 
 	writer := db.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
@@ -264,21 +266,21 @@ func writeSorted(db *badger.DB, num uint64) error {
 func writeBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithSyncWrites(syncWrites).
-		WithCompactL0OnClose(force).
-		WithValueThreshold(valueThreshold).
-		WithNumVersionsToKeep(numVersions).
-		WithBlockCacheSize(blockCacheSize << 20).
-		WithIndexCacheSize(indexCacheSize << 20).
-		WithValueLogMaxEntries(vlogMaxEntries).
-		WithEncryptionKey([]byte(encryptionKey)).
-		WithDetectConflicts(detectConflicts).
+		WithSyncWrites(wo.syncWrites).
+		WithCompactL0OnClose(wo.force).
+		WithValueThreshold(wo.valueThreshold).
+		WithNumVersionsToKeep(wo.numVersions).
+		WithBlockCacheSize(wo.blockCacheSize << 20).
+		WithIndexCacheSize(wo.indexCacheSize << 20).
+		WithValueLogMaxEntries(wo.vlogMaxEntries).
+		WithEncryptionKey([]byte(wo.encryptionKey)).
+		WithDetectConflicts(wo.detectConflicts).
 		WithLoggingLevel(badger.INFO)
-	if zstdComp {
+	if wo.zstdComp {
 		opt = opt.WithCompression(options.ZSTD)
 	}
 
-	if !showLogs {
+	if !wo.showLogs {
 		opt = opt.WithLogger(nil)
 	}
 
@@ -298,14 +300,14 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	fmt.Println("*********************************************************")
 
 	startTime = time.Now()
-	num := uint64(numKeys * mil)
+	num := uint64(wo.numKeys * mil)
 	c := z.NewCloser(4)
 	go reportStats(c, db)
 	go dropAll(c, db)
 	go dropPrefix(c, db)
 	go runGC(c, db)
 
-	if sorted {
+	if wo.sorted {
 		err = writeSorted(db, num)
 	} else {
 		err = writeRandom(db, num)
@@ -360,11 +362,11 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			count++
-			if showKeysCount {
+			if wo.showKeysCount {
 				showKeysStats(db)
 			}
 			// fetch directory contents
-			if showDir {
+			if wo.showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
 					fileSize := humanize.Bytes(uint64(info.Size()))
 					files = append(files, "[Content] "+path+" "+fileSize)
@@ -407,7 +409,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 
 func runGC(c *z.Closer, db *badger.DB) {
 	defer c.Done()
-	period, err := time.ParseDuration(gcPeriod)
+	period, err := time.ParseDuration(wo.gcPeriod)
 	y.Check(err)
 	if period == 0 {
 		return
@@ -420,7 +422,7 @@ func runGC(c *z.Closer, db *badger.DB) {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
-			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
+			if err := db.RunValueLogGC(wo.gcDiscardRatio); err == nil {
 				atomic.AddUint64(&gcSuccess, 1)
 			} else {
 				log.Printf("[GC] Failed due to following err %v", err)
@@ -431,7 +433,7 @@ func runGC(c *z.Closer, db *badger.DB) {
 
 func dropAll(c *z.Closer, db *badger.DB) {
 	defer c.Done()
-	dropPeriod, err := time.ParseDuration(dropAllPeriod)
+	dropPeriod, err := time.ParseDuration(wo.dropAllPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
 		return
@@ -462,7 +464,7 @@ func dropAll(c *z.Closer, db *badger.DB) {
 
 func dropPrefix(c *z.Closer, db *badger.DB) {
 	defer c.Done()
-	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
+	dropPeriod, err := time.ParseDuration(wo.dropPrefixPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
 		return
@@ -476,7 +478,7 @@ func dropPrefix(c *z.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			fmt.Println("[DropPrefix] Started")
-			prefix := make([]byte, 1+int(float64(keySz)*0.1))
+			prefix := make([]byte, 1+int(float64(wo.keySz)*0.1))
 			y.Check2(rand.Read(prefix))
 			err = db.DropPrefix(prefix)
 
