@@ -368,8 +368,13 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	if len(opt.Prefix) == 0 {
-		out := make([]*table.Table, len(all))
-		copy(out, all)
+		out := make([]*table.Table, 0, len(all))
+		for _, t := range all {
+			if t.MaxVersion() < opt.SinceTs {
+				continue
+			}
+			out = append(out, t)
+		}
 		return out
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
