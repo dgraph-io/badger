@@ -45,7 +45,7 @@ import (
 var (
 	badgerPrefix = []byte("!badger!")       // Prefix for internal keys used by badger.
 	txnKey       = []byte("!badger!txn")    // For indicating end of entries in txn.
-	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces (used by Dgraph).
+	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces.
 )
 
 const (
@@ -83,7 +83,7 @@ func (lk *lockedKeys) has(key uint64) bool {
 func (lk *lockedKeys) all() []uint64 {
 	lk.RLock()
 	defer lk.RUnlock()
-	var keys []uint64
+	keys := make([]uint64, 0, len(lk.keys))
 	for key := range lk.keys {
 		keys = append(keys, key)
 	}
@@ -374,7 +374,7 @@ func Open(opt Options) (*DB, error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	if err := db.setBannedNamespaces(); err != nil {
+	if err := db.initBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
@@ -395,12 +395,12 @@ func Open(opt Options) (*DB, error) {
 	return db, nil
 }
 
-// setBannedPrefixes retrieves the banned keys from the DB and updates the in-memory structure.
-func (db *DB) setBannedNamespaces() error {
+// initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
+func (db *DB) initBannedNamespaces() error {
 	if db.opt.NamespaceOffset < 0 {
 		return nil
 	}
-	db.View(func(txn *Txn) error {
+	return db.View(func(txn *Txn) error {
 		iopts := DefaultIteratorOptions
 		iopts.Prefix = bannedNsKey
 		iopts.PrefetchValues = false
@@ -413,7 +413,6 @@ func (db *DB) setBannedNamespaces() error {
 		}
 		return nil
 	})
-	return nil
 }
 
 func (db *DB) MaxVersion() uint64 {
@@ -1777,8 +1776,8 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 	return filtered, nil
 }
 
-// Checks if the key is banned. Returns the respective error is the key is prefixed by any of banned
-// prefix, or it is invalid. Else it returns nil.
+// Checks if the key is banned. Returns the respective error if the key belongs to any of the banned
+// namepspaces. Else it returns nil.
 func (db *DB) isBanned(key []byte) error {
 	if db.opt.NamespaceOffset < 0 {
 		return nil
@@ -1792,13 +1791,13 @@ func (db *DB) isBanned(key []byte) error {
 	return nil
 }
 
-// BanNamespace bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
+// BanNamespace bans a namespace. Read/write to keys belonging to any of such namespace is denied.
 func (db *DB) BanNamespace(ns uint64) error {
 	if db.opt.NamespaceOffset < 0 {
 		return ErrNamespaceMode
 	}
 	db.opt.Infof("Banning namespace: %d", ns)
-	// First set the banned prefixes in DB and then update the in-memory structure.
+	// First set the banned namespaces in DB and then update the in-memory structure.
 	key := y.KeyWithTs(append(bannedNsKey, y.U64ToBytes(ns)...), 1)
 	entry := []*Entry{{
 		Key:   key,

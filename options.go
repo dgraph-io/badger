@@ -99,7 +99,6 @@ type Options struct {
 	DetectConflicts bool
 
 	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
-	// The namespace is used by Dgraph for multi-tenency.
 	NamespaceOffset int
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -585,7 +584,7 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 // will expect the namespace in each key at the 8 bytes starting from NamespaceOffset. A negative
 // value means that namespace is not stored in the key.
 //
-// The default value for NamespaceMode is -1.
+// The default value for NamespaceOffset is -1.
 func (opt Options) WithNamespaceOffset(offset int) Options {
 	opt.NamespaceOffset = offset
 	return opt

@@ -55,7 +55,7 @@ var (
 	// reserved for internal usage.
 	ErrInvalidKey = errors.New("Key is using a reserved !badger! prefix")
 
-	// ErrBannedKey is returned if the read/write key is prefixed by any banned prefix.
+	// ErrBannedKey is returned if the read/write key belongs to any banned namespace.
 	ErrBannedKey = errors.New("Key is using the banned prefix")
 
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
@@ -79,8 +79,8 @@ var (
 	ErrManagedTxn = errors.New(
 		"Invalid API request. Not allowed to perform this action using ManagedDB")
 
-	// ErrNamespaceMode is returned if the user tries to use an API which isn't allowed when
-	// DB is not open in NamespaceMode
+	// ErrNamespaceMode is returned if the user tries to use an API which is allowed only when
+	// NamespaceOffset is non-negative.
 	ErrNamespaceMode = errors.New(
 		"Invalid API request. Not allowed to perform this action when NamespaceMode is not set.")
 
