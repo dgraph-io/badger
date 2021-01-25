@@ -2471,3 +2471,44 @@ func TestIterateWithBanned(t *testing.T) {
 		validate(IteratorOptions{Reverse: true, AllVersions: true}, 25*N*V-1, 20*N*V)
 	})
 }
+
+// A basic test that checks if the DB works even if user is not using the DefaultOptions.
+func TestBannedAtZeroOffset(t *testing.T) {
+	opt := getTestOptions("")
+	// When DefaultOptions is not used, NamespaceOffset will be set to 0.
+	opt.NamespaceOffset = 0
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		require.Equal(t, 0, db.opt.NamespaceOffset)
+		err := db.Update(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+				if err := txn.SetEntry(entry); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+
+		err = db.View(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+				if err != nil {
+					return err
+				}
+
+				expected := []byte(fmt.Sprintf("val%d", i))
+				if err := item.Value(func(val []byte) error {
+					require.Equal(t, expected, val,
+						"Invalid value for key %q. expected: %q, actual: %q",
+						item.Key(), expected, val)
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
