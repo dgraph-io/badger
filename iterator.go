@@ -330,6 +330,7 @@ type IteratorOptions struct {
 	// prefix are picked based on their range of keys.
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
+	SinceTs     uint64 // Only read data that has version >= SinceTs.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -342,6 +343,10 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 }
 
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
+	// Ignore this table if its max version is less than the sinceTs.
+	if t.MaxVersion() < opt.SinceTs {
+		return false
+	}
 	if len(opt.Prefix) == 0 {
 		return true
 	}
@@ -391,6 +396,9 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	var out []*table.Table
 	hash := y.Hash(opt.Prefix)
 	for _, t := range filtered {
+		if t.MaxVersion() < opt.SinceTs {
+			continue
+		}
 		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
 		// stop. This is an IMPORTANT optimization, just considering how often we call
 		// NewKeyIterator.
@@ -610,7 +618,8 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	if version > it.readTs {
+	// Ignore everything that is above the readTs and below the sinceTs.
+	if version > it.readTs || version < it.opt.SinceTs {
 		mi.Next()
 		return false
 	}

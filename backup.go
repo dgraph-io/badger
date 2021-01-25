@@ -48,6 +48,7 @@ const flushThreshold = 100 << 20
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
 	stream.LogPrefix = "DB.Backup"
+	stream.SinceTs = since
 	return stream.Backup(w, since)
 }
 
@@ -66,11 +67,6 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 		for ; itr.Valid(); itr.Next() {
 			item := itr.Item()
 			if !bytes.Equal(item.Key(), key) {
-				return list, nil
-			}
-			if item.Version() < since {
-				// Ignore versions less than given timestamp, or skip older
-				// versions of the given key.
 				return list, nil
 			}
 
