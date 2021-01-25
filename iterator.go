@@ -367,48 +367,43 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // pickTables picks the necessary table for the iterator. This function also assumes
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
-	if len(opt.Prefix) == 0 {
-		if opt.SinceTs == 0 {
-			out := make([]*table.Table, len(all))
-			copy(out, all)
-			return out
-		}
-		out := make([]*table.Table, 0, len(all))
-		for _, t := range all {
+	allCopy := make([]*table.Table, len(all))
+	copy(allCopy, all)
+	if opt.SinceTs > 0 {
+		tmp := allCopy[:0]
+		for _, t := range allCopy {
 			if t.MaxVersion() < opt.SinceTs {
 				continue
 			}
-			out = append(out, t)
+			tmp = append(tmp, t)
 		}
-		return out
+		allCopy = tmp
 	}
-	sIdx := sort.Search(len(all), func(i int) bool {
+	if len(opt.Prefix) == 0 {
+		return allCopy
+	}
+	sIdx := sort.Search(len(allCopy), func(i int) bool {
 		// table.Biggest >= opt.prefix
 		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
-		return opt.compareToPrefix(all[i].Biggest()) >= 0
+		return opt.compareToPrefix(allCopy[i].Biggest()) >= 0
 	})
-	if sIdx == len(all) {
+	if sIdx == len(allCopy) {
 		// Not found.
 		return []*table.Table{}
 	}
 
-	filtered := all[sIdx:]
+	filtered := allCopy[sIdx:]
 	if !opt.prefixIsKey {
 		eIdx := sort.Search(len(filtered), func(i int) bool {
 			return opt.compareToPrefix(filtered[i].Smallest()) > 0
 		})
-		out := make([]*table.Table, len(filtered[:eIdx]))
-		copy(out, filtered[:eIdx])
-		return out
+		return filtered[:eIdx]
 	}
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
-	var out []*table.Table
 	hash := y.Hash(opt.Prefix)
+	out := filtered[:0]
 	for _, t := range filtered {
-		if t.MaxVersion() < opt.SinceTs {
-			continue
-		}
 		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
 		// stop. This is an IMPORTANT optimization, just considering how often we call
 		// NewKeyIterator.
