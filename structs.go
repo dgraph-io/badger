@@ -155,8 +155,8 @@ type Entry struct {
 	meta      byte
 
 	// Fields maintained internally.
-	hlen int                 // Length of the header.
-	vtcr valThreshComparison // value threshold comparison result
+	hlen         int // Length of the header.
+	valThreshold int64
 }
 
 func (e *Entry) isZero() bool {
@@ -164,41 +164,26 @@ func (e *Entry) isZero() bool {
 }
 
 func (e *Entry) estimateSize(threshold int64) int64 {
+	if e.valThreshold == 0 {
+		e.valThreshold = threshold
+	}
 	k := int64(len(e.Key))
 	v := int64(len(e.Value))
-	switch e.vtcr {
-	case Lesser:
-		return k + v + 2
-	case Greater:
-		return k + 12 + 2
-	default:
-		if v < threshold {
-			e.vtcr = Lesser
-			return k + v + 2 // Meta, UserMeta
-		}
-		e.vtcr = Greater
-		return k + 12 + 2
+	if v < e.valThreshold {
+		return k + v + 2 // Meta, UserMeta
 	}
+	return k + 12 + 2
 }
 
 func (e *Entry) skipVlog(threshold int64) bool {
-	v := int64(len(e.Value))
-	switch e.vtcr {
-	case Lesser:
-		return true
-	case Greater:
-		return false
-	default:
-		// Default case has been added here for the completeness. With dynamic value threshold,
-		// Improper use of estimate size and skipVlog can lead to inconsistent result.
-		// Handle the entry struct carefully in those scenarios.
-		if v < threshold {
-			e.vtcr = Lesser
-			return true
-		}
-		e.vtcr = Greater
-		return false
+	if e.valThreshold == 0 {
+		e.valThreshold = threshold
 	}
+	v := int64(len(e.Value))
+	if v < e.valThreshold {
+		return true
+	}
+	return false
 }
 
 func (e Entry) print(prefix string) {

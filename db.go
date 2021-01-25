@@ -116,21 +116,25 @@ func checkAndSetOptions(opt *Options) error {
 	}
 	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
-	//opt.maxValueThreshold = 1024.0
-	opt.maxValueThreshold = math.Min(maxValueThreshold, float64(opt.maxBatchSize))
 
-	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
-	if opt.ValueThreshold > maxValueThreshold {
-		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+	// This is the maximum value, vlogThreshold can have if dynamic thresholding is enabled.
+	opt.maxValueThreshold = math.Min(maxValueThreshold, float64(opt.maxBatchSize))
+	if opt.VLogPercentile < 0.0 || opt.VLogPercentile > 1.0 {
+		return errors.New("vlogPercentile must be within range of 0.0-1.0")
+	}
+
+	// We are limiting opt.MinValueThreshold to maxValueThreshold for now.
+	if opt.MinValueThreshold > maxValueThreshold {
+		return errors.Errorf("Invalid MinValueThreshold, must be less or equal to %d",
 			maxValueThreshold)
 	}
 
-	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
+	// If MinValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if opt.ValueThreshold > opt.maxBatchSize {
+	if opt.MinValueThreshold > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
-			opt.ValueThreshold, opt.maxBatchSize)
+			"reduce opt.MinValueThreshold or increase opt.MaxTableSize.",
+			opt.MinValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
@@ -283,7 +287,7 @@ func Open(opt Options) (*DB, error) {
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
-		db.opt.ValueThreshold = math.MaxInt32
+		db.opt.MinValueThreshold = math.MaxInt32
 	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
@@ -721,7 +725,7 @@ func (db *DB) writeToLSM(b *request) error {
 					// Ensure value pointer flag is removed. Otherwise, the value will fail
 					// to be retrieved during iterator prefetch. `bitValuePointer` is only
 					// known to be set in write to LSM when the entry is loaded from a backup
-					// with lower ValueThreshold and its value was stored in the value log.
+					// with lower MinValueThreshold and its value was stored in the value log.
 					Meta:      entry.meta &^ bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,

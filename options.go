@@ -58,9 +58,9 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	DynamicValueThreshold bool
-	ValueThreshold        int64
-	NumMemtables          int
+	VLogPercentile  float64
+	MinValueThreshold int64
+	NumMemtables      int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
 	BlockSize          int
@@ -159,8 +159,8 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries: 1000000,
 
-		DynamicValueThreshold: false,
-		ValueThreshold:        1 << 10, // 1 KB.
+		VLogPercentile:  0.0,
+		MinValueThreshold: 1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
@@ -192,7 +192,7 @@ const (
 	maxValueThreshold = (1 << 20) // 1 MB
 )
 
-// LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
+// LSMOnlyOptions follows from DefaultOptions, but sets a higher MinValueThreshold
 // so values would be collocated with the LSM tree, with value log largely acting
 // as a write-ahead log only. These options would reduce the disk usage of value
 // log, and make Badger act more like a typical LSM tree.
@@ -202,12 +202,12 @@ func LSMOnlyOptions(path string) Options {
 	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
 	// Setting it to ValueLogMaxEntries to 1000, can generate too many files.
 	// These options are better configured on a usage basis, than broadly here.
-	// The ValueThreshold is the most important setting a user needs to do to
+	// The MinValueThreshold is the most important setting a user needs to do to
 	// achieve a heavier usage of LSM tree.
-	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
+	// NOTE: If a user does not want to set 64KB as the MinValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
 	// values smaller than 1KB to be collocated with the keys in the LSM tree.
-	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
+	return DefaultOptions(path).WithMinValueThreshold(maxValueThreshold /* 1 MB */)
 }
 
 // WithDir returns a new Options value with Dir set to the given value.
@@ -321,25 +321,29 @@ func (opt Options) WithMaxLevels(val int) Options {
 	return opt
 }
 
-// WithValueThreshold returns a new Options value with ValueThreshold set to the given value.
+// WithMinValueThreshold returns a new Options value with MinValueThreshold set to the given value.
 //
-// ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
+// MinValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int64) Options {
-	opt.ValueThreshold = val
+// The default value of MinValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
+func (opt Options) WithMinValueThreshold(val int64) Options {
+	opt.MinValueThreshold = val
 	return opt
 }
 
-// WithDynamicValueThreshold returns a new Options value with DynamicValueThreshold set to true.
+// WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
 //
-// DynamicValueThreshold with true enabled the valueThreshold to be dynamic based on the 1
-// percentile values badger has seen.
+// VLogPercentile with 0 means no dynamic thresholding is enabled
+// Say VLogPercentile with value 0.99 means 99 percentile of value will be put in sst
+// and only 1 percent in vlog.
 //
-// The default value of DynamicValueThreshold is false.
-func (opt Options) WithDynamicValueThreshold() Options {
-	opt.DynamicValueThreshold = true
+// Say VLogPercentile with 1.0 means threshold will be set to
+// Max(max size of value till now, Min(maxValueThreshold, float64(opt.maxBatchSize)))
+//
+// The default value of VLogPercentile is 0.0.
+func (opt Options) WithVLogPercentile(t float64) Options {
+	opt.VLogPercentile = t
 	return opt
 }
 

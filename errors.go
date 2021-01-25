@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// ValueThresholdLimit is the maximum permissible value of opt.ValueThreshold.
+	// ValueThresholdLimit is the maximum permissible value of opt.MinValueThreshold.
 	ValueThresholdLimit = math.MaxUint16 - 16 + 1
 )
 

@@ -268,7 +268,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithSyncWrites(wo.syncWrites).
 		WithCompactL0OnClose(wo.force).
-		WithValueThreshold(wo.valueThreshold).
+		WithMinValueThreshold(wo.valueThreshold).
 		WithNumVersionsToKeep(wo.numVersions).
 		WithBlockCacheSize(wo.blockCacheSize << 20).
 		WithIndexCacheSize(wo.indexCacheSize << 20).

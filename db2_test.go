@@ -60,7 +60,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
-	opt.ValueThreshold = 1 // Force all reads from value log.
+	opt.MinValueThreshold = 1 // Force all reads from value log.
 
 	db, err := Open(opt)
 	require.NoError(t, err)
@@ -366,7 +366,7 @@ func TestBigValues(t *testing.T) {
 		return
 	}
 	opts := DefaultOptions("").
-		WithValueThreshold(1 << 20).
+		WithMinValueThreshold(1 << 20).
 		WithValueLogMaxEntries(100)
 	test := func(t *testing.T, db *DB) {
 		keyCount := 1000
@@ -552,7 +552,7 @@ func TestReadSameVlog(t *testing.T) {
 	t.Run("Test Read Again Plain Text", func(t *testing.T) {
 		opt := getTestOptions("")
 		// Forcing to read from vlog
-		opt.ValueThreshold = 1
+		opt.MinValueThreshold = 1
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			testReadingSameKey(t, db)
 		})
@@ -561,7 +561,7 @@ func TestReadSameVlog(t *testing.T) {
 
 	t.Run("Test Read Again Encryption", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.ValueThreshold = 1
+		opt.MinValueThreshold = 1
 		// Generate encryption key.
 		eKey := make([]byte, 32)
 		_, err := rand.Read(eKey)
@@ -587,7 +587,7 @@ func TestL0GCBug(t *testing.T) {
 	opts.NumLevelZeroTables = 50
 	opts.NumLevelZeroTablesStall = 51
 	opts.ValueLogMaxEntries = 2
-	opts.ValueThreshold = 2
+	opts.MinValueThreshold = 2
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
 
 	db1, err := Open(opts)
@@ -673,7 +673,7 @@ func TestWindowsDataLoss(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := DefaultOptions(dir).WithSyncWrites(true)
-	opt.ValueThreshold = 32
+	opt.MinValueThreshold = 32
 
 	db, err := Open(opt)
 	require.NoError(t, err)

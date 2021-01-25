@@ -37,8 +37,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
-
-	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32).WithDynamicValueThreshold())
+	kv, _ := Open(getTestOptions(dir).WithMinValueThreshold(32).WithVLogPercentile(0.99))
 	defer kv.Close()
 	log := &kv.vlog
 	for vl := 32; vl <= 1024; vl = vl + 4 {
@@ -80,7 +79,7 @@ func TestValueBasic(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
+	kv, _ := Open(getTestOptions(dir).WithMinValueThreshold(32))
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -621,7 +620,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 	// Create skeleton files.
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	opts.ValueThreshold = 32
+	opts.MinValueThreshold = 32
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -1067,7 +1066,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
-		opt.ValueThreshold = 32
+		opt.MinValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
@@ -1096,7 +1095,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
-		opt.ValueThreshold = 32
+		opt.MinValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
@@ -1203,7 +1202,7 @@ func TestValueLogMeta(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	opt := getTestOptions(dir).WithValueThreshold(16)
+	opt := getTestOptions(dir).WithMinValueThreshold(16)
 	db, _ := Open(opt)
 	defer db.Close()
 	txn := db.NewTransaction(true)

@@ -69,6 +69,8 @@ var errDeleteVlogFile = errors.New("Delete vlog file")
 
 type logEntry func(e Entry, vp valuePointer) error
 
+type ReqValSize []int64
+
 type safeRead struct {
 	k []byte
 	v []byte
@@ -439,10 +441,6 @@ func (vlog *valueLog) dropAll() (int, error) {
 }
 
 func (db *DB) valueThreshold() int64 {
-	if db.threshold == nil {
-		return db.opt.ValueThreshold
-	}
-
 	return atomic.LoadInt64(&db.threshold.valueThreshold)
 }
 
@@ -844,6 +842,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		return nil
 	}
 
+	valueSizes := make(ReqValSize, 0)
 	buf := new(bytes.Buffer)
 	for i := range reqs {
 		b := reqs[i]
@@ -853,6 +852,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			buf.Reset()
 
 			e := b.Entries[j]
+			valueSizes = append(valueSizes, int64(len(e.Value)))
 			if e.skipVlog(vlog.db.valueThreshold()) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
@@ -889,7 +889,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
-		vlog.db.threshold.update(b)
+		vlog.db.threshold.update(valueSizes)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
@@ -1108,23 +1108,20 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 }
 
 type vlogThreshold struct {
+	percentile     float64
 	valueThreshold int64
-	valueCh        chan *request
+	valueCh        chan ReqValSize
 	closer         *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics *z.HistogramData
 }
 
 func initVlogThreshold(opt *Options) *vlogThreshold {
-	if !opt.DynamicValueThreshold {
-		return nil
-	}
-
 	getBounds := func() []float64 {
 		mxbd := opt.maxValueThreshold
-		mnbd := float64(opt.ValueThreshold)
-		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
-		size := math.Min(mxbd-mnbd, 1024.0)
+		mnbd := float64(opt.MinValueThreshold)
+		y.AssertTruef(mxbd >= mnbd, "maximum threshold bound is less than the min threshold")
+		size := math.Min(mxbd-mnbd+1, 1024.0)
 		bdstp := (mxbd - mnbd) / size
 		bounds := make([]float64, int64(size))
 		for i := range bounds {
@@ -1134,54 +1131,45 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 			}
 			if i == int(size-1) {
 				bounds[i] = mxbd
+				continue
 			}
 			bounds[i] = bounds[i-1] + bdstp
 		}
 		return bounds
 	}
-
 	return &vlogThreshold{
-		valueThreshold: opt.ValueThreshold,
-		valueCh:        make(chan *request, 1000),
+		percentile:     opt.VLogPercentile,
+		valueThreshold: opt.MinValueThreshold,
+		valueCh:        make(chan ReqValSize, 1000),
 		closer:         z.NewCloser(1),
 		vlMetrics:      z.NewHistogramData(getBounds()),
 	}
 }
 
-func (v *vlogThreshold) update(request *request) {
-	if v == nil {
-		return
-	}
-	v.valueCh <- request
+func (v *vlogThreshold) update(sizes ReqValSize) {
+	v.valueCh <- sizes
 }
 
 func (v *vlogThreshold) close() {
-	if v == nil {
-		return
-	}
 	v.closer.SignalAndWait()
 }
 
 func (v *vlogThreshold) listenForValueThresholdUpdate() {
-	if v == nil {
-		return
-	}
-
 	defer v.closer.Done()
 	for {
 		select {
 		case <-v.closer.HasBeenClosed():
 			return
 		case val := <-v.valueCh:
-			if val == nil || val.Entries == nil {
+			if val == nil {
 				continue
 			}
-			for _, e := range val.Entries {
-				v.vlMetrics.Update(int64(len(e.Value)))
+			for _, e := range val {
+				v.vlMetrics.Update(e)
 			}
 			// we are making it to get 99 percentile so that only values
 			// in range of 1 percentile will make it to the value log
-			p := int64(v.vlMetrics.Percentile(0.99))
+			p := int64(v.vlMetrics.Percentile(v.percentile))
 			vt := atomic.LoadInt64(&v.valueThreshold)
 			if vt != p {
 				// v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
