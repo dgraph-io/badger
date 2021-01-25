@@ -98,6 +98,9 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
+	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
+	NamespaceOffset int
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -160,6 +163,7 @@ func DefaultOptions(path string) Options {
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
+		NamespaceOffset:               -1,
 	}
 }
 
@@ -573,6 +577,16 @@ func (opt Options) WithIndexCacheSize(size int64) Options {
 // The default value of Detect conflicts is True.
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
+	return opt
+}
+
+// WithNamespaceOffset returns a new Options value with NamespaceOffset set to the given value. DB
+// will expect the namespace in each key at the 8 bytes starting from NamespaceOffset. A negative
+// value means that namespace is not stored in the key.
+//
+// The default value for NamespaceOffset is -1.
+func (opt Options) WithNamespaceOffset(offset int) Options {
+	opt.NamespaceOffset = offset
 	return opt
 }
 

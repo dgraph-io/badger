@@ -43,8 +43,9 @@ import (
 )
 
 var (
-	badgerPrefix = []byte("!badger!")    // Prefix for internal keys used by badger.
-	txnKey       = []byte("!badger!txn") // For indicating end of entries in txn.
+	badgerPrefix = []byte("!badger!")       // Prefix for internal keys used by badger.
+	txnKey       = []byte("!badger!txn")    // For indicating end of entries in txn.
+	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces.
 )
 
 const (
@@ -59,6 +60,34 @@ type closers struct {
 	valueGC     *z.Closer
 	pub         *z.Closer
 	cacheHealth *z.Closer
+}
+
+type lockedKeys struct {
+	sync.RWMutex
+	keys map[uint64]struct{}
+}
+
+func (lk *lockedKeys) add(key uint64) {
+	lk.Lock()
+	defer lk.Unlock()
+	lk.keys[key] = struct{}{}
+}
+
+func (lk *lockedKeys) has(key uint64) bool {
+	lk.RLock()
+	defer lk.RUnlock()
+	_, ok := lk.keys[key]
+	return ok
+}
+
+func (lk *lockedKeys) all() []uint64 {
+	lk.RLock()
+	defer lk.RUnlock()
+	keys := make([]uint64, 0, len(lk.keys))
+	for key := range lk.keys {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -89,7 +118,8 @@ type DB struct {
 	blockWrites int32
 	isClosed    uint32
 
-	orc *oracle
+	orc              *oracle
+	bannedNamespaces *lockedKeys
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -210,16 +240,17 @@ func Open(opt Options) (*DB, error) {
 	}()
 
 	db := &DB{
-		imm:           make([]*memTable, 0, opt.NumMemtables),
-		flushChan:     make(chan flushTask, opt.NumMemtables),
-		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           opt,
-		manifest:      manifestFile,
-		dirLockGuard:  dirLockGuard,
-		valueDirGuard: valueDirLockGuard,
-		orc:           newOracle(opt),
-		pub:           newPublisher(),
-		allocPool:     z.NewAllocatorPool(8),
+		imm:              make([]*memTable, 0, opt.NumMemtables),
+		flushChan:        make(chan flushTask, opt.NumMemtables),
+		writeCh:          make(chan *request, kvWriteChCapacity),
+		opt:              opt,
+		manifest:         manifestFile,
+		dirLockGuard:     dirLockGuard,
+		valueDirGuard:    valueDirLockGuard,
+		orc:              newOracle(opt),
+		pub:              newPublisher(),
+		allocPool:        z.NewAllocatorPool(8),
+		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -343,6 +374,10 @@ func Open(opt Options) (*DB, error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
+	if err := db.initBannedNamespaces(); err != nil {
+		return db, errors.Wrapf(err, "While setting banned keys")
+	}
+
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
@@ -358,6 +393,26 @@ func Open(opt Options) (*DB, error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
+func (db *DB) initBannedNamespaces() error {
+	if db.opt.NamespaceOffset < 0 {
+		return nil
+	}
+	return db.View(func(txn *Txn) error {
+		iopts := DefaultIteratorOptions
+		iopts.Prefix = bannedNsKey
+		iopts.PrefetchValues = false
+		iopts.InternalAccess = true
+		itr := txn.NewIterator(iopts)
+		defer itr.Close()
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			key := y.BytesToU64(itr.Item().Key()[len(bannedNsKey):])
+			db.bannedNamespaces.add(key)
+		}
+		return nil
+	})
 }
 
 func (db *DB) MaxVersion() uint64 {
@@ -1719,6 +1774,49 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 		}
 	}
 	return filtered, nil
+}
+
+// Checks if the key is banned. Returns the respective error if the key belongs to any of the banned
+// namepspaces. Else it returns nil.
+func (db *DB) isBanned(key []byte) error {
+	if db.opt.NamespaceOffset < 0 {
+		return nil
+	}
+	if len(key) <= db.opt.NamespaceOffset+8 {
+		return nil
+	}
+	if db.bannedNamespaces.has(y.BytesToU64(key[db.opt.NamespaceOffset:])) {
+		return ErrBannedKey
+	}
+	return nil
+}
+
+// BanNamespace bans a namespace. Read/write to keys belonging to any of such namespace is denied.
+func (db *DB) BanNamespace(ns uint64) error {
+	if db.opt.NamespaceOffset < 0 {
+		return ErrNamespaceMode
+	}
+	db.opt.Infof("Banning namespace: %d", ns)
+	// First set the banned namespaces in DB and then update the in-memory structure.
+	key := y.KeyWithTs(append(bannedNsKey, y.U64ToBytes(ns)...), 1)
+	entry := []*Entry{{
+		Key:   key,
+		Value: nil,
+	}}
+	req, err := db.sendToWriteCh(entry)
+	if err != nil {
+		return err
+	}
+	if err := req.Wait(); err != nil {
+		return err
+	}
+	db.bannedNamespaces.add(ns)
+	return nil
+}
+
+// BannedNamespaces returns the list of prefixes banned for DB.
+func (db *DB) BannedNamespaces() []uint64 {
+	return db.bannedNamespaces.all()
 }
 
 // KVList contains a list of key-value pairs.

@@ -299,6 +299,44 @@ func BytesToU32Slice(b []byte) []uint32 {
 	return u32s
 }
 
+// U64ToBytes converts the given Uint64 to bytes
+func U64ToBytes(v uint64) []byte {
+	var uBuf [8]byte
+	binary.BigEndian.PutUint64(uBuf[:], v)
+	return uBuf[:]
+}
+
+// BytesToU64 converts the given byte slice to uint64
+func BytesToU64(b []byte) uint64 {
+	return binary.BigEndian.Uint64(b)
+}
+
+// U64SliceToBytes converts the given Uint64 slice to byte slice
+func U64SliceToBytes(u64s []uint64) []byte {
+	if len(u64s) == 0 {
+		return nil
+	}
+	var b []byte
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	hdr.Len = len(u64s) * 8
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&u64s[0]))
+	return b
+}
+
+// BytesToU64Slice converts the given byte slice to uint64 slice
+func BytesToU64Slice(b []byte) []uint64 {
+	if len(b) == 0 {
+		return nil
+	}
+	var u64s []uint64
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&u64s))
+	hdr.Len = len(b) / 8
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
+	return u64s
+}
+
 // page struct contains one underlying buffer.
 type page struct {
 	buf []byte

@@ -381,6 +381,10 @@ func (txn *Txn) modify(e *Entry) error {
 		return exceedsSize("Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	}
 
+	if err := txn.db.isBanned(e.Key); err != nil {
+		return err
+	}
+
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}
@@ -442,6 +446,10 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
 		return nil, ErrDiscardedTxn
+	}
+
+	if err := txn.db.isBanned(key); err != nil {
+		return nil, err
 	}
 
 	item = new(Item)
