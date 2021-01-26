@@ -135,14 +135,6 @@ func (h *header) DecodeFrom(reader *hashReader) (int, error) {
 	return reader.bytesRead, nil
 }
 
-type valThreshComparison uint8
-
-const (
-	Unknown valThreshComparison = iota
-	Lesser
-	Greater
-)
-
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
 // the user to set data.
 type Entry struct {
@@ -179,8 +171,7 @@ func (e *Entry) skipVlog(threshold int64) bool {
 	if e.valThreshold == 0 {
 		e.valThreshold = threshold
 	}
-	v := int64(len(e.Value))
-	if v < e.valThreshold {
+	if int64(len(e.Value)) < e.valThreshold {
 		return true
 	}
 	return false

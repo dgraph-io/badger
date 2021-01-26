@@ -1170,8 +1170,7 @@ func (v *vlogThreshold) listenForValueThresholdUpdate() {
 			// we are making it to get 99 percentile so that only values
 			// in range of 1 percentile will make it to the value log
 			p := int64(v.vlMetrics.Percentile(v.percentile))
-			vt := atomic.LoadInt64(&v.valueThreshold)
-			if vt != p {
+			if atomic.LoadInt64(&v.valueThreshold) != p {
 				// v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
 				atomic.StoreInt64(&v.valueThreshold, p)
 			}
