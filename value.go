@@ -842,12 +842,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 		return nil
 	}
 
-	valueSizes := make(ReqValSize, 0)
 	buf := new(bytes.Buffer)
 	for i := range reqs {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
 		var written, bytesWritten int
+		valueSizes := make(ReqValSize, 0, len(b.Entries))
 		for j := range b.Entries {
 			buf.Reset()
 
@@ -1167,8 +1167,9 @@ func (v *vlogThreshold) listenForValueThresholdUpdate() {
 			for _, e := range val {
 				v.vlMetrics.Update(e)
 			}
-			// we are making it to get 99 percentile so that only values
-			// in range of 1 percentile will make it to the value log
+			// we are making it to get Options.VlogPercentile so that values with sizes
+			// in range of Options.VlogPercentile will make it to the LSM tree and rest to the
+			// value log file.
 			p := int64(v.vlMetrics.Percentile(v.percentile))
 			if atomic.LoadInt64(&v.valueThreshold) != p {
 				// v.opt.Infof("updating value threshold from: %d to: %d", vt, p)

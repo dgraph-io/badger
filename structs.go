@@ -164,7 +164,7 @@ func (e *Entry) estimateSize(threshold int64) int64 {
 	if v < e.valThreshold {
 		return k + v + 2 // Meta, UserMeta
 	}
-	return k + 12 + 2
+	return k + 12 + 2 // 12 for ValuePointer, 2 for metas.
 }
 
 func (e *Entry) skipVlog(threshold int64) bool {
