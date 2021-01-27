@@ -19,7 +19,7 @@ package badger
 import (
 	"encoding/binary"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -40,7 +40,7 @@ type discardStats struct {
 const discardFname string = "DISCARD"
 
 func initDiscardStats(opt Options) (*discardStats, error) {
-	fname := path.Join(opt.ValueDir, discardFname)
+	fname := filepath.Join(opt.ValueDir, discardFname)
 
 	// 1GB file can store 67M discard entries. Each entry is 16 bytes.
 	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR, 1<<20)

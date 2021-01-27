@@ -2287,3 +2287,228 @@ func TestOpenDBReadOnly(t *testing.T) {
 	require.Equal(t, 20, count)
 	require.NoError(t, db.Close())
 }
+
+func TestBannedPrefixes(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err, "temp dir for badger count not be created")
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir).WithNamespaceOffset(3)
+	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
+	// restart.
+	opt.ValueThreshold = 0
+	opt.ValueLogMaxEntries = 2
+	// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
+	initialBytes := make([]byte, opt.NamespaceOffset)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(db.vlog.filesMap))
+
+	var keys [][]byte
+	var allPrefixes []uint64 = []uint64{1234, 3456, 5678, 7890, 901234}
+	for _, p := range allPrefixes {
+		prefix := y.U64ToBytes(p)
+		for i := 0; i < 10; i++ {
+			// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
+			key := []byte(fmt.Sprintf("%s%s-key%02d", initialBytes, prefix, i))
+			keys = append(keys, key)
+		}
+	}
+
+	bannedPrefixes := make(map[uint64]struct{})
+	isBanned := func(key []byte) bool {
+		prefix := y.BytesToU64(key[3:])
+		if _, ok := bannedPrefixes[prefix]; ok {
+			return true
+		}
+		return false
+	}
+
+	validate := func() {
+		// Validate read/write.
+		for _, key := range keys {
+			txn := db.NewTransaction(true)
+			_, rerr := txn.Get(key)
+			werr := txn.Set(key, []byte("value"))
+			txn.Discard()
+			if isBanned(key) {
+				require.Equal(t, ErrBannedKey, rerr)
+				require.Equal(t, ErrBannedKey, werr)
+			} else {
+				require.NoError(t, rerr)
+				require.NoError(t, werr)
+			}
+		}
+	}
+
+	for _, key := range keys {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry([]byte(key), []byte("value")))
+		}))
+	}
+	validate()
+
+	// Ban a couple of prefix and validate that we should not be able to read/write them.
+	require.NoError(t, db.BanNamespace(1234))
+	bannedPrefixes[1234] = struct{}{}
+	validate()
+
+	require.NoError(t, db.BanNamespace(5678))
+	bannedPrefixes[5678] = struct{}{}
+	validate()
+
+	require.Greater(t, len(db.vlog.filesMap), 1)
+	require.NoError(t, db.Close())
+
+	db, err = Open(opt)
+	require.NoError(t, err)
+	validate()
+	require.NoError(t, db.Close())
+}
+
+// Tests that the iterator skips the banned prefixes. Sets keys with multiple versions in
+// different namespaces and maintains a sorted list of those keys in-memory.
+// Then, ban few prefixes and iterate over the DB and match it with the corresponding keys from the
+// in-memory list. Simulate the skipping in in-memory list as well.
+func TestIterateWithBanned(t *testing.T) {
+	opt := DefaultOptions("").WithNamespaceOffset(3)
+	opt.NumVersionsToKeep = math.MaxInt64
+
+	// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
+	initialBytes := make([]byte, opt.NamespaceOffset)
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		bkey := func(prefix uint64, i int) []byte {
+			return []byte(fmt.Sprintf("%s%s-%04d", initialBytes, y.U64ToBytes(prefix), i))
+		}
+
+		N := 100
+		V := 3
+
+		// Generate 26*N keys, each with V versions (versions set by txnSet())
+		var keys [][]byte
+		for i := 'a'; i <= 'z'; i++ {
+			for j := 0; j < N; j++ {
+				for v := 0; v < V; v++ {
+					keys = append(keys, bkey(uint64(i*1000), j))
+				}
+			}
+		}
+		for _, key := range keys {
+			txnSet(t, db, key, key, 0)
+		}
+
+		// Validate that we don't see the banned keys in iterating.
+		// Pass it the iterator options, idx to start from in the in-memory list, and the number of
+		// keys we expect to see through iteration.
+		validate := func(iopts IteratorOptions, idx, expected int) {
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			itr := txn.NewIterator(iopts)
+			defer itr.Close()
+			incIdx := func() {
+				n := 1
+				// If AllVersions is set, then we need to skip V keys.
+				if !iopts.AllVersions {
+					n *= V
+				}
+				// If Reverse iterating, then decrement the index of in-memory list.
+				if iopts.Reverse {
+					idx -= n
+				} else {
+					idx += n
+				}
+			}
+			count := 0
+			for itr.Seek(itr.opt.Prefix); itr.Valid(); itr.Next() {
+				// Iterator should skip the banned keys, so should we.
+				for db.isBanned(keys[idx]) != nil {
+					incIdx()
+				}
+				count++
+				require.Equalf(t, keys[idx], itr.Item().Key(), "count:%d", count)
+				incIdx()
+			}
+			require.Equal(t, expected, count)
+		}
+
+		getIterablePrefix := func(i int) []byte {
+			return []byte(fmt.Sprintf("%s%s", initialBytes, y.U64ToBytes(uint64(i*1000))))
+		}
+		validate(IteratorOptions{}, 0, 26*N)
+		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 26*N*V)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
+
+		require.NoError(t, db.BanNamespace(uint64('a'*1000)))
+		validate(IteratorOptions{}, 1*N*V, 25*N)
+		validate(IteratorOptions{AllVersions: true}, 1*N*V, 25*N*V)
+		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 25*N*V)
+
+		require.NoError(t, db.BanNamespace(uint64('b'*1000)))
+		validate(IteratorOptions{}, 2*N*V, 24*N)
+		validate(IteratorOptions{AllVersions: true}, 2*N*V, 24*N*V)
+
+		require.NoError(t, db.BanNamespace(uint64('d'*1000)))
+		validate(IteratorOptions{}, 2*N*V, 23*N)
+		validate(IteratorOptions{AllVersions: true}, 2*N*V, 23*N*V)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f')}, 5*N*V, N)
+		validate(IteratorOptions{Prefix: getIterablePrefix('f'), AllVersions: true}, 5*N*V, N*V)
+
+		require.NoError(t, db.BanNamespace(uint64('g')*1000))
+		validate(IteratorOptions{AllVersions: true}, 2*N*V, 22*N*V)
+
+		require.NoError(t, db.BanNamespace(uint64('r'*1000)))
+		validate(IteratorOptions{}, 2*N*V, 21*N)
+		validate(IteratorOptions{Reverse: true, AllVersions: true}, 26*N*V-1, 21*N*V)
+
+		// Iterate over the banned prefix. Passing -1 as we don't expect to access keys.
+		validate(IteratorOptions{Prefix: getIterablePrefix('g')}, -1, 0)
+		validate(IteratorOptions{Prefix: getIterablePrefix('g'), Reverse: true, AllVersions: true},
+			-1, 0)
+
+		require.NoError(t, db.BanNamespace(uint64('z'*1000)))
+		validate(IteratorOptions{}, 2*N*V, 20*N)
+		validate(IteratorOptions{AllVersions: true}, 2*N*V, 20*N*V)
+		validate(IteratorOptions{Reverse: true, AllVersions: true}, 25*N*V-1, 20*N*V)
+	})
+}
+
+// A basic test that checks if the DB works even if user is not using the DefaultOptions.
+func TestBannedAtZeroOffset(t *testing.T) {
+	opt := getTestOptions("")
+	// When DefaultOptions is not used, NamespaceOffset will be set to 0.
+	opt.NamespaceOffset = 0
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		require.Equal(t, 0, db.opt.NamespaceOffset)
+		err := db.Update(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+				if err := txn.SetEntry(entry); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+
+		err = db.View(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+				if err != nil {
+					return err
+				}
+
+				expected := []byte(fmt.Sprintf("val%d", i))
+				if err := item.Value(func(val []byte) error {
+					require.Equal(t, expected, val,
+						"Invalid value for key %q. expected: %q, actual: %q",
+						item.Key(), expected, val)
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}

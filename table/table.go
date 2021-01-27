@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -767,7 +766,7 @@ func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 
 // ParseFileID reads the file id out of a filename.
 func ParseFileID(name string) (uint64, bool) {
-	name = path.Base(name)
+	name = filepath.Base(name)
 	if !strings.HasSuffix(name, fileSuffix) {
 		return 0, false
 	}
