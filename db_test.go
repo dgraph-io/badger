@@ -2296,7 +2296,7 @@ func TestBannedPrefixes(t *testing.T) {
 	opt := getTestOptions(dir).WithNamespaceOffset(3)
 	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
 	// restart.
-	opt.ValueThreshold = 0
+	opt.MinValueThreshold = 0
 	opt.ValueLogMaxEntries = 2
 	// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
 	initialBytes := make([]byte, opt.NamespaceOffset)
