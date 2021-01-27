@@ -7,7 +7,7 @@ go 1.12
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20210106133825-0120d284f296
+	github.com/dgraph-io/ristretto v0.0.4-0.20210127133938-1b848e7192b2
 	github.com/dustin/go-humanize v1.0.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.3.1
@@ -20,6 +20,6 @@ require (
 	github.com/stretchr/testify v1.4.0
 	go.opencensus.io v0.22.5
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974
-	golang.org/x/sys v0.0.0-20210105210732-16f7687f5001
+	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )

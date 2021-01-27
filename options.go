@@ -58,7 +58,7 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	VLogPercentile  float64
+	VLogPercentile    float64
 	MinValueThreshold int64
 	NumMemtables      int
 	// Changing BlockSize across DB runs will not break badger. The block size is
@@ -162,7 +162,7 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries: 1000000,
 
-		VLogPercentile:  0.0,
+		VLogPercentile:    0.0,
 		MinValueThreshold: 1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
@@ -338,12 +338,14 @@ func (opt Options) WithMinValueThreshold(val int64) Options {
 
 // WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
 //
-// VLogPercentile with 0 means no dynamic thresholding is enabled
-// Say VLogPercentile with value 0.99 means 99 percentile of value will be put in sst
-// and only 1 percent in vlog.
+// VLogPercentile with 0.0 means no dynamic thresholding is enabled.
+// MinThreshold value will always act as the value threshold.
 //
-// Say VLogPercentile with 1.0 means threshold will be set to
-// Max(max size of value till now, Min(maxValueThreshold, float64(opt.maxBatchSize)))
+// VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
+// and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
+// [MinValueThreshold, Options.maxValueThreshold]
+//
+// Say VLogPercentile with 1.0 means threshold will eventually sets too Options.maxValueThreshold
 //
 // The default value of VLogPercentile is 0.0.
 func (opt Options) WithVLogPercentile(t float64) Options {
