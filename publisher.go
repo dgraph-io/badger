@@ -85,21 +85,22 @@ func (p *publisher) publishUpdates(reqs requests) {
 	for _, req := range reqs {
 		for _, e := range req.Entries {
 			ids := p.indexer.Get(e.Key)
-			if len(ids) > 0 {
-				k := y.SafeCopy(nil, e.Key)
-				kv := &pb.KV{
-					Key:       y.ParseKey(k),
-					Value:     y.SafeCopy(nil, e.Value),
-					Meta:      []byte{e.UserMeta},
-					ExpiresAt: e.ExpiresAt,
-					Version:   y.ParseTs(k),
+			if len(ids) == 0 {
+				continue
+			}
+			k := y.SafeCopy(nil, e.Key)
+			kv := &pb.KV{
+				Key:       y.ParseKey(k),
+				Value:     y.SafeCopy(nil, e.Value),
+				Meta:      []byte{e.UserMeta},
+				ExpiresAt: e.ExpiresAt,
+				Version:   y.ParseTs(k),
+			}
+			for id := range ids {
+				if _, ok := batchedUpdates[id]; !ok {
+					batchedUpdates[id] = &pb.KVList{}
 				}
-				for id := range ids {
-					if _, ok := batchedUpdates[id]; !ok {
-						batchedUpdates[id] = &pb.KVList{}
-					}
-					batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, kv)
-				}
+				batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, kv)
 			}
 		}
 	}

@@ -79,3 +79,8 @@ message DataKey {
   bytes  iv         = 3;
   int64  created_at = 4;
 }
+
+message Match {
+    bytes prefix = 1;
+    string ignore_bytes = 2; // Comma separated with dash to represent ranges "1, 2-3, 4-7, 9"
+}
