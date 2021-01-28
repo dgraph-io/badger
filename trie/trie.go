@@ -55,7 +55,8 @@ func NewTrie() *Trie {
 	}
 }
 
-// returns true for bytes which need to be ignored.
+// parseIgnoreBytes would parse the ignore string, and convert it into a list of bools, where
+// bool[idx] = true implies that key[idx] can be ignored during comparison.
 func parseIgnoreBytes(ig string) ([]bool, error) {
 	var out []bool
 	if ig == "" {
@@ -116,8 +117,8 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 // used to denote a range. Valid example is "3, 5-8, 10, 12-15". Length of IgnoreBytes does not need
 // to match the length of the Prefix passed.
 //
-// Consider a prefix = "aaaa". If the IgnoreBytes is set to "0, 2", then along with key "aaaa...", a
-// key "baba..." would also match.
+// Consider a prefix = "aaaa". If the IgnoreBytes is set to "0, 2", then along with key "aaaa...",
+// a key "baba..." would also match.
 func (t *Trie) AddMatch(m pb.Match, id uint64) error {
 	return t.fix(m, id, set)
 }
@@ -143,6 +144,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 			child = curNode.ignore
 			if child == nil {
 				if op == del {
+					// No valid node found for delete operation. Return immediately.
 					return nil
 				}
 				child = newNode()
@@ -152,6 +154,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 			child = curNode.children[byt]
 			if child == nil {
 				if op == del {
+					// No valid node found for delete operation. Return immediately.
 					return nil
 				}
 				child = newNode()
@@ -164,6 +167,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 	// We only need to add the id to the last node of the given prefix.
 	if op == set {
 		curNode.ids = append(curNode.ids, id)
+
 	} else if op == del {
 		out := curNode.ids[:0]
 		for _, cid := range curNode.ids {
