@@ -1828,13 +1828,13 @@ type KVList = pb.KVList
 // This function blocks until the given context is done or an error occurs.
 // The given function will be called with a new KVList containing the modified keys and the
 // corresponding values.
-func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes ...[]byte) error {
+func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, ignore string, prefixes ...[]byte) error {
 	if cb == nil {
 		return ErrNilCallback
 	}
 
 	c := z.NewCloser(1)
-	recvCh, id := db.pub.newSubscriber(c, prefixes...)
+	recvCh, id := db.pub.newSubscriber(c, ignore, prefixes...)
 	slurp := func(batch *pb.KVList) error {
 		for {
 			select {
