@@ -111,6 +111,13 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 	y.Check(t.AddMatch(m, id))
 }
 
+// AddMatch allows you to send in a prefix match, with "holes" in the prefix. The holes are
+// specified via IgnoreBytes in a comma-separated list of indices starting from 0. A dash can be
+// used to denote a range. Valid example is "3, 5-8, 10, 12-15". Length of IgnoreBytes does not need
+// to match the length of the Prefix passed.
+//
+// Consider a prefix = "aaaa". If the IgnoreBytes is set to "0, 2", then along with key "aaaa...", a
+// key "baba..." would also match.
 func (t *Trie) AddMatch(m pb.Match, id uint64) error {
 	return t.fix(m, id, set)
 }
