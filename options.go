@@ -48,6 +48,8 @@ type Options struct {
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
+	// Sets the default Stream.numGo
+	NumGoroutines int
 
 	// Fine tuning options.
 
@@ -125,6 +127,7 @@ func DefaultOptions(path string) Options {
 		TableSizeMultiplier: 2,
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
+		NumGoroutines:       8,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -249,6 +252,12 @@ func (opt Options) WithSyncWrites(val bool) Options {
 // The default value of NumVersionsToKeep is 1.
 func (opt Options) WithNumVersionsToKeep(val int) Options {
 	opt.NumVersionsToKeep = val
+	return opt
+}
+
+// TODO: document
+func (opt Options) WithNumGoroutines(val int) Options {
+	opt.NumGoroutines = val
 	return opt
 }
 
