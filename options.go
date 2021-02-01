@@ -48,7 +48,7 @@ type Options struct {
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
-	// Sets the default Stream.numGo
+	// Sets the Stream.numGo field
 	NumGoroutines int
 
 	// Fine tuning options.
@@ -255,7 +255,9 @@ func (opt Options) WithNumVersionsToKeep(val int) Options {
 	return opt
 }
 
-// TODO: document
+// WithNumGoroutines sets the number of goroutines to be used in Stream.
+//
+// The default value of NumGoroutines is 8.
 func (opt Options) WithNumGoroutines(val int) Options {
 	opt.NumGoroutines = val
 	return opt
