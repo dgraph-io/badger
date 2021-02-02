@@ -548,7 +548,7 @@ function initData() {
 
 function initDateRange() {
     max.date.setHours(0, 0, 0, 0);
-    minDate = new Date(new Date().setDate(max.date.getDate() - 90));
+    minDate = new Date(new Date().setDate(max.date.getDate() - 7));
 }
 
 function initAnnotations() {

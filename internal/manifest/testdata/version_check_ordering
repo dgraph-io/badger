@@ -1,0 +1,215 @@
+check-ordering
+L0
+  a.SET.1-b.SET.2
+----
+OK
+
+check-ordering
+L0
+  a.SET.1-b.SET.2
+  c.SET.3-d.SET.4
+----
+OK
+
+check-ordering
+L0
+  c.SET.3-d.SET.4
+  a.SET.1-b.SET.2
+----
+L0 files 000001 and 000002 are not properly ordered: <#3-#4> vs <#1-#2>
+0.0:
+  000002:[a#1,SET-b#2,SET]
+  000001:[c#3,SET-d#4,SET]
+
+check-ordering
+L0
+  c.SET.3-d.SET.4
+  a.SET.1-b.SET.5
+  e.SET.2-f.SET.7
+  g.SET.6-h.SET.12
+  i.SET.8-j.SET.13
+  b.SET.15-d.SET.15
+  a.SET.14-j.SET.17
+  k.SET.16-n.SET.19
+----
+OK
+
+# Add some ingested SSTables around the 14-19 seqnum cases.
+check-ordering
+L0
+  c.SET.3-d.SET.4
+  a.SET.1-b.SET.5
+  e.SET.2-f.SET.7
+  g.SET.6-h.SET.12
+  i.SET.8-j.SET.13
+  b.SET.15-d.SET.15
+  a.SET.14-j.SET.17
+  m.SET.18-n.SET.18
+  k.SET.16-n.SET.19
+  m.SET.20-n.SET.20
+----
+OK
+
+# Coincident sequence numbers around sstables with overlapping sequence numbers
+# are possible due to flush splitting, so this is acceptable.
+check-ordering
+L0
+  c.SET.3-d.SET.4
+  a.SET.1-b.SET.5
+  e.SET.2-f.SET.7
+  g.SET.6-h.SET.12
+  i.SET.8-j.SET.13
+  b.SET.15-d.SET.15
+  a.SET.15-j.SET.17
+  m.SET.18-n.SET.18
+  k.SET.16-n.SET.19
+  m.SET.20-n.SET.20
+----
+OK
+
+# Ensure that sstables passed in a non-sorted order are detected.
+check-ordering
+L0
+  a.SET.3-d.SET.3
+  a.SET.1-b.SET.2
+----
+L0 files 000001 and 000002 are not properly ordered: <#3-#3> vs <#1-#2>
+0.1:
+  000002:[a#1,SET-b#2,SET]
+0.0:
+  000001:[a#3,SET-d#3,SET]
+
+check-ordering
+L0
+  a.SET.2-d.SET.4
+  a.SET.3-b.SET.3
+----
+L0 files 000001 and 000002 are not properly ordered: <#2-#4> vs <#3-#3>
+0.1:
+  000002:[a#3,SET-b#3,SET]
+0.0:
+  000001:[a#2,SET-d#4,SET]
+
+check-ordering
+L0
+  a.SET.3-d.SET.3
+  a.SET.3-b.SET.3
+----
+OK
+
+check-ordering
+L0
+  a.SET.3-d.SET.3
+  a.SET.3-d.SET.5
+----
+OK
+
+check-ordering
+L0
+  a.SET.4-d.SET.4
+  a.SET.3-d.SET.5
+----
+OK
+
+check-ordering
+L0
+  a.SET.3-d.SET.5
+  a.SET.5-d.SET.5
+----
+OK
+
+check-ordering
+L0
+  a.SET.4-d.SET.4
+  a.SET.5-d.SET.5
+  a.SET.4-d.SET.6
+----
+OK
+
+check-ordering
+L0
+  a.SET.0-d.SET.0
+  a.SET.0-d.SET.0
+  a.SET.0-d.SET.3
+----
+OK
+
+check-ordering
+L1
+  a.SET.1-b.SET.2
+----
+OK
+
+check-ordering
+L1
+  b.SET.1-a.SET.2
+----
+L1 : file 000001 has inconsistent bounds: b#1,SET vs a#2,SET
+1:
+  000001:[b#1,SET-a#2,SET]
+
+check-ordering
+L1
+  a.SET.1-b.SET.2
+  c.SET.3-d.SET.4
+----
+OK
+
+check-ordering
+L1
+  a.SET.1-b.SET.2
+  d.SET.3-c.SET.4
+----
+L1 : file 000002 has inconsistent bounds: d#3,SET vs c#4,SET
+1:
+  000001:[a#1,SET-b#2,SET]
+  000002:[d#3,SET-c#4,SET]
+
+check-ordering
+L1
+  a.SET.1-b.SET.2
+  b.SET.1-d.SET.4
+----
+OK
+
+check-ordering
+L1
+  a.SET.1-b.SET.2
+  b.SET.2-d.SET.4
+----
+L1 files 000001 and 000002 have overlapping ranges: [a#1,SET-b#2,SET] vs [b#2,SET-d#4,SET]
+1:
+  000001:[a#1,SET-b#2,SET]
+  000002:[b#2,SET-d#4,SET]
+
+check-ordering
+L1
+  a.SET.1-c.SET.2
+  b.SET.3-d.SET.4
+----
+L1 files 000001 and 000002 have overlapping ranges: [a#1,SET-c#2,SET] vs [b#3,SET-d#4,SET]
+1:
+  000001:[a#1,SET-c#2,SET]
+  000002:[b#3,SET-d#4,SET]
+
+check-ordering
+L1
+  a.SET.1-c.SET.2
+L2
+  b.SET.3-d.SET.4
+----
+OK
+
+check-ordering
+L1
+  a.SET.1-c.SET.2
+L2
+  b.SET.3-d.SET.4
+  c.SET.5-e.SET.6
+----
+L2 files 000002 and 000003 have overlapping ranges: [b#3,SET-d#4,SET] vs [c#5,SET-e#6,SET]
+1:
+  000001:[a#1,SET-c#2,SET]
+2:
+  000002:[b#3,SET-d#4,SET]
+  000003:[c#5,SET-e#6,SET]

@@ -1,0 +1,70 @@
+build
+000001:10
+000002:20
+000003:30
+----
+open test/000001.sst: file does not exist
+
+check-consistency
+----
+OK
+
+check-consistency
+L0
+  000005:10
+----
+L0: 000005: stat test/000005.sst: file does not exist
+
+check-consistency
+L0
+  000001:10
+----
+L0: 000001: stat test/000001.sst: file does not exist
+
+check-consistency
+L0
+  000001:11
+----
+L0: 000001: stat test/000001.sst: file does not exist
+
+check-consistency redact
+L0
+  000001:11
+----
+L0: 000001: stat ‹×›: file does not exist
+
+check-consistency
+L0
+  000001:10
+L1
+  000002:20
+L2
+  000003:30
+----
+L0: 000001: stat test/000001.sst: file does not exist
+L1: 000002: stat test/000002.sst: file does not exist
+L2: 000003: stat test/000003.sst: file does not exist
+
+check-consistency
+L0
+  000001:11
+L1
+  000002:22
+L2
+  000003:33
+----
+L0: 000001: stat test/000001.sst: file does not exist
+L1: 000002: stat test/000002.sst: file does not exist
+L2: 000003: stat test/000003.sst: file does not exist
+
+check-consistency redact
+L0
+  000001:11
+L1
+  000002:22
+L2
+  000004:30
+----
+L0: 000001: stat ‹×›: file does not exist
+L1: 000002: stat ‹×›: file does not exist
+L2: 000004: stat ‹×›: file does not exist

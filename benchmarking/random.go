@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"pebbleinternal/randvar"
-	"pebbleinternal/rate"
+	"github.com/dgraph.io/badger/internal/randvar"
+	"github.com/dgraph.io/badger/internal/rate"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/rand"

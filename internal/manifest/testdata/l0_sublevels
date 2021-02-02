@@ -1,0 +1,1079 @@
+
+define
+L0
+  000009:a.SET.10-b.SET.10
+  000007:b.SET.6-j.SET.8
+  000003:e.SET.5-j.SET.7
+----
+file count: 3, sublevels: 3, intervals: 5
+flush split keys(2): [b, j]
+0.2: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000009:a#10,1-b#10,1
+0.1: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [1, 3]
+	000007:b#6,1-j#8,1
+0.0: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [3, 3]
+	000003:e#5,1-j#7,1
+compacting file count: 0, base compacting intervals: none
+L0.2:  a---b
+L0.1:     b------------------------j
+L0.0:              e---------------j
+       aa bb cc dd ee ff gg hh ii jj
+
+define no_initialize
+L0.2
+  000009:a.SET.10-b.SET.10
+L0.1
+  000003:e.SET.5-j.SET.7
+L0.0
+  000007:b.SET.6-j.SET.8
+----
+file count: 3, sublevels: 3, intervals: 0
+flush split keys(0): []
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000009:a#10,1-b#10,1
+0.1: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000003:e#5,1-j#7,1
+0.0: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000007:b#6,1-j#8,1
+compacting file count: 0, base compacting intervals: none
+L0.2:  a---b
+L0.1:              e---------------j
+L0.0:     b------------------------j
+       aa bb cc dd ee ff gg hh ii jj
+
+l0-check-ordering
+----
+OK
+
+define no_initialize
+L0.1
+  000009:a.SET.10-b.SET.10
+L0.0
+  000007:b.SET.6-j.SET.8
+  000003:e.SET.5-j.SET.7
+----
+file count: 3, sublevels: 2, intervals: 0
+flush split keys(0): []
+0.1: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000009:a#10,1-b#10,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000007:b#6,1-j#8,1
+	000003:e#5,1-j#7,1
+compacting file count: 0, base compacting intervals: none
+L0.1:  a---b
+L0.0:     b------------------------j e---j
+       aa bb cc dd ee ff gg hh ii jj
+
+l0-check-ordering
+----
+L0.0 files 000007 and 000003 have overlapping ranges: [b#6,SET-j#8,SET] vs [e#5,SET-j#7,SET]
+
+define
+L0
+  000001:a.SET.2-b.SET.3
+  000002:c.SET.3-d.SET.5
+  000003:e.SET.5-f.SET.7
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.10-i.SET.10
+  000010:f.SET.11-g.SET.11
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 5, intervals: 10
+flush split keys(3): [d, f, g]
+0.4: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [5, 6]
+	000010:f#11,1-g#11,1
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [5, 8]
+	000009:f#10,1-i#10,1
+0.2: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [5, 7]
+	000005:f#6,1-h#9,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [4, 5]
+	000003:e#5,1-f#7,1
+0.0: file count: 3, bytes: 768, width (mean, max): 1.3, 2, interval range: [0, 6]
+	000001:a#2,1-b#3,1
+	000002:c#3,1-d#5,1
+	000006:f#4,1-g#5,1
+compacting file count: 0, base compacting intervals: none
+L0.4:                 f---g
+L0.3:                 f---------i
+L0.2:                 f------h
+L0.1:              e---f
+L0.0:  a---b c---d    f---g
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+max-depth-after-ongoing-compactions
+----
+5
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 5
+000006,000003,000005,000009,000010,000001,000002
+seed interval: f-f
+L0.4:                 f+++g
+L0.3:                 f+++++++++i
+L0.2:                 f++++++h
+L0.1:              e+++f
+L0.0:  a+++b c+++d    f+++g
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# SSTables 000001 and 000002 are optional additions to the above compaction, as they
+# overlap with base files that overlap with L0 files in the seed interval.
+# Marking 0002 as compacting should be enough to exclude both from the
+# chosen compaction.
+
+define
+L0
+  000001:a.SET.2-b.SET.3
+  000002:c.SET.3-d.SET.5 intra_l0_compacting
+  000003:e.SET.5-f.SET.7
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.10-i.SET.10
+  000010:f.SET.11-g.SET.11
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 5, intervals: 10
+flush split keys(3): [d, f, g]
+0.4: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [5, 6]
+	000010:f#11,1-g#11,1
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [5, 8]
+	000009:f#10,1-i#10,1
+0.2: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [5, 7]
+	000005:f#6,1-h#9,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [4, 5]
+	000003:e#5,1-f#7,1
+0.0: file count: 3, bytes: 768, width (mean, max): 1.3, 2, interval range: [0, 6]
+	000001:a#2,1-b#3,1
+	000002:c#3,1-d#5,1
+	000006:f#4,1-g#5,1
+compacting file count: 1, base compacting intervals: none
+L0.4:                 f---g
+L0.3:                 f---------i
+L0.2:                 f------h
+L0.1:              e---f
+L0.0:  a---b c^^^d    f---g
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 5
+000006,000003,000005,000009,000010
+seed interval: f-f
+L0.4:                 f+++g
+L0.3:                 f+++++++++i
+L0.2:                 f++++++h
+L0.1:              e+++f
+L0.0:  a---b c^^^d    f+++g
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Mark the above compaction as started.
+
+update-state-for-compaction files=(000006,000003,000005,000009,000010)
+----
+OK
+
+describe
+----
+file count: 7, sublevels: 5, intervals: 10
+flush split keys(3): [d, f, g]
+0.4: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [5, 6]
+	000010:f#11,1-g#11,1
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [5, 8]
+	000009:f#10,1-i#10,1
+0.2: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [5, 7]
+	000005:f#6,1-h#9,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [4, 5]
+	000003:e#5,1-f#7,1
+0.0: file count: 3, bytes: 768, width (mean, max): 1.3, 2, interval range: [0, 6]
+	000001:a#2,1-b#3,1
+	000002:c#3,1-d#5,1
+	000006:f#4,1-g#5,1
+compacting file count: 6, base compacting intervals: [4, 9]
+L0.4:                 fvvvg
+L0.3:                 fvvvvvvvvvi
+L0.2:                 fvvvvvvh
+L0.1:              evvvf
+L0.0:  a---b c^^^d    fvvvg
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+no compaction picked
+
+# Extend one of the SSTables (000009) to the right, and place an SSTable "under"
+# the extension (000011). This adds it to the compaction.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.10-p.SET.10
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.2: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#10,1-p#10,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f---g
+L0.2:                 f------------------------------p
+L0.1:                 f------h
+L0.0:                 f---g                   n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000006,000005,000009,000011,000010
+seed interval: f-g
+L0.3:                 f+++g
+L0.2:                 f++++++++++++++++++++++++++++++p
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Set SSTable 000011 which is under/older SSTable 000009 to IsBaseCompacting = true.
+# This should prevent SSTable 000009 from participating in a base compaction.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.10-p.SET.10
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.9 base_compacting
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.2: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#10,1-p#10,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#9,1
+compacting file count: 1, base compacting intervals: [3, 4]
+L0.3:                 f---g
+L0.2:                 f------------------------------p
+L0.1:                 f------h
+L0.0:                 f---g                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+no compaction picked
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000010,000009,000005,000006
+seed interval: f-g
+L0.3:                 f+++g
+L0.2:                 f++++++++++++++++++++++++++++++p
+L0.1:                 f++++++h
+L0.0:                 f+++g                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Raise 000009 to a higher level, so that there's still a stack depth of 3 below
+# it. This should make f-g a candidate for base compaction again.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10 base_compacting
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 1, base compacting intervals: [3, 4]
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 3
+000006,000005,000010
+seed interval: f-g
+L0.3:                 f------------------------------p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+max-depth-after-ongoing-compactions
+----
+4
+
+# Assume the above base compaction is chosen. This should reduce max depth after
+# ongoing compactions.
+
+define
+L0
+  000005:f.SET.6-h.SET.9 base_compacting
+  000006:f.SET.4-g.SET.5 base_compacting
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11 base_compacting
+  000011:n.SET.8-p.SET.10 base_compacting
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 4, base compacting intervals: [0, 1], [3, 4]
+L0.3:                 f------------------------------p
+L0.2:                 fvvvg
+L0.1:                 fvvvvvvh
+L0.0:                 fvvvg                   nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+no compaction picked
+
+pick-intra-l0-compaction min_depth=3
+----
+no compaction picked
+
+max-depth-after-ongoing-compactions
+----
+1
+
+# Ensure that when 000011 is not base compacting, it's chosen for compactions
+# along with 000009.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g                   n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000006,000005,000010,000009,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Don't pick a base compaction if the overlapping Lbase files are marked as
+# compacting.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0 compacting
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g                   n------p
+L6:    a---------------f g====================================s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+no compaction picked
+
+# Greatly increase the size of SSTable 000009, past 100 << 20. This should make
+# it no longer a candidate for base compaction.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.12-p.SET.12 size=104859600
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(4): [g, h, n, p]
+0.3: file count: 1, bytes: 104859600, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g                   n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 3
+000006,000005,000010,000011
+seed interval: f-g
+L0.3:                 f------------------------------p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# However, when the size increase is applied to a lower sublevel that is
+# necessary to include to meet the minimum stack depth reduction, we overlook
+# the size difference and choose the file for compaction anyway.
+
+define
+L0
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11 size=104859600
+  000011:n.SET.8-p.SET.10
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 5, sublevels: 4, intervals: 5
+flush split keys(2): [g, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 4.0, 4, interval range: [0, 3]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 104859600, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000005:f#6,1-h#9,1
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 3]
+	000006:f#4,1-g#5,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g                   n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000006,000005,000010,000009,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g                   n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+read-amp
+----
+4
+
+# In L0.0, SST 000007 is marked as base compacting. There are two SSTs to the left
+# of it in the sublevel, and one to its right. The ones to its left should be
+# chosen by extendCandidateToRectangle.
+
+define
+L0
+  000004:h.SET.2-j.SET.4
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000007:k.SET.2-l.SET.4 base_compacting
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000012:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 4, intervals: 9
+flush split keys(4): [g, h, l, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 8.0, 8, interval range: [0, 7]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [0, 2]
+	000005:f#6,1-h#9,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-p#10,1
+compacting file count: 1, base compacting intervals: [5, 5]
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g h------j kvvvl    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006,000004
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g h++++++j kvvvl    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=3
+----
+compaction picked with stack depth reduction 3
+000006,000005,000004,000010
+seed interval: f-g
+L0.3:                 f------------------------------p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g h++++++j kvvvl    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+
+# Now shift the base_compacting marker one SST to the left. But since file 6
+# was already chosen as part of the seed compaction construction, we still
+# prefer to choose it over files 7 and 11.
+
+define
+L0
+  000004:h.SET.2-j.SET.4 base_compacting
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000007:k.SET.2-l.SET.4
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000012:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 4, intervals: 9
+flush split keys(4): [g, h, l, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 8.0, 8, interval range: [0, 7]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [0, 2]
+	000005:f#6,1-h#9,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-p#10,1
+compacting file count: 1, base compacting intervals: [2, 3]
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g hvvvvvvj k---l    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g hvvvvvvj k---l    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Without any base_compacting markers, all SSTs in the bottom sublevel should
+# be chosen for an intra-L0 compaction.
+
+define
+L0
+  000004:h.SET.2-j.SET.4
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000007:k.SET.2-l.SET.4
+  000009:f.SET.12-p.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10
+L6
+  000012:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 4, intervals: 9
+flush split keys(4): [g, h, l, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 8.0, 8, interval range: [0, 7]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [0, 2]
+	000005:f#6,1-h#9,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-p#10,1
+compacting file count: 0, base compacting intervals: none
+L0.3:                 f------------------------------p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 f---g h------j k---l    n------p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-intra-l0-compaction min_depth=3
+----
+compaction picked with stack depth reduction 4
+000009,000010,000005,000006,000004,000007,000011
+seed interval: f-g
+L0.3:                 f++++++++++++++++++++++++++++++p
+L0.2:                 f+++g
+L0.1:                 f++++++h
+L0.0:                 f+++g h++++++j k+++l    n++++++p
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+define flush_split_max_bytes=32
+L0
+  000001:a.SET.2-e.SET.5 size=64
+  000002:c.SET.6-g.SET.8 size=16
+  000003:f.SET.9-j.SET.11 size=16
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 3, sublevels: 3, intervals: 6
+flush split keys(0): []
+0.2: file count: 1, bytes: 16, width (mean, max): 2.0, 2, interval range: [3, 4]
+	000003:f#9,1-j#11,1
+0.1: file count: 1, bytes: 16, width (mean, max): 3.0, 3, interval range: [1, 3]
+	000002:c#6,1-g#8,1
+0.0: file count: 1, bytes: 64, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000001:a#2,1-e#5,1
+compacting file count: 0, base compacting intervals: none
+L0.2:                 f------------j
+L0.1:        c------------g
+L0.0:  a------------e
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Check that read amplification is the sublevel height of the tallest key
+# interval, not the overall count of sublevels.
+
+read-amp
+----
+2
+
+# The comparison of a cumulative count of interpolated bytes and
+# flushSplitMaxBytes is a <, so even though the cumulative count equals 32 after
+# a-c, we do not emit a flush split key until the end of the next interval, c-e.
+
+flush-split-keys
+----
+flush user split keys: none
+
+# Reduce flush_split_max_bytes by 1, and there should also be a split key at c.
+
+define flush_split_max_bytes=31
+L0
+  000001:a.SET.2-e.SET.5 size=64
+  000002:c.SET.6-g.SET.8 size=16
+  000003:f.SET.9-j.SET.11 size=16
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 3, sublevels: 3, intervals: 6
+flush split keys(1): [j]
+0.2: file count: 1, bytes: 16, width (mean, max): 2.0, 2, interval range: [3, 4]
+	000003:f#9,1-j#11,1
+0.1: file count: 1, bytes: 16, width (mean, max): 3.0, 3, interval range: [1, 3]
+	000002:c#6,1-g#8,1
+0.0: file count: 1, bytes: 64, width (mean, max): 2.0, 2, interval range: [0, 1]
+	000001:a#2,1-e#5,1
+compacting file count: 0, base compacting intervals: none
+L0.2:                 f------------j
+L0.1:        c------------g
+L0.0:  a------------e
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+flush-split-keys
+----
+flush user split keys: j
+
+max-depth-after-ongoing-compactions
+----
+2
+
+define flush_split_max_bytes=64
+L0
+  000001:a.SET.2-d.SET.5 size=64
+  000002:e.SET.6-g.SET.8 size=64
+  000003:h.SET.9-j.SET.11 size=16
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 3, sublevels: 1, intervals: 6
+flush split keys(1): [g]
+0.0: file count: 3, bytes: 144, width (mean, max): 1.0, 1, interval range: [0, 4]
+	000001:a#2,1-d#5,1
+	000002:e#6,1-g#8,1
+	000003:h#9,1-j#11,1
+compacting file count: 0, base compacting intervals: none
+L0.0:  a---------d e------g h------j
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+flush-split-keys
+----
+flush user split keys: g
+
+# The calculation for flush split bytes multiplies the specified max bytes
+# parameter with the number of sublevels. In the case below, that should mean
+# a flush split key would not be emitted at d despite the estimated bytes tally
+# exceeding 64 bytes. Instead, it would be emitted when 64 * 2 = 128 bytes have
+# been exceeded.
+
+define flush_split_max_bytes=64
+L0
+  000001:a.SET.2-d.SET.5 size=64
+  000004:d.SET.12-e.SET.12 size=64
+  000002:e.SET.6-g.SET.8 size=64
+  000003:h.SET.9-j.SET.11 size=16
+L6
+  000007:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 4, sublevels: 2, intervals: 8
+flush split keys(1): [e]
+0.1: file count: 1, bytes: 64, width (mean, max): 3.0, 3, interval range: [1, 3]
+	000004:d#12,1-e#12,1
+0.0: file count: 3, bytes: 144, width (mean, max): 1.7, 2, interval range: [0, 6]
+	000001:a#2,1-d#5,1
+	000002:e#6,1-g#8,1
+	000003:h#9,1-j#11,1
+compacting file count: 0, base compacting intervals: none
+L0.1:           d---e
+L0.0:  a---------d e------g h------j
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+flush-split-keys
+----
+flush user split keys: e
+
+# Ensure that the compaction picker doesn't error out when all seed files are
+# compacting.
+
+define
+L0
+  000004:h.SET.2-j.SET.4    base_compacting
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5    base_compacting
+  000007:k.SET.2-l.SET.4    base_compacting
+  000009:f.SET.12-p.SET.12  intra_l0_compacting
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-p.SET.10   base_compacting
+L6
+  000012:a.SET.0-f.SET.0
+  000008:g.SET.0-s.SET.0
+----
+file count: 7, sublevels: 4, intervals: 9
+flush split keys(4): [g, h, l, p]
+0.3: file count: 1, bytes: 256, width (mean, max): 8.0, 8, interval range: [0, 7]
+	000009:f#12,1-p#12,1
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 1, bytes: 256, width (mean, max): 3.0, 3, interval range: [0, 2]
+	000005:f#6,1-h#9,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-p#10,1
+compacting file count: 5, base compacting intervals: [0, 0], [2, 3], [5, 5], [7, 8]
+L0.3:                 f^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^p
+L0.2:                 f---g
+L0.1:                 f------h
+L0.0:                 fvvvg hvvvvvvj kvvvl    nvvvvvvp
+L6:    a---------------f g------------------------------------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=2
+----
+no compaction picked
+
+pick-intra-l0-compaction min_depth=2
+----
+no compaction picked
+
+# Ensure that base files with largest key set to the rangedel sentinel key are
+# treated as not containing the largest user key. If L0 files containing that
+# user key get added to that compaction, it could trigger a
+# "files have overlapping ranges" error in Lbase as one of the outputs of the
+# compaction would overlap with an Lbase file not in the compaction.
+# Compare the output of the next two calls to PickBaseCompaction below; as the
+# base file's end key is changed to the range deletion sentinel, L0 files
+# overlapping with it are no longer chosen for compaction.
+
+define
+L0
+  000004:h.SET.2-j.SET.4
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000007:k.SET.2-l.SET.4
+  000009:n.SET.12-o.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-o.SET.10
+L6
+  000001:a.SET.0-o.SET.0
+  000008:p.SET.0-s.SET.0
+----
+file count: 7, sublevels: 3, intervals: 9
+flush split keys(4): [g, h, l, o]
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 2, bytes: 512, width (mean, max): 2.0, 3, interval range: [0, 7]
+	000005:f#6,1-h#9,1
+	000009:n#12,1-o#12,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-o#10,1
+compacting file count: 0, base compacting intervals: none
+L0.2:                 f---g
+L0.1:                 f------h                n---o
+L0.0:                 f---g h------j k---l    n---o
+L6:    a------------------------------------------o p---------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=2
+----
+compaction picked with stack depth reduction 3
+000006,000005,000004,000010,000007,000011,000009
+seed interval: f-g
+L0.2:                 f+++g
+L0.1:                 f++++++h                n+++o
+L0.0:                 f+++g h++++++j k+++l    n+++o
+L6:    a------------------------------------------o p---------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+define
+L0
+  000004:h.SET.2-j.SET.4
+  000005:f.SET.6-h.SET.9
+  000006:f.SET.4-g.SET.5
+  000007:k.SET.2-l.SET.4
+  000009:n.SET.12-o.SET.12
+  000010:f.SET.11-g.SET.11
+  000011:n.SET.8-o.SET.10
+L6
+  000001:a.SET.0-o.RANGEDEL.72057594037927935
+  000008:p.SET.0-s.SET.0
+----
+file count: 7, sublevels: 3, intervals: 9
+flush split keys(4): [g, h, l, o]
+0.2: file count: 1, bytes: 256, width (mean, max): 1.0, 1, interval range: [0, 0]
+	000010:f#11,1-g#11,1
+0.1: file count: 2, bytes: 512, width (mean, max): 2.0, 3, interval range: [0, 7]
+	000005:f#6,1-h#9,1
+	000009:n#12,1-o#12,1
+0.0: file count: 4, bytes: 1024, width (mean, max): 1.2, 2, interval range: [0, 7]
+	000006:f#4,1-g#5,1
+	000004:h#2,1-j#4,1
+	000007:k#2,1-l#4,1
+	000011:n#8,1-o#10,1
+compacting file count: 0, base compacting intervals: none
+L0.2:                 f---g
+L0.1:                 f------h                n---o
+L0.0:                 f---g h------j k---l    n---o
+L6:    a------------------------------------------o p---------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+pick-base-compaction min_depth=2
+----
+compaction picked with stack depth reduction 3
+000006,000005,000004,000010,000007,000011,000009
+seed interval: f-g
+L0.2:                 f+++g
+L0.1:                 f++++++h                n+++o
+L0.0:                 f+++g h++++++j k+++l    n+++o
+L6:    a------------------------------------------o p---------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss
+
+# Ensure that two L0 sstables where one ends at a rangedel sentinel key and
+# the other starts at the same user key occupy the same sublevel.
+
+define
+L0
+  000004:a.SET.2-d.RANGEDEL.72057594037927935
+  000005:d.SET.3-g.SET.5
+L6
+  000001:a.SET.0-o.SET.0
+  000008:p.SET.0-s.SET.0
+----
+file count: 2, sublevels: 1, intervals: 3
+flush split keys(2): [d, g]
+0.0: file count: 2, bytes: 512, width (mean, max): 1.0, 1, interval range: [0, 1]
+	000004:a#2,1-d#72057594037927935,15
+	000005:d#3,1-g#5,1
+compacting file count: 0, base compacting intervals: none
+L0.0:  a--------d---------g
+L6:    a------------------------------------------o p---------s
+       aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss

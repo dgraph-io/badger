@@ -7,7 +7,7 @@ package main
 import (
 	"log"
 
-	"pebbleinternal/bytealloc"
+	"github.com/dgraph.io/badger/internal/bytealloc"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"

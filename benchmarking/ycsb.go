@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"pebbleinternal/ackseq"
-	"pebbleinternal/randvar"
-	"pebbleinternal/rate"
+	"github.com/dgraph.io/badger/internal/ackseq"
+	"github.com/dgraph.io/badger/internal/randvar"
+	"github.com/dgraph.io/badger/internal/rate"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"

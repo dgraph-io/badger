@@ -10,9 +10,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"pebbleinternal/base"
-	"pebbleinternal/manifest"
-	"pebbleinternal/record"
+	"github.com/dgraph.io/badger/internal/base"
+	"github.com/dgraph.io/badger/internal/manifest"
+	"github.com/dgraph.io/badger/internal/record"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/errors/oserror"

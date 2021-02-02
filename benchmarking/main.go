@@ -55,8 +55,8 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "pebble [command] (flags)",
-		Short: "pebble benchmarking/introspection tool",
+		Use:   "benchTool [command] (flags)",
+		Short: "benchTool benchmarking/introspection tool",
 	}
 	rootCmd.AddCommand(benchCmd)
 	rootCmd.AddCommand(generateJSCmd)

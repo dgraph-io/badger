@@ -2,13 +2,12 @@
 // of this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 
-// +build badger
-
 package main
 
 import (
 	"bytes"
 	"log"
+	"fmt"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/dgraph-io/badger/v3"
@@ -20,7 +19,6 @@ type badgerDB struct {
 }
 
 func newBadgerDB(dir string) DB {
-	// fmt.Printf("---- Sourav newBadgerDB ----")
 	db, err := badger.Open(badger.DefaultOptions(dir).WithBlockCacheSize(cacheSize))
 	if err != nil {
 		log.Fatal(err)
@@ -47,7 +45,7 @@ func (b badgerDB) NewBatch() batch {
 }
 
 func (b badgerDB) Scan(iter iterator, key []byte, count int64, reverse bool) error {
-	panic("badgerDB.Scan: unimplemented")
+	return fmt.Errorf("badgerDB.Scan: unimplemented")
 }
 
 func (b badgerDB) Metrics() *pebble.Metrics {
@@ -148,5 +146,5 @@ func (b badgerBatch) Delete(key []byte, _ *pebble.WriteOptions) error {
 }
 
 func (b badgerBatch) LogData(data []byte, _ *pebble.WriteOptions) error {
-	panic("badgerBatch.logData: unimplemented")
+	return fmt.Errorf("badgerBatch.logData: unimplemented")
 }
