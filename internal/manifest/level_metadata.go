@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"pebbleinternal/base"
+	"github.com/dgraph.io/badger/v3/internal/base"
 )
 
 // LevelMetadata contains metadata for all of the files within

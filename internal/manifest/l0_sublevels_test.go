@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"pebbleinternal/base"
-	"pebbleinternal/datadriven"
-	"pebbleinternal/record"
+	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph.io/badger/v3/internal/datadriven"
+	"github.com/dgraph.io/badger/v3/internal/record"
 	"github.com/stretchr/testify/require"
 )
 

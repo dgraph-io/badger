@@ -4,7 +4,7 @@
 
 package private
 
-import "pebbleinternal/manifest"
+import "github.com/dgraph.io/badger/v3/internal/manifest"
 
 // FlushExternalTable is a hook for linking files into L0 without assigning a
 // global sequence number, mimicking a flush. FlushExternalTable takes a

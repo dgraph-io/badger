@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"pebbleinternal/base"
-	"pebbleinternal/crc"
+	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph.io/badger/v3/internal/crc"
 )
 
 var walSyncLabels = pprof.Labels("pebble", "wal-sync")

@@ -14,7 +14,7 @@
 
 package bytealloc
 
-import "pebbleinternal/rawalloc"
+import "github.com/dgraph.io/badger/v3/internal/rawalloc"
 
 // An A provides chunk allocation of []byte, amortizing the overhead of each
 // allocation. Because the underlying storage for the slices is shared, they

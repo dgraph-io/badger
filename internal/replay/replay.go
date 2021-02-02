@@ -9,8 +9,8 @@ import (
 	"sort"
 
 	"github.com/cockroachdb/pebble"
-	"pebbleinternal/manifest"
-	"pebbleinternal/private"
+	"github.com/dgraph.io/badger/v3/internal/manifest"
+	"github.com/dgraph.io/badger/v3/internal/private"
 )
 
 // Table describes a sstable from the reference database whose writes are

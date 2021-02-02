@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph.io/badger/internal/randvar"
+	"github.com/dgraph.io/badger/v3/internal/randvar"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/spf13/cobra"

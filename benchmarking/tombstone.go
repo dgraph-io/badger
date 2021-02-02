@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph.io/badger/internal/humanize"
+	"github.com/dgraph.io/badger/v3/internal/humanize"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"

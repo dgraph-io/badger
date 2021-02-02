@@ -7,7 +7,7 @@ package main
 import (
 	"log"
 
-	"github.com/dgraph.io/badger/internal/bytealloc"
+	"github.com/dgraph.io/badger/v3/internal/bytealloc"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"

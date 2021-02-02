@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph.io/badger/internal/base"
-	"github.com/dgraph.io/badger/internal/humanize"
-	"github.com/dgraph.io/badger/internal/manifest"
-	"github.com/dgraph.io/badger/internal/replay"
+	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph.io/badger/v3/internal/humanize"
+	"github.com/dgraph.io/badger/v3/internal/manifest"
+	"github.com/dgraph.io/badger/v3/internal/replay"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"

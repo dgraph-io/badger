@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-	"pebbleinternal/base"
+	"github.com/dgraph.io/badger/v3/internal/base"
 	"github.com/cockroachdb/pebble/vfs"
 )
 
