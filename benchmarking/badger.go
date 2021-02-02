@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"log"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/dgraph-io/badger/v3"
@@ -45,7 +46,19 @@ func (b badgerDB) NewBatch() batch {
 }
 
 func (b badgerDB) Scan(iter iterator, key []byte, count int64, reverse bool) error {
-	return fmt.Errorf("badgerDB.Scan: unimplemented")
+	var entriesRead uint64
+	var sizeRead uint64
+        txn := b.db.NewTransaction(false)
+	if reverse {
+	   badger.DefaultIteratorOptions.Reverse = true
+	}
+	it := txn.NewIterator(badger.DefaultIteratorOptions)
+        for it.Rewind(); it.Valid(); it.Next() {
+		i := it.Item()
+		atomic.AddUint64(&entriesRead, 1)
+		atomic.AddUint64(&sizeRead, uint64(i.EstimatedSize()))
+	}
+	return nil
 }
 
 func (b badgerDB) Metrics() *pebble.Metrics {
@@ -65,6 +78,13 @@ type badgerIterator struct {
 }
 
 func (i *badgerIterator) SeekLT(key []byte) bool {
+	i.iter.Seek(key)
+	if !i.iter.Valid() {
+		return false
+	}
+	if i.lower != nil && bytes.Compare(i.Key(), i.lower) >= 0 {
+		return false
+	}
 	return true
 }
 
