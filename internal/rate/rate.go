@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package rate provides a rate limiter.
-package rate // import "github.com/dgraph.io/badger/v3/internal/rate"
+package rate // import "github.com/dgraph-io/badger/v3/internal/rate"
 
 import (
 	"context"

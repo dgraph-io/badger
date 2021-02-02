@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/base"
 )
 
 // Intervals are of the form [start, end) with no gap between intervals. Each

@@ -17,9 +17,9 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/dgraph.io/badger/v3/internal/base"
-	"github.com/dgraph.io/badger/v3/internal/datadriven"
-	"github.com/dgraph.io/badger/v3/internal/record"
+	"github.com/dgraph-io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/datadriven"
+	"github.com/dgraph-io/badger/v3/internal/record"
 	"github.com/kr/pretty"
 	"github.com/stretchr/testify/require"
 )

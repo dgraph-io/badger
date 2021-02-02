@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/dgraph.io/badger/v3/internal/base"
-	"github.com/dgraph.io/badger/v3/internal/datadriven"
+	"github.com/dgraph-io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/datadriven"
 	"github.com/cockroachdb/pebble/vfs"
 	"github.com/cockroachdb/redact"
 )

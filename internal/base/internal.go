@@ -2,7 +2,7 @@
 // of this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 
-package base // import "github.com/dgraph.io/badger/v3/internal/base"
+package base // import "github.com/dgraph-io/badger/v3/internal/base"
 
 import (
 	"encoding/binary"

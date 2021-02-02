@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/base"
 )
 
 // TODO(peter): describe the MANIFEST file format, independently of the C++

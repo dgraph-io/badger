@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph.io/badger/v3/internal/base"
-	"github.com/dgraph.io/badger/v3/internal/datadriven"
+	"github.com/dgraph-io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/datadriven"
 )
 
 func TestLevelIterator(t *testing.T) {

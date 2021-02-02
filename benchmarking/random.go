@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph.io/badger/v3/internal/randvar"
-	"github.com/dgraph.io/badger/v3/internal/rate"
+	"github.com/dgraph-io/badger/v3/internal/randvar"
+	"github.com/dgraph-io/badger/v3/internal/rate"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/rand"

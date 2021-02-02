@@ -10,9 +10,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dgraph.io/badger/v3/internal/base"
-	"github.com/dgraph.io/badger/v3/internal/manifest"
-	"github.com/dgraph.io/badger/v3/internal/record"
+	"github.com/dgraph-io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/manifest"
+	"github.com/dgraph-io/badger/v3/internal/record"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/errors/oserror"

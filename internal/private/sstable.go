@@ -4,7 +4,7 @@
 
 package private
 
-import "github.com/dgraph.io/badger/v3/internal/base"
+import "github.com/dgraph-io/badger/v3/internal/base"
 
 // SSTableCacheOpts is a hook for specifying cache options to
 // sstable.NewReader.

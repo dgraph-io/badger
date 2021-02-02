@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/dgraph.io/badger/v3/internal/base"
+	"github.com/dgraph-io/badger/v3/internal/base"
 	"github.com/stretchr/testify/require"
 )
 

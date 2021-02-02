@@ -7,7 +7,7 @@ package main
 import (
 	"bytes"
 
-	"github.com/dgraph.io/badger/v3/internal/bytealloc"
+	"github.com/dgraph-io/badger/v3/internal/bytealloc"
 
 	"github.com/cockroachdb/pebble"
 )
