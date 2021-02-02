@@ -1,7 +1,3 @@
-// Copyright 2020 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 // Package replay implements facilities for replaying writes to a database.
 package replay
 
@@ -28,8 +24,7 @@ func (s bySeqNum) Less(i, j int) bool {
 	return s[i].FileMetadata.SmallestSeqNum < s[j].FileMetadata.SmallestSeqNum
 }
 
-// Open opens a database for replaying flushed and ingested tables. It's
-// intended for use by the `pebble bench compact` command.
+// Open opens a database for replaying flushed and ingested tables.
 func Open(dirname string, opts *pebble.Options) (*DB, error) {
 	d, err := pebble.Open(dirname, opts)
 	if err != nil {

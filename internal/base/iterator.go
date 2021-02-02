@@ -1,7 +1,3 @@
-// Copyright 2019 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package base
 
 import "fmt"
@@ -51,8 +47,7 @@ import "fmt"
 // the reverse positioning routines respect the upper bound (i.e. calling
 // SeekGE instead of First if there is a lower bound, and SeekLT instead of
 // Last if there is an upper bound). This imposition is done in order to
-// elevate that enforcement to the caller (generally pebble.Iterator or
-// pebble.mergingIter) rather than having it duplicated in every
+// elevate that enforcement to the caller rather than having it duplicated in every
 // InternalIterator implementation. Additionally, the caller needs to ensure
 // that SeekGE/SeekPrefixGE are not called with a key > the upper bound, and
 // SeekLT is not called with a key < the lower bound.
@@ -106,10 +101,7 @@ type InternalIterator interface {
 	//
 	// Calling SeekPrefixGE places the receiver into prefix iteration mode. Once
 	// in this mode, reverse iteration may not be supported and will return an
-	// error. Note that pebble/Iterator.SeekPrefixGE has this same restriction on
-	// not supporting reverse iteration in prefix iteration mode until a
-	// different positioning routine (SeekGE, SeekLT, First or Last) switches the
-	// iterator out of prefix iteration.
+    // error.
 	SeekPrefixGE(prefix, key []byte) (*InternalKey, []byte)
 
 	// SeekLT moves the iterator to the last key/value pair whose key is less

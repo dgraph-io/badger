@@ -1,7 +1,3 @@
-// Copyright 2011 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 // Package record reads and writes sequences of records. Each record is a stream
 // of bytes that completes before the next record starts.
 //
@@ -134,19 +130,19 @@ const (
 
 var (
 	// ErrNotAnIOSeeker is returned if the io.Reader underlying a Reader does not implement io.Seeker.
-	ErrNotAnIOSeeker = errors.New("pebble/record: reader does not implement io.Seeker")
+	ErrNotAnIOSeeker = errors.New("record: reader does not implement io.Seeker")
 
 	// ErrNoLastRecord is returned if LastRecordOffset is called and there is no previous record.
-	ErrNoLastRecord = errors.New("pebble/record: no last record exists")
+	ErrNoLastRecord = errors.New("record: no last record exists")
 
 	// ErrZeroedChunk is returned if a chunk is encountered that is zeroed. This
 	// usually occurs due to log file preallocation.
-	ErrZeroedChunk = base.CorruptionErrorf("pebble/record: zeroed chunk")
+	ErrZeroedChunk = base.CorruptionErrorf("record: zeroed chunk")
 
 	// ErrInvalidChunk is returned if a chunk is encountered with an invalid
 	// header, length, or checksum. This usually occurs when a log is recycled,
 	// but can also occur due to corruption.
-	ErrInvalidChunk = base.CorruptionErrorf("pebble/record: invalid chunk")
+	ErrInvalidChunk = base.CorruptionErrorf("record: invalid chunk")
 )
 
 // IsInvalidRecord returns true if the error matches one of the error types
@@ -389,7 +385,7 @@ type singleReader struct {
 func (x singleReader) Read(p []byte) (int, error) {
 	r := x.r
 	if r.seq != x.seq {
-		return 0, errors.New("pebble/record: stale reader")
+		return 0, errors.New("record: stale reader")
 	}
 	if r.err != nil {
 		return 0, r.err
@@ -463,7 +459,7 @@ func NewWriter(w io.Writer) *Writer {
 // fillHeader fills in the header for the pending chunk.
 func (w *Writer) fillHeader(last bool) {
 	if w.i+legacyHeaderSize > w.j || w.j > blockSize {
-		panic("pebble/record: bad writer state")
+		panic("record: bad writer state")
 	}
 	if last {
 		if w.first {
@@ -513,7 +509,7 @@ func (w *Writer) Close() error {
 	if w.err != nil {
 		return w.err
 	}
-	w.err = errors.New("pebble/record: closed Writer")
+	w.err = errors.New("record: closed Writer")
 	return nil
 }
 
@@ -617,7 +613,7 @@ type singleWriter struct {
 func (x singleWriter) Write(p []byte) (int, error) {
 	w := x.w
 	if w.seq != x.seq {
-		return 0, errors.New("pebble/record: stale writer")
+		return 0, errors.New("record: stale writer")
 	}
 	if w.err != nil {
 		return 0, w.err

@@ -1,7 +1,3 @@
-// Copyright 2011 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package base // import "github.com/dgraph-io/badger/v3/internal/base"
 
 import (
@@ -84,9 +80,8 @@ func (k InternalKeyKind) String() string {
 }
 
 // InternalKey is a key used for the in-memory and on-disk partial DBs that
-// make up a pebble DB.
 //
-// It consists of the user key (as given by the code that uses package pebble)
+// It consists of the user key
 // followed by 8-bytes of metadata:
 //   - 1 byte for the type of internal key: delete or set,
 //   - 7 bytes for a uint56 sequence number, in little-endian format.

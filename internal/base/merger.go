@@ -1,7 +1,3 @@
-// Copyright 2018 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package base
 
 import "io"
@@ -73,9 +69,6 @@ type Merger struct {
 	Merge Merge
 
 	// Name is the name of the merger.
-	//
-	// Pebble stores the merger name on disk, and opening a database with a
-	// different merger from the one it was created with will result in an error.
 	Name string
 }
 
@@ -113,5 +106,5 @@ var DefaultMerger = &Merger{
 		return res, nil
 	},
 
-	Name: "pebble.concatenate",
+	Name: "concatenate",
 }

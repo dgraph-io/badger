@@ -1,7 +1,3 @@
-// Copyright 2012 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package manifest
 
 import (
@@ -99,8 +95,8 @@ type FileMetadata struct {
 	// Fields inside the Atomic struct should be accessed atomically.
 	Atomic struct {
 		// AllowedSeeks is used to determine if a file should be picked for
-		// a read triggered compaction. It is decremented when read sampling
-		// in pebble.Iterator after every after every positioning operation
+		// a read triggered compaction.
+		// Iterator after every after every positioning operation
 		// that returns a user key (eg. Next, Prev, SeekGE, SeekLT, etc).
 		AllowedSeeks int64
 	}
@@ -638,7 +634,7 @@ func (l *VersionList) Back() *Version {
 // becomes the "newest" version in the list.
 func (l *VersionList) PushBack(v *Version) {
 	if v.list != nil || v.prev != nil || v.next != nil {
-		panic("pebble: version list is inconsistent")
+		panic("version list is inconsistent")
 	}
 	v.prev = l.root.prev
 	v.prev.next = v
@@ -650,10 +646,10 @@ func (l *VersionList) PushBack(v *Version) {
 // Remove removes the specified version from the list.
 func (l *VersionList) Remove(v *Version) {
 	if v == &l.root {
-		panic("pebble: cannot remove version list root node")
+		panic("cannot remove version list root node")
 	}
 	if v.list != l {
-		panic("pebble: version list is inconsistent")
+		panic("version list is inconsistent")
 	}
 	v.prev.next = v.next
 	v.next.prev = v.prev
@@ -709,11 +705,6 @@ func CheckOrdering(cmp Compare, format base.FormatKey, level Level, files LevelI
 		// but do not overlap in keys inside the sstables. These files correspond to
 		// partitioned flushes or the results of intra-L0 compactions of partitioned
 		// flushes.
-		//
-		// Since these types of SSTables violate most other sequence number
-		// overlap invariants, and handling this case is important for compatibility
-		// with future versions of pebble, this method relaxes most L0 invariant
-		// checks.
 
 		var prev *FileMetadata
 		for f := files.First(); f != nil; f, prev = files.Next(), f {

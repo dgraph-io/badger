@@ -1,7 +1,3 @@
-// Copyright 2018 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package record
 
 import (
@@ -18,7 +14,7 @@ import (
 	"github.com/dgraph-io/badger/v3/internal/crc"
 )
 
-var walSyncLabels = pprof.Labels("pebble", "wal-sync")
+var walSyncLabels = pprof.Labels("badger","wal-sync")
 
 type block struct {
 	// buf[:written] has already been filled with fragments. Updated atomically.
@@ -93,7 +89,7 @@ func (q *syncQueue) push(wg *sync.WaitGroup, err *error) {
 	ptrs := atomic.LoadUint64(&q.headTail)
 	head, tail := q.unpack(ptrs)
 	if (tail+uint32(len(q.slots)))&(1<<dequeueBits-1) == head {
-		panic("pebble: queue is full")
+		panic("queue is full")
 	}
 
 	slot := &q.slots[head&uint32(len(q.slots)-1)]
@@ -564,7 +560,7 @@ func (w *LogWriter) Close() error {
 			return cerr
 		}
 	}
-	w.err = errors.New("pebble/record: closed LogWriter")
+	w.err = errors.New("record: closed LogWriter")
 	return err
 }
 

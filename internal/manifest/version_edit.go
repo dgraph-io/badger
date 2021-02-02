@@ -1,7 +1,3 @@
-// Copyright 2012 The LevelDB-Go and Pebble Authors. All rights reserved. Use
-// of this source code is governed by a BSD-style license that can be found in
-// the LICENSE file.
-
 package manifest
 
 import (
@@ -15,10 +11,8 @@ import (
 	"github.com/dgraph-io/badger/v3/internal/base"
 )
 
-// TODO(peter): describe the MANIFEST file format, independently of the C++
-// project.
 
-var errCorruptManifest = base.CorruptionErrorf("pebble: corrupt manifest")
+var errCorruptManifest = base.CorruptionErrorf("corrupt manifest")
 
 type byteReader interface {
 	io.ByteReader
@@ -84,10 +78,6 @@ type VersionEdit struct {
 	// This is an optional field, and 0 represents it is not set.
 	MinUnflushedLogNum base.FileNum
 
-	// ObsoletePrevLogNum is a historic artifact from LevelDB that is not used by
-	// Pebble, RocksDB, or even LevelDB. Its use in LevelDB was deprecated in
-	// 6/2011. We keep it around purely for informational purposes when
-	// displaying MANIFEST contents.
 	ObsoletePrevLogNum uint64
 
 	// The next file number. A single counter is used to assign file numbers
@@ -460,7 +450,7 @@ func (b *BulkVersionEdit) Accumulate(ve *VersionEdit) error {
 			}
 			m = b.AddedByFileNum[df.FileNum]
 			if m == nil {
-				return base.CorruptionErrorf("pebble: file deleted L%d.%s before it was inserted", df.Level, df.FileNum)
+				return base.CorruptionErrorf("file deleted L%d.%s before it was inserted", df.Level, df.FileNum)
 			}
 		}
 		dmap[df.FileNum] = m
@@ -471,7 +461,7 @@ func (b *BulkVersionEdit) Accumulate(ve *VersionEdit) error {
 		// VersionEdit at the same level (though files can move across levels).
 		if dmap := b.Deleted[nf.Level]; dmap != nil {
 			if _, ok := dmap[nf.Meta.FileNum]; ok {
-				return base.CorruptionErrorf("pebble: file deleted L%d.%s before it was inserted", nf.Level, nf.Meta.FileNum)
+				return base.CorruptionErrorf("file deleted L%d.%s before it was inserted", nf.Level, nf.Meta.FileNum)
 			}
 		}
 		b.Added[nf.Level] = append(b.Added[nf.Level], nf.Meta)
@@ -526,7 +516,7 @@ func (b *BulkVersionEdit) Apply(
 				// Initialize L0Sublevels.
 				if curr == nil || curr.L0Sublevels == nil {
 					if err := v.InitL0Sublevels(cmp, formatKey, flushSplitBytes); err != nil {
-						return nil, nil, errors.Wrap(err, "pebble: internal error")
+						return nil, nil, errors.Wrap(err, "internal error")
 					}
 				} else {
 					v.L0Sublevels = curr.L0Sublevels
@@ -541,7 +531,7 @@ func (b *BulkVersionEdit) Apply(
 		deletedMap := b.Deleted[level]
 		if n := v.Levels[level].Len() + len(addedFiles); n == 0 {
 			return nil, nil, base.CorruptionErrorf(
-				"pebble: internal error: No current or added files but have deleted files: %d",
+				"internal error: No current or added files but have deleted files: %d",
 				errors.Safe(len(deletedMap)))
 		}
 
@@ -555,7 +545,7 @@ func (b *BulkVersionEdit) Apply(
 				// reference count. However, because we cloned the
 				// previous level's B-Tree, this should never result in a
 				// file's reference count dropping to zero.
-				err := errors.Errorf("pebble: internal error: file L%d.%s obsolete during B-Tree removal", level, f.FileNum)
+				err := errors.Errorf("internal error: file L%d.%s obsolete during B-Tree removal", level, f.FileNum)
 				return nil, nil, err
 			}
 		}
@@ -581,7 +571,7 @@ func (b *BulkVersionEdit) Apply(
 
 			err := lm.tree.insert(f)
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "pebble")
+				return nil, nil, errors.Wrap(err, "badger")
 			}
 			removeZombie(f.FileNum)
 			// Track the keys with the smallest and largest keys, so that we can
@@ -596,10 +586,10 @@ func (b *BulkVersionEdit) Apply(
 
 		if level == 0 {
 			if err := v.InitL0Sublevels(cmp, formatKey, flushSplitBytes); err != nil {
-				return nil, nil, errors.Wrap(err, "pebble: internal error")
+				return nil, nil, errors.Wrap(err, " internal error")
 			}
 			if err := CheckOrdering(cmp, formatKey, Level(0), v.Levels[level].Iter()); err != nil {
-				return nil, nil, errors.Wrap(err, "pebble: internal error")
+				return nil, nil, errors.Wrap(err, " internal error")
 			}
 			continue
 		}
@@ -619,7 +609,7 @@ func (b *BulkVersionEdit) Apply(
 				}
 			})
 			if err := CheckOrdering(cmp, formatKey, Level(level), check.Iter()); err != nil {
-				return nil, nil, errors.Wrap(err, "pebble: internal error")
+				return nil, nil, errors.Wrap(err, " internal error")
 			}
 		}
 	}
