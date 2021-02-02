@@ -318,9 +318,9 @@ func runTest(dir string, t test) {
 		case <-workersDone:
 			workersDone = nil
 			t.done(time.Since(start))
-			p := db.Metrics()
-			fmt.Printf("%s", p)
-			if !waitCompactions || !backgroundCompactions(p) {
+			// p := db.Metrics()
+			// fmt.Printf("%s", p)
+			if !waitCompactions {//|| !backgroundCompactions(p) {
 				return
 			}
 			fmt.Printf("waiting for background compactions\n")
