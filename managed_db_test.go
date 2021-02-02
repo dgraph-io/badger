@@ -761,12 +761,12 @@ func TestWriteBatchDuplicate(t *testing.T) {
 			wb := db.NewManagedWriteBatch()
 			defer wb.Cancel()
 
-			for i := uint64(0); i < uint64(N); i++ {
+			for i := uint64(1); i <= uint64(N); i++ {
 				// Multiple versions of the same key.
 				require.NoError(t, wb.SetEntryAt(&Entry{Key: k, Value: v}, i))
 			}
 			require.NoError(t, wb.Flush())
-			readVerify(t, db, N, []int{9, 8, 7, 6, 5, 4, 3, 2, 1, 0})
+			readVerify(t, db, N, []int{10, 9, 8, 7, 6, 5, 4, 3, 2, 1})
 		})
 	})
 }
@@ -784,6 +784,8 @@ func TestZeroDiscardStats(t *testing.T) {
 	t.Run("after rewrite", func(t *testing.T) {
 		opts := getTestOptions("")
 		opts.ValueLogFileSize = 5 << 20
+		opts.ValueThreshold = 1 << 10
+		opts.MemTableSize = 1 << 15
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			populate(t, db)
 			require.Equal(t, int(N), numKeys(db))
@@ -800,7 +802,7 @@ func TestZeroDiscardStats(t *testing.T) {
 			// All data should still be present.
 			require.Equal(t, int(N), numKeys(db))
 
-			db.vlog.discardStats.iterate(func(id, val uint64) {
+			db.vlog.discardStats.Iterate(func(id, val uint64) {
 				// Vlog with id=fid has been re-written, it's discard stats should be zero.
 				if uint32(id) == fid {
 					require.Zero(t, val)
@@ -821,11 +823,11 @@ func TestZeroDiscardStats(t *testing.T) {
 				db.vlog.discardStats.Update(uint32(fid), 1)
 			}
 
-			db.vlog.discardStats.iterate(func(id, val uint64) { require.NotZero(t, val) })
+			db.vlog.discardStats.Iterate(func(id, val uint64) { require.NotZero(t, val) })
 			require.NoError(t, db.DropAll())
 			require.Equal(t, 0, numKeys(db))
 			// We've deleted everything. DS should be zero.
-			db.vlog.discardStats.iterate(func(id, val uint64) { require.Zero(t, val) })
+			db.vlog.discardStats.Iterate(func(id, val uint64) { require.Zero(t, val) })
 		})
 	})
 }

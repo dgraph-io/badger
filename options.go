@@ -18,7 +18,11 @@ package badger
 
 import (
 	"os"
+	"reflect"
+	"strings"
 	"time"
+
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
@@ -48,6 +52,8 @@ type Options struct {
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
+	// Sets the Stream.numGo field
+	NumGoroutines int
 
 	// Fine tuning options.
 
@@ -58,7 +64,8 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	ValueThreshold int
+	VLogPercentile float64
+	ValueThreshold int64
 	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
@@ -110,6 +117,8 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	maxValueThreshold float64
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -125,6 +134,7 @@ func DefaultOptions(path string) Options {
 		TableSizeMultiplier: 2,
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
+		NumGoroutines:       8,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -157,8 +167,11 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                1 << 10, // 1 KB.
+		ValueLogMaxEntries: 1000000,
+
+		VLogPercentile: 0.0,
+		ValueThreshold: maxValueThreshold,
+
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
@@ -208,6 +221,48 @@ func LSMOnlyOptions(path string) Options {
 	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
 }
 
+// FromSuperFlag fills Options fields for each flag within the superflag. For
+// example, replacing the default Options.NumGoroutines:
+//
+//	options := FromSuperFlag("numgoroutines=4", DefaultOptions(""))
+//
+// It's important to note that if you pass an empty Options struct, FromSuperFlag
+// will not fill it with default values. FromSuperFlag only writes to the fields
+// present within the superflag string (case insensitive).
+//
+// Unsupported: Options.Logger, Options.EncryptionKey
+func (opt Options) FromSuperFlag(superflag string) Options {
+	flags := z.NewSuperFlag(superflag)
+	v := reflect.ValueOf(&opt).Elem()
+	optionsStruct := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		// only iterate over exported fields
+		if field := v.Field(i); field.CanInterface() {
+			// z.SuperFlag stores keys as lowercase, keep everything case
+			// insensitive
+			name := strings.ToLower(optionsStruct.Field(i).Name)
+			kind := v.Field(i).Kind()
+			// make sure the option exists in the SuperFlag first, otherwise
+			// we'd overwrite the defaults with 0 values
+			if flags.Has(name) {
+				switch kind {
+				case reflect.Bool:
+					field.SetBool(flags.GetBool(name))
+				case reflect.Int, reflect.Int64:
+					field.SetInt(flags.GetInt64(name))
+				case reflect.Uint32:
+					field.SetUint(uint64(flags.GetUint32(name)))
+				case reflect.Float64:
+					field.SetFloat(flags.GetFloat64(name))
+				case reflect.String:
+					field.SetString(flags.GetString(name))
+				}
+			}
+		}
+	}
+	return opt
+}
+
 // WithDir returns a new Options value with Dir set to the given value.
 //
 // Dir is the path of the directory where key data will be stored in.
@@ -249,6 +304,14 @@ func (opt Options) WithSyncWrites(val bool) Options {
 // The default value of NumVersionsToKeep is 1.
 func (opt Options) WithNumVersionsToKeep(val int) Options {
 	opt.NumVersionsToKeep = val
+	return opt
+}
+
+// WithNumGoroutines sets the number of goroutines to be used in Stream.
+//
+// The default value of NumGoroutines is 8.
+func (opt Options) WithNumGoroutines(val int) Options {
+	opt.NumGoroutines = val
 	return opt
 }
 
@@ -324,9 +387,26 @@ func (opt Options) WithMaxLevels(val int) Options {
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int) Options {
+// The default value of ValueThreshold is 1 MB, but LSMOnlyOptions sets it to maxValueThreshold.
+func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
+	return opt
+}
+
+// WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
+//
+// VLogPercentile with 0.0 means no dynamic thresholding is enabled.
+// MinThreshold value will always act as the value threshold.
+//
+// VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
+// and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
+// [ValueThreshold, Options.maxValueThreshold]
+//
+// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
+//
+// The default value of VLogPercentile is 0.0.
+func (opt Options) WithVLogPercentile(t float64) Options {
+	opt.VLogPercentile = t
 	return opt
 }
 

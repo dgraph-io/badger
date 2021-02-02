@@ -27,6 +27,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
+	"github.com/pkg/errors"
 )
 
 // flushThreshold determines when a buffer will be flushed. When performing a
@@ -48,6 +49,7 @@ const flushThreshold = 100 << 20
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
 	stream.LogPrefix = "DB.Backup"
+	stream.SinceTs = since
 	return stream.Backup(w, since)
 }
 
@@ -69,9 +71,8 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 				return list, nil
 			}
 			if item.Version() < since {
-				// Ignore versions less than given timestamp, or skip older
-				// versions of the given key.
-				return list, nil
+				return nil, errors.Errorf("Backup: Item Version: %d less than sinceTs: %d",
+					item.Version(), since)
 			}
 
 			var valCopy []byte
@@ -192,7 +193,7 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 		ExpiresAt: kv.ExpiresAt,
 		meta:      meta,
 	}
-	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
+	estimatedSize := e.estimateSizeAndSetThreshold(l.db.valueThreshold())
 	// Flush entries if inserting the next entry would overflow the transactional limits.
 	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
 		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize ||

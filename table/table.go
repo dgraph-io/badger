@@ -89,6 +89,7 @@ type TableInterface interface {
 	Smallest() []byte
 	Biggest() []byte
 	DoesNotHave(hash uint32) bool
+	MaxVersion() uint64
 }
 
 // Table represents a loaded table file with the info we have about it.

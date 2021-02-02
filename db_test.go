@@ -68,9 +68,6 @@ func (s *DB) validate() error { return s.lc.validate() }
 
 func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
-		WithMemTableSize(1 << 15).
-		WithBaseTableSize(1 << 15). // Force more compaction.
-		WithBaseLevelSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false).
 		WithLoggingLevel(WARNING)
 	return opt
@@ -1521,7 +1518,7 @@ func TestWriteDeadlock(t *testing.T) {
 	var count int
 	val := make([]byte, 10000)
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		for i := 0; i < 1500; i++ {
+		for i := 0; i < 1000; i++ {
 			key := fmt.Sprintf("%d", i)
 			rand.Read(val)
 			require.NoError(t, txn.SetEntry(NewEntry([]byte(key), val)))
@@ -1759,7 +1756,6 @@ func TestLSMOnly(t *testing.T) {
 
 	opts := LSMOnlyOptions(dir)
 	dopts := DefaultOptions(dir)
-	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
 	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)
@@ -1847,12 +1843,13 @@ func TestGoroutineLeak(t *testing.T) {
 				var wg sync.WaitGroup
 				wg.Add(1)
 				go func() {
+					match := pb.Match{Prefix: []byte("key"), IgnoreBytes: ""}
 					err := db.Subscribe(ctx, func(kvs *pb.KVList) error {
 						require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
 						updated = true
 						wg.Done()
 						return nil
-					}, []byte("key"))
+					}, []pb.Match{match})
 					if err != nil {
 						require.Equal(t, err.Error(), context.Canceled.Error())
 					}
@@ -2268,8 +2265,8 @@ func TestOpenDBReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	// Add bunch of entries that go into value log.
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		require.Greater(t, db.opt.ValueThreshold, 10)
-		val := make([]byte, db.opt.ValueThreshold+10)
+		require.Greater(t, db.valueThreshold(), int64(10))
+		val := make([]byte, db.valueThreshold()+10)
 		rand.Read(val)
 		for i := 0; i < 10; i++ {
 			key := fmt.Sprintf("KEY-%05d", i)

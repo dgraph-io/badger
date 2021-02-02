@@ -230,10 +230,10 @@ func TestCompaction(t *testing.T) {
 
 	t.Run("level 0 to level 1 with lower overlap", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
-			l01 := []keyValVersion{{"foo", "bar", 2, 0}}
-			l1 := []keyValVersion{{"foo", "bar", 1, 0}}
-			l2 := []keyValVersion{{"foo", "bar", 0, 0}}
+			l0 := []keyValVersion{{"foo", "bar", 4, 0}, {"fooz", "baz", 1, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 3, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l2 := []keyValVersion{{"foo", "bar", 1, 0}}
 			// Level 0 has table l0 and l01.
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l01, 0)
@@ -246,8 +246,8 @@ func TestCompaction(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0},
-				{"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0}, {"fooz", "baz", 1, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -260,7 +260,7 @@ func TestCompaction(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
 			// foo version 2 and version 1 should be dropped after compaction.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3, 0}, {"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 1, 0}, {"fooz", "baz", 1, 0},
 			})
 		})
 	})
@@ -973,8 +973,7 @@ func TestLevelGet(t *testing.T) {
 func TestKeyVersions(t *testing.T) {
 	inMemoryOpt := DefaultOptions("").
 		WithSyncWrites(false).
-		WithInMemory(true).
-		WithMemTableSize(4 << 20)
+		WithInMemory(true)
 
 	t.Run("disk", func(t *testing.T) {
 		t.Run("small table", func(t *testing.T) {
@@ -1037,7 +1036,7 @@ func TestKeyVersions(t *testing.T) {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
 				require.NoError(t, writer.Flush())
-				require.Equal(t, 11, len(db.KeySplits(nil)))
+				require.Equal(t, 10, len(db.KeySplits(nil)))
 			})
 		})
 		t.Run("prefix", func(t *testing.T) {

@@ -684,7 +684,7 @@ func TestWindowsDataLoss(t *testing.T) {
 		err := db.Update(func(txn *Txn) error {
 			key := []byte(fmt.Sprintf("%d", i))
 			v := []byte("barValuebarValuebarValuebarValuebarValue")
-			require.Greater(t, len(v), opt.ValueThreshold)
+			require.Greater(t, len(v), db.valueThreshold())
 
 			//32 bytes length and now it's not working
 			err := txn.Set(key, v)

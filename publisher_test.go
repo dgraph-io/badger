@@ -36,6 +36,7 @@ func TestPublisherOrdering(t *testing.T) {
 		go func() {
 			subWg.Done()
 			updates := 0
+			match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
 			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) error {
 				updates += len(kvs.GetKv())
 				for _, kv := range kvs.GetKv() {
@@ -45,7 +46,7 @@ func TestPublisherOrdering(t *testing.T) {
 					wg.Done()
 				}
 				return nil
-			}, []byte("ke"))
+			}, []pb.Match{match})
 			if err != nil {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
@@ -73,6 +74,8 @@ func TestMultiplePrefix(t *testing.T) {
 		go func() {
 			subWg.Done()
 			updates := 0
+			match1 := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
+			match2 := pb.Match{Prefix: []byte("hel"), IgnoreBytes: ""}
 			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) error {
 				updates += len(kvs.GetKv())
 				for _, kv := range kvs.GetKv() {
@@ -86,7 +89,7 @@ func TestMultiplePrefix(t *testing.T) {
 					wg.Done()
 				}
 				return nil
-			}, []byte("ke"), []byte("hel"))
+			}, []pb.Match{match1, match2})
 			if err != nil {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}

@@ -330,6 +330,7 @@ type IteratorOptions struct {
 	// prefix are picked based on their range of keys.
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
+	SinceTs     uint64 // Only read data that has version > SinceTs.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -342,6 +343,10 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 }
 
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
+	// Ignore this table if its max version is less than the sinceTs.
+	if t.MaxVersion() < opt.SinceTs {
+		return false
+	}
 	if len(opt.Prefix) == 0 {
 		return true
 	}
@@ -362,10 +367,24 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // pickTables picks the necessary table for the iterator. This function also assumes
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
+	filterTables := func(tables []*table.Table) []*table.Table {
+		if opt.SinceTs > 0 {
+			tmp := tables[:0]
+			for _, t := range tables {
+				if t.MaxVersion() < opt.SinceTs {
+					continue
+				}
+				tmp = append(tmp, t)
+			}
+			tables = tmp
+		}
+		return tables
+	}
+
 	if len(opt.Prefix) == 0 {
 		out := make([]*table.Table, len(all))
 		copy(out, all)
-		return out
+		return filterTables(out)
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
 		// table.Biggest >= opt.prefix
@@ -384,7 +403,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		})
 		out := make([]*table.Table, len(filtered[:eIdx]))
 		copy(out, filtered[:eIdx])
-		return out
+		return filterTables(out)
 	}
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
@@ -405,7 +424,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		}
 		out = append(out, t)
 	}
-	return out
+	return filterTables(out)
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -474,7 +493,6 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
-
 	res := &Iterator{
 		txn:    txn,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),
@@ -536,6 +554,10 @@ func (it *Iterator) Close() {
 		return
 	}
 	it.closed = true
+	if it.iitr == nil {
+		atomic.AddInt32(&it.txn.numIterators, -1)
+		return
+	}
 
 	it.iitr.Close()
 	// It is important to wait for the fill goroutines to finish. Otherwise, we might leave zombie
@@ -558,6 +580,9 @@ func (it *Iterator) Close() {
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
 // to ensure you have access to a valid it.Item().
 func (it *Iterator) Next() {
+	if it.iitr == nil {
+		return
+	}
 	// Reuse current item
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
 	it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2
@@ -612,7 +637,8 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	if version > it.readTs {
+	// Ignore everything that is above the readTs and below or at the sinceTs.
+	if version > it.readTs || version <= it.opt.SinceTs {
 		mi.Next()
 		return false
 	}
@@ -724,6 +750,9 @@ func (it *Iterator) prefetch() {
 // smallest key greater than the provided key if iterating in the forward direction.
 // Behavior would be reversed if iterating backwards.
 func (it *Iterator) Seek(key []byte) {
+	if it.iitr == nil {
+		return
+	}
 	if len(key) > 0 {
 		it.txn.addReadKey(key)
 	}
