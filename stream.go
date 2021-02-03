@@ -446,7 +446,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 func (db *DB) newStream() *Stream {
 	return &Stream{
 		db:        db,
-		NumGo:     8,
+		NumGo:     db.opt.NumGoroutines,
 		LogPrefix: "Badger.Stream",
 	}
 }
