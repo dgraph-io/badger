@@ -58,9 +58,9 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	VLogPercentile    float64
-	MinValueThreshold int64
-	NumMemtables      int
+	VLogPercentile float64
+	ValueThreshold int64
+	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
 	BlockSize          int
@@ -162,8 +162,8 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries: 1000000,
 
-		VLogPercentile:    0.0,
-		MinValueThreshold: 1 << 10, // 1 KB.
+		VLogPercentile: 0.0,
+		ValueThreshold: 1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
@@ -196,7 +196,7 @@ const (
 	maxValueThreshold = (1 << 20) // 1 MB
 )
 
-// LSMOnlyOptions follows from DefaultOptions, but sets a higher MinValueThreshold
+// LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
 // so values would be collocated with the LSM tree, with value log largely acting
 // as a write-ahead log only. These options would reduce the disk usage of value
 // log, and make Badger act more like a typical LSM tree.
@@ -206,12 +206,12 @@ func LSMOnlyOptions(path string) Options {
 	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
 	// Setting it to ValueLogMaxEntries to 1000, can generate too many files.
 	// These options are better configured on a usage basis, than broadly here.
-	// The MinValueThreshold is the most important setting a user needs to do to
+	// The ValueThreshold is the most important setting a user needs to do to
 	// achieve a heavier usage of LSM tree.
-	// NOTE: If a user does not want to set 64KB as the MinValueThreshold because
+	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
 	// values smaller than 1KB to be collocated with the keys in the LSM tree.
-	return DefaultOptions(path).WithMinValueThreshold(maxValueThreshold /* 1 MB */)
+	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
 }
 
 // WithDir returns a new Options value with Dir set to the given value.
@@ -325,14 +325,14 @@ func (opt Options) WithMaxLevels(val int) Options {
 	return opt
 }
 
-// WithMinValueThreshold returns a new Options value with MinValueThreshold set to the given value.
+// WithValueThreshold returns a new Options value with ValueThreshold set to the given value.
 //
-// MinValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
+// ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of MinValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithMinValueThreshold(val int64) Options {
-	opt.MinValueThreshold = val
+// The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
+func (opt Options) WithValueThreshold(val int64) Options {
+	opt.ValueThreshold = val
 	return opt
 }
 
@@ -343,9 +343,9 @@ func (opt Options) WithMinValueThreshold(val int64) Options {
 //
 // VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
 // and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
-// [MinValueThreshold, Options.maxValueThreshold]
+// [ValueThreshold, Options.maxValueThreshold]
 //
-// Say VLogPercentile with 1.0 means threshold will eventually sets too Options.maxValueThreshold
+// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
 //
 // The default value of VLogPercentile is 0.0.
 func (opt Options) WithVLogPercentile(t float64) Options {

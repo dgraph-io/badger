@@ -77,7 +77,7 @@ func stream(cmd *cobra.Command, args []string) error {
 	}
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(so.readOnly).
-		WithMinValueThreshold(1 << 10 /* 1KB */).
+		WithValueThreshold(1 << 10 /* 1KB */).
 		WithNumVersionsToKeep(so.numVersions).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).

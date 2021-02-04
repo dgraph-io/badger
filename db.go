@@ -153,18 +153,18 @@ func checkAndSetOptions(opt *Options) error {
 		return errors.New("vlogPercentile must be within range of 0.0-1.0")
 	}
 
-	// We are limiting opt.MinValueThreshold to maxValueThreshold for now.
-	if opt.MinValueThreshold > maxValueThreshold {
-		return errors.Errorf("Invalid MinValueThreshold, must be less or equal to %d",
+	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
+	if opt.ValueThreshold > maxValueThreshold {
+		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
 			maxValueThreshold)
 	}
 
-	// If MinValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
+	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if opt.MinValueThreshold > opt.maxBatchSize {
+	if opt.ValueThreshold > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
-			"reduce opt.MinValueThreshold or increase opt.MaxTableSize.",
-			opt.MinValueThreshold, opt.maxBatchSize)
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
+			opt.ValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
@@ -318,7 +318,7 @@ func Open(opt Options) (*DB, error) {
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
-		db.opt.MinValueThreshold = math.MaxInt32
+		db.opt.ValueThreshold = math.MaxInt32
 	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
@@ -772,7 +772,7 @@ func (db *DB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		var err error
-		if entry.skipVlog(db.valueThreshold()) {
+		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -780,7 +780,7 @@ func (db *DB) writeToLSM(b *request) error {
 					// Ensure value pointer flag is removed. Otherwise, the value will fail
 					// to be retrieved during iterator prefetch. `bitValuePointer` is only
 					// known to be set in write to LSM when the entry is loaded from a backup
-					// with lower MinValueThreshold and its value was stored in the value log.
+					// with lower ValueThreshold and its value was stored in the value log.
 					Meta:      entry.meta &^ bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
@@ -864,7 +864,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += e.estimateSize(db.valueThreshold())
+		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
@@ -1688,7 +1688,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
 	db.indexCache.Clear()
-
+	db.threshold.Clear(db.opt)
 	return resume, nil
 }
 

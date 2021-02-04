@@ -155,7 +155,7 @@ func (e *Entry) isZero() bool {
 	return len(e.Key) == 0
 }
 
-func (e *Entry) estimateSize(threshold int64) int64 {
+func (e *Entry) estimateSizeAndSetThreshold(threshold int64) int64 {
 	if e.valThreshold == 0 {
 		e.valThreshold = threshold
 	}
@@ -167,14 +167,11 @@ func (e *Entry) estimateSize(threshold int64) int64 {
 	return k + 12 + 2 // 12 for ValuePointer, 2 for metas.
 }
 
-func (e *Entry) skipVlog(threshold int64) bool {
+func (e *Entry) skipVlogAndSetThreshold(threshold int64) bool {
 	if e.valThreshold == 0 {
 		e.valThreshold = threshold
 	}
-	if int64(len(e.Value)) < e.valThreshold {
-		return true
-	}
-	return false
+	return int64(len(e.Value)) < e.valThreshold
 }
 
 func (e Entry) print(prefix string) {

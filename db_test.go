@@ -1759,20 +1759,20 @@ func TestLSMOnly(t *testing.T) {
 
 	opts := LSMOnlyOptions(dir)
 	dopts := DefaultOptions(dir)
-	require.NotEqual(t, dopts.MinValueThreshold, opts.MinValueThreshold)
+	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
-	dopts.MinValueThreshold = 1 << 21
+	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)
-	require.Contains(t, err.Error(), "Invalid MinValueThreshold")
+	require.Contains(t, err.Error(), "Invalid ValueThreshold")
 
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
-	dopts.MinValueThreshold = LSMOnlyOptions(dir).MinValueThreshold
+	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
 	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MemTableSize = int64(LSMOnlyOptions(dir).MinValueThreshold)
+	dopts.MemTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")
 	require.Contains(t, err.Error(),
-		fmt.Sprintf("Valuethreshold %d greater than max batch size", dopts.MinValueThreshold))
+		fmt.Sprintf("Valuethreshold %d greater than max batch size", dopts.ValueThreshold))
 
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
@@ -2296,7 +2296,7 @@ func TestBannedPrefixes(t *testing.T) {
 	opt := getTestOptions(dir).WithNamespaceOffset(3)
 	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
 	// restart.
-	opt.MinValueThreshold = 0
+	opt.ValueThreshold = 0
 	opt.ValueLogMaxEntries = 2
 	// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
 	initialBytes := make([]byte, opt.NamespaceOffset)

@@ -69,8 +69,6 @@ var errDeleteVlogFile = errors.New("Delete vlog file")
 
 type logEntry func(e Entry, vp valuePointer) error
 
-type ReqValSize []int64
-
 type safeRead struct {
 	k []byte
 	v []byte
@@ -235,7 +233,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
-			es := ne.estimateSize(vlog.db.valueThreshold())
+			es := ne.estimateSizeAndSetThreshold(vlog.db.valueThreshold())
 			// Consider size of value as well while considering the total size
 			// of the batch. There have been reports of high memory usage in
 			// rewrite because we don't consider the value size. See #1292.
@@ -847,13 +845,13 @@ func (vlog *valueLog) write(reqs []*request) error {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
 		var written, bytesWritten int
-		valueSizes := make(ReqValSize, 0, len(b.Entries))
+		valueSizes := make([]int64, 0, len(b.Entries))
 		for j := range b.Entries {
 			buf.Reset()
 
 			e := b.Entries[j]
 			valueSizes = append(valueSizes, int64(len(e.Value)))
-			if e.skipVlog(vlog.db.valueThreshold()) {
+			if e.skipVlogAndSetThreshold(vlog.db.valueThreshold()) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -1108,9 +1106,11 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 }
 
 type vlogThreshold struct {
+	logger         Logger
 	percentile     float64
 	valueThreshold int64
-	valueCh        chan ReqValSize
+	valueCh        chan []int64
+	clearCh        chan bool
 	closer         *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics *z.HistogramData
@@ -1119,7 +1119,7 @@ type vlogThreshold struct {
 func initVlogThreshold(opt *Options) *vlogThreshold {
 	getBounds := func() []float64 {
 		mxbd := opt.maxValueThreshold
-		mnbd := float64(opt.MinValueThreshold)
+		mnbd := float64(opt.ValueThreshold)
 		y.AssertTruef(mxbd >= mnbd, "maximum threshold bound is less than the min threshold")
 		size := math.Min(mxbd-mnbd+1, 1024.0)
 		bdstp := (mxbd - mnbd) / size
@@ -1138,15 +1138,22 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 		return bounds
 	}
 	return &vlogThreshold{
+		logger:         opt.Logger,
 		percentile:     opt.VLogPercentile,
-		valueThreshold: opt.MinValueThreshold,
-		valueCh:        make(chan ReqValSize, 1000),
+		valueThreshold: opt.ValueThreshold,
+		valueCh:        make(chan []int64, 1000),
+		clearCh:        make(chan bool, 1),
 		closer:         z.NewCloser(1),
 		vlMetrics:      z.NewHistogramData(getBounds()),
 	}
 }
 
-func (v *vlogThreshold) update(sizes ReqValSize) {
+func (v *vlogThreshold) Clear(opt Options) {
+	atomic.StoreInt64(&v.valueThreshold, opt.ValueThreshold)
+	v.clearCh <- true
+}
+
+func (v *vlogThreshold) update(sizes []int64) {
 	v.valueCh <- sizes
 }
 
@@ -1161,9 +1168,6 @@ func (v *vlogThreshold) listenForValueThresholdUpdate() {
 		case <-v.closer.HasBeenClosed():
 			return
 		case val := <-v.valueCh:
-			if val == nil {
-				continue
-			}
 			for _, e := range val {
 				v.vlMetrics.Update(e)
 			}
@@ -1172,9 +1176,13 @@ func (v *vlogThreshold) listenForValueThresholdUpdate() {
 			// value log file.
 			p := int64(v.vlMetrics.Percentile(v.percentile))
 			if atomic.LoadInt64(&v.valueThreshold) != p {
-				// v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
+				if v.logger != nil {
+					v.logger.Infof("updating value of threshold to: %d", p)
+				}
 				atomic.StoreInt64(&v.valueThreshold, p)
 			}
+		case <-v.clearCh:
+			v.vlMetrics.Clear()
 		}
 	}
 }

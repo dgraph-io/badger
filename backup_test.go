@@ -511,7 +511,7 @@ func TestBackupBitClear(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
-	opt.MinValueThreshold = 10 // This is important
+	opt.ValueThreshold = 10 // This is important
 	db, err := Open(opt)
 	require.NoError(t, err)
 
@@ -541,7 +541,7 @@ func TestBackupBitClear(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	opt = getTestOptions(dir)
-	opt.MinValueThreshold = 200 // This is important.
+	opt.ValueThreshold = 200 // This is important.
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
