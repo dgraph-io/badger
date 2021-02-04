@@ -60,7 +60,8 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	ValueThreshold int
+	VLogPercentile float64
+	ValueThreshold int64
 	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
@@ -112,6 +113,8 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	maxValueThreshold float64
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -160,8 +163,11 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                1 << 10, // 1 KB.
+		ValueLogMaxEntries: 1000000,
+
+		VLogPercentile: 0.0,
+		ValueThreshold: 1 << 10, // 1 KB.
+
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
@@ -336,8 +342,25 @@ func (opt Options) WithMaxLevels(val int) Options {
 // tree or separately in the log value files.
 //
 // The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int) Options {
+func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
+	return opt
+}
+
+// WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
+//
+// VLogPercentile with 0.0 means no dynamic thresholding is enabled.
+// MinThreshold value will always act as the value threshold.
+//
+// VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
+// and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
+// [ValueThreshold, Options.maxValueThreshold]
+//
+// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
+//
+// The default value of VLogPercentile is 0.0.
+func (opt Options) WithVLogPercentile(t float64) Options {
+	opt.VLogPercentile = t
 	return opt
 }
 

@@ -2268,8 +2268,8 @@ func TestOpenDBReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	// Add bunch of entries that go into value log.
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		require.Greater(t, db.opt.ValueThreshold, 10)
-		val := make([]byte, db.opt.ValueThreshold+10)
+		require.Greater(t, db.valueThreshold(), int64(10))
+		val := make([]byte, db.valueThreshold()+10)
 		rand.Read(val)
 		for i := 0; i < 10; i++ {
 			key := fmt.Sprintf("KEY-%05d", i)

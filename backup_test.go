@@ -517,7 +517,7 @@ func TestBackupBitClear(t *testing.T) {
 
 	key := []byte("foo")
 	val := []byte(fmt.Sprintf("%0100d", 1))
-	require.Greater(t, len(val), db.opt.ValueThreshold)
+	require.Greater(t, int64(len(val)), db.valueThreshold())
 
 	err = db.Update(func(txn *Txn) error {
 		e := NewEntry(key, val)

@@ -2,12 +2,12 @@ module github.com/dgraph-io/badger/v3
 
 go 1.12
 
-// replace github.com/dgraph-io/ristretto => /home/mrjn/go/src/github.com/dgraph-io/ristretto
+// replace github.com/dgraph-io/ristretto => /home/amanbansal/go/src/github.com/dgraph-io/ristretto
 
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20210122082011-bb5d392ed82d
+	github.com/dgraph-io/ristretto v0.0.4-0.20210204105926-13024c7bdb7e
 	github.com/dustin/go-humanize v1.0.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.3.1
@@ -20,6 +20,6 @@ require (
 	github.com/stretchr/testify v1.4.0
 	go.opencensus.io v0.22.5
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974
-	golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f
+	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )

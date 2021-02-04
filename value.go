@@ -233,7 +233,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
-			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
+			es := ne.estimateSizeAndSetThreshold(vlog.db.valueThreshold())
 			// Consider size of value as well while considering the total size
 			// of the batch. There have been reports of high memory usage in
 			// rewrite because we don't consider the value size. See #1292.
@@ -438,6 +438,10 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
+func (db *DB) valueThreshold() int64 {
+	return atomic.LoadInt64(&db.threshold.valueThreshold)
+}
+
 type valueLog struct {
 	dirPath string
 
@@ -624,7 +628,6 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -842,11 +845,13 @@ func (vlog *valueLog) write(reqs []*request) error {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
 		var written, bytesWritten int
+		valueSizes := make([]int64, 0, len(b.Entries))
 		for j := range b.Entries {
 			buf.Reset()
 
 			e := b.Entries[j]
-			if vlog.db.opt.skipVlog(e) {
+			valueSizes = append(valueSizes, int64(len(e.Value)))
+			if e.skipVlogAndSetThreshold(vlog.db.valueThreshold()) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -876,13 +881,13 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			written++
 			bytesWritten += buf.Len()
-
 			// No need to flush anything, we write to file directly via mmap.
 		}
 		y.NumWrites.Add(int64(written))
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
+		vlog.db.threshold.update(valueSizes)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
@@ -1097,5 +1102,87 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	}
 	for fid, discard := range stats {
 		vlog.discardStats.Update(fid, discard)
+	}
+}
+
+type vlogThreshold struct {
+	logger         Logger
+	percentile     float64
+	valueThreshold int64
+	valueCh        chan []int64
+	clearCh        chan bool
+	closer         *z.Closer
+	// Metrics contains a running log of statistics like amount of data stored etc.
+	vlMetrics *z.HistogramData
+}
+
+func initVlogThreshold(opt *Options) *vlogThreshold {
+	getBounds := func() []float64 {
+		mxbd := opt.maxValueThreshold
+		mnbd := float64(opt.ValueThreshold)
+		y.AssertTruef(mxbd >= mnbd, "maximum threshold bound is less than the min threshold")
+		size := math.Min(mxbd-mnbd+1, 1024.0)
+		bdstp := (mxbd - mnbd) / size
+		bounds := make([]float64, int64(size))
+		for i := range bounds {
+			if i == 0 {
+				bounds[0] = mnbd
+				continue
+			}
+			if i == int(size-1) {
+				bounds[i] = mxbd
+				continue
+			}
+			bounds[i] = bounds[i-1] + bdstp
+		}
+		return bounds
+	}
+	return &vlogThreshold{
+		logger:         opt.Logger,
+		percentile:     opt.VLogPercentile,
+		valueThreshold: opt.ValueThreshold,
+		valueCh:        make(chan []int64, 1000),
+		clearCh:        make(chan bool, 1),
+		closer:         z.NewCloser(1),
+		vlMetrics:      z.NewHistogramData(getBounds()),
+	}
+}
+
+func (v *vlogThreshold) Clear(opt Options) {
+	atomic.StoreInt64(&v.valueThreshold, opt.ValueThreshold)
+	v.clearCh <- true
+}
+
+func (v *vlogThreshold) update(sizes []int64) {
+	v.valueCh <- sizes
+}
+
+func (v *vlogThreshold) close() {
+	v.closer.SignalAndWait()
+}
+
+func (v *vlogThreshold) listenForValueThresholdUpdate() {
+	defer v.closer.Done()
+	for {
+		select {
+		case <-v.closer.HasBeenClosed():
+			return
+		case val := <-v.valueCh:
+			for _, e := range val {
+				v.vlMetrics.Update(e)
+			}
+			// we are making it to get Options.VlogPercentile so that values with sizes
+			// in range of Options.VlogPercentile will make it to the LSM tree and rest to the
+			// value log file.
+			p := int64(v.vlMetrics.Percentile(v.percentile))
+			if atomic.LoadInt64(&v.valueThreshold) != p {
+				if v.logger != nil {
+					v.logger.Infof("updating value of threshold to: %d", p)
+				}
+				atomic.StoreInt64(&v.valueThreshold, p)
+			}
+		case <-v.clearCh:
+			v.vlMetrics.Clear()
+		}
 	}
 }

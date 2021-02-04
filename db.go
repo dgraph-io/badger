@@ -120,6 +120,7 @@ type DB struct {
 
 	orc              *oracle
 	bannedNamespaces *lockedKeys
+	threshold        *vlogThreshold
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -146,6 +147,12 @@ func checkAndSetOptions(opt *Options) error {
 	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
+	// This is the maximum value, vlogThreshold can have if dynamic thresholding is enabled.
+	opt.maxValueThreshold = math.Min(maxValueThreshold, float64(opt.maxBatchSize))
+	if opt.VLogPercentile < 0.0 || opt.VLogPercentile > 1.0 {
+		return errors.New("vlogPercentile must be within range of 0.0-1.0")
+	}
+
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
 		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
@@ -154,7 +161,7 @@ func checkAndSetOptions(opt *Options) error {
 
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if int64(opt.ValueThreshold) > opt.maxBatchSize {
+	if opt.ValueThreshold > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
 			opt.ValueThreshold, opt.maxBatchSize)
@@ -251,6 +258,7 @@ func Open(opt Options) (*DB, error) {
 		pub:              newPublisher(),
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
+		threshold:        initVlogThreshold(&opt),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -373,6 +381,8 @@ func Open(opt Options) (*DB, error) {
 	// compaction when run in offline mode via the flatten tool.
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
+
+	go db.threshold.listenForValueThresholdUpdate()
 
 	if err := db.initBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
@@ -625,6 +635,7 @@ func (db *DB) close() (err error) {
 	db.indexCache.Close()
 
 	atomic.StoreUint32(&db.isClosed, 1)
+	db.threshold.close()
 
 	if db.opt.InMemory {
 		return
@@ -751,10 +762,6 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (opt Options) skipVlog(e *Entry) bool {
-	return len(e.Value) < opt.ValueThreshold
-}
-
 func (db *DB) writeToLSM(b *request) error {
 	// We should check the length of b.Prts and b.Entries only when badger is not
 	// running in InMemory mode. In InMemory mode, we don't write anything to the
@@ -765,7 +772,7 @@ func (db *DB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		var err error
-		if db.opt.skipVlog(entry) {
+		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -857,7 +864,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += int64(e.estimateSize(db.opt.ValueThreshold))
+		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
@@ -1681,7 +1688,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
 	db.indexCache.Clear()
-
+	db.threshold.Clear(db.opt)
 	return resume, nil
 }
 
