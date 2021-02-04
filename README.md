@@ -163,7 +163,6 @@ Below is a list of known projects that use Badger:
 * [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
 * [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
 * [smallstep/certificates](https://github.com/smallstep/certificates) - Step-ca is an online certificate authority for secure, automated certificate management.
-* [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
 * [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
