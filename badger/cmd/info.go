@@ -110,7 +110,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		ds, err := badger.InitDiscardStats(bopt)
 		y.Check(err)
 		ds.Iterate(func(fid, stats uint64) {
-			fmt.Printf("Value Log Fid: %5d. Stats: %10d [ %s ]\n", fid, stats, humanize.IBytes(stats))
+			fmt.Printf("Value Log Fid: %5d. Stats: %10d [ %s ]\n",
+				fid, stats, humanize.IBytes(stats))
 		})
 		fmt.Println("DONE")
 		return nil
