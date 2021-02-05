@@ -761,12 +761,12 @@ func TestWriteBatchDuplicate(t *testing.T) {
 			wb := db.NewManagedWriteBatch()
 			defer wb.Cancel()
 
-			for i := uint64(0); i < uint64(N); i++ {
+			for i := uint64(1); i <= uint64(N); i++ {
 				// Multiple versions of the same key.
 				require.NoError(t, wb.SetEntryAt(&Entry{Key: k, Value: v}, i))
 			}
 			require.NoError(t, wb.Flush())
-			readVerify(t, db, N, []int{9, 8, 7, 6, 5, 4, 3, 2, 1, 0})
+			readVerify(t, db, N, []int{10, 9, 8, 7, 6, 5, 4, 3, 2, 1})
 		})
 	})
 }
