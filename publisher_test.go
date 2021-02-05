@@ -45,7 +45,7 @@ func TestPublisherOrdering(t *testing.T) {
 					wg.Done()
 				}
 				return nil
-			}, []byte("ke"))
+			}, "", []byte("ke"))
 			if err != nil {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
@@ -86,7 +86,7 @@ func TestMultiplePrefix(t *testing.T) {
 					wg.Done()
 				}
 				return nil
-			}, []byte("ke"), []byte("hel"))
+			}, "", []byte("ke"), []byte("hel"))
 			if err != nil {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}

@@ -571,7 +571,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 				return batch.Flush()
 			}
-			_ = db.Subscribe(ctx, updater, accountIDS...)
+			_ = db.Subscribe(ctx, updater, "", accountIDS...)
 		}()
 	}
 
