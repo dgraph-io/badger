@@ -552,7 +552,7 @@ func (vlog *valueLog) init(db *DB) {
 	vlog.dirPath = vlog.opt.ValueDir
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
-	lf, err := initDiscardStats(vlog.opt)
+	lf, err := InitDiscardStats(vlog.opt)
 	y.Check(err)
 	vlog.discardStats = lf
 }
