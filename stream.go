@@ -81,6 +81,8 @@ type Stream struct {
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(buf *z.Buffer) error
 
+	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
+	SinceTs      uint64
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
@@ -193,6 +195,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		iterOpts.AllVersions = true
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = false
+		iterOpts.SinceTs = st.SinceTs
 		itr := txn.NewIterator(iterOpts)
 		itr.ThreadId = threadId
 		defer itr.Close()

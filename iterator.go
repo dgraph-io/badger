@@ -330,6 +330,7 @@ type IteratorOptions struct {
 	// prefix are picked based on their range of keys.
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
+	SinceTs     uint64 // Only read data that has version > SinceTs.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -342,6 +343,10 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 }
 
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
+	// Ignore this table if its max version is less than the sinceTs.
+	if t.MaxVersion() < opt.SinceTs {
+		return false
+	}
 	if len(opt.Prefix) == 0 {
 		return true
 	}
@@ -362,10 +367,24 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // pickTables picks the necessary table for the iterator. This function also assumes
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
+	filterTables := func(tables []*table.Table) []*table.Table {
+		if opt.SinceTs > 0 {
+			tmp := tables[:0]
+			for _, t := range tables {
+				if t.MaxVersion() < opt.SinceTs {
+					continue
+				}
+				tmp = append(tmp, t)
+			}
+			tables = tmp
+		}
+		return tables
+	}
+
 	if len(opt.Prefix) == 0 {
 		out := make([]*table.Table, len(all))
 		copy(out, all)
-		return out
+		return filterTables(out)
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
 		// table.Biggest >= opt.prefix
@@ -384,7 +403,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		})
 		out := make([]*table.Table, len(filtered[:eIdx]))
 		copy(out, filtered[:eIdx])
-		return out
+		return filterTables(out)
 	}
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
@@ -405,7 +424,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		}
 		out = append(out, t)
 	}
-	return out
+	return filterTables(out)
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -612,7 +631,8 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	if version > it.readTs {
+	// Ignore everything that is above the readTs and below or at the sinceTs.
+	if version > it.readTs || version <= it.opt.SinceTs {
 		mi.Next()
 		return false
 	}

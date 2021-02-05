@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ type tableMock struct {
 func (tm *tableMock) Smallest() []byte             { return tm.left }
 func (tm *tableMock) Biggest() []byte              { return tm.right }
 func (tm *tableMock) DoesNotHave(hash uint32) bool { return false }
+func (tm *tableMock) MaxVersion() uint64           { return math.MaxUint64 }
 
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
@@ -120,6 +122,42 @@ func TestPickSortTables(t *testing.T) {
 	filtered = opt.pickTables(tables)
 	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
 	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
+}
+
+func TestIterateSinceTs(t *testing.T) {
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%04d", i))
+	}
+	val := []byte("OK")
+	n := 100000
+
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		batch := db.NewWriteBatch()
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				t.Logf("Put i=%d\n", i)
+			}
+			require.NoError(t, batch.Set(bkey(i), val))
+		}
+		require.NoError(t, batch.Flush())
+
+		maxVs := db.MaxVersion()
+		sinceTs := maxVs - maxVs/10
+		iopt := DefaultIteratorOptions
+		iopt.SinceTs = sinceTs
+
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+
+			for it.Rewind(); it.Valid(); it.Next() {
+				i := it.Item()
+				require.GreaterOrEqual(t, i.Version(), sinceTs)
+			}
+			return nil
+		})
+
+	})
 }
 
 func TestIteratePrefix(t *testing.T) {
