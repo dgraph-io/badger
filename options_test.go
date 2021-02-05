@@ -8,8 +8,11 @@ import (
 )
 
 func TestOptions(t *testing.T) {
+	// copy all the default options over to a big SuperFlag string
 	defaultSuperFlag := generateSuperFlag(DefaultOptions(""))
+	// fill an empty Options with values from the SuperFlag
 	overwritten := overwriteOptions(defaultSuperFlag, Options{})
+	// make sure they're equal
 	if !optionsEqual(DefaultOptions(""), overwritten) {
 		t.Fatal("generated default SuperFlag != default Options")
 	}

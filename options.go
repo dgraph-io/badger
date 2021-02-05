@@ -120,10 +120,6 @@ type Options struct {
 	maxValueThreshold float64
 }
 
-// TODO: move everything from DefaultOptions to here? then MergeAndCheckDefault
-//       will handle overwriting default options with the set flags
-const DefaultFlags = ""
-
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(superflag string) Options {
@@ -183,12 +179,11 @@ func DefaultOptions(superflag string) Options {
 	})
 }
 
+// overwriteOptions replaces Option values if found in superflag
 func overwriteOptions(superflag string, options Options) Options {
 	flags := z.NewSuperFlag(superflag)
-
 	v := reflect.ValueOf(&options).Elem()
 	optionsStruct := v.Type()
-
 	for i := 0; i < v.NumField(); i++ {
 		// only iterate over exported fields
 		if field := v.Field(i); field.CanInterface() {
@@ -196,7 +191,6 @@ func overwriteOptions(superflag string, options Options) Options {
 			// insensitive
 			name := strings.ToLower(optionsStruct.Field(i).Name)
 			kind := v.Field(i).Kind()
-
 			// make sure the option exists in the SuperFlag first, otherwise
 			// we'd overwrite the defaults with 0 values
 			if flags.Has(name) {
@@ -220,7 +214,6 @@ func overwriteOptions(superflag string, options Options) Options {
 			}
 		}
 	}
-
 	return options
 }
 
