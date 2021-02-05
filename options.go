@@ -196,20 +196,15 @@ func overwriteOptions(superflag string, options Options) Options {
 			if flags.Has(name) {
 				switch kind {
 				case reflect.Bool:
-					f := flags.GetBool(name)
-					field.SetBool(f)
+					field.SetBool(flags.GetBool(name))
 				case reflect.Int, reflect.Int64:
-					f := flags.GetInt64(name)
-					field.SetInt(f)
+					field.SetInt(flags.GetInt64(name))
 				case reflect.Uint32:
-					f := flags.GetUint32(name)
-					field.SetUint(uint64(f))
+					field.SetUint(uint64(flags.GetUint32(name)))
 				case reflect.Float64:
-					f := flags.GetFloat64(name)
-					field.SetFloat(f)
+					field.SetFloat(flags.GetFloat64(name))
 				case reflect.String:
-					f := flags.GetString(name)
-					field.SetString(f)
+					field.SetString(flags.GetString(name))
 				}
 			}
 		}
