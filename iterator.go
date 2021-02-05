@@ -330,7 +330,7 @@ type IteratorOptions struct {
 	// prefix are picked based on their range of keys.
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
-	SinceTs     uint64 // Only read data that has version >= SinceTs.
+	SinceTs     uint64 // Only read data that has version > SinceTs.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -367,42 +367,48 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // pickTables picks the necessary table for the iterator. This function also assumes
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
-	allCopy := make([]*table.Table, len(all))
-	copy(allCopy, all)
-	if opt.SinceTs > 0 {
-		tmp := allCopy[:0]
-		for _, t := range allCopy {
-			if t.MaxVersion() < opt.SinceTs {
-				continue
+	filterTables := func(tables []*table.Table) []*table.Table {
+		if opt.SinceTs > 0 {
+			tmp := tables[:0]
+			for _, t := range tables {
+				if t.MaxVersion() < opt.SinceTs {
+					continue
+				}
+				tmp = append(tmp, t)
 			}
-			tmp = append(tmp, t)
+			tables = tmp
 		}
-		allCopy = tmp
+		return tables
 	}
+
 	if len(opt.Prefix) == 0 {
-		return allCopy
+		out := make([]*table.Table, len(all))
+		copy(out, all)
+		return filterTables(out)
 	}
-	sIdx := sort.Search(len(allCopy), func(i int) bool {
+	sIdx := sort.Search(len(all), func(i int) bool {
 		// table.Biggest >= opt.prefix
 		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
-		return opt.compareToPrefix(allCopy[i].Biggest()) >= 0
+		return opt.compareToPrefix(all[i].Biggest()) >= 0
 	})
-	if sIdx == len(allCopy) {
+	if sIdx == len(all) {
 		// Not found.
 		return []*table.Table{}
 	}
 
-	filtered := allCopy[sIdx:]
+	filtered := all[sIdx:]
 	if !opt.prefixIsKey {
 		eIdx := sort.Search(len(filtered), func(i int) bool {
 			return opt.compareToPrefix(filtered[i].Smallest()) > 0
 		})
-		return filtered[:eIdx]
+		out := make([]*table.Table, len(filtered[:eIdx]))
+		copy(out, filtered[:eIdx])
+		return filterTables(out)
 	}
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
+	var out []*table.Table
 	hash := y.Hash(opt.Prefix)
-	out := filtered[:0]
 	for _, t := range filtered {
 		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
 		// stop. This is an IMPORTANT optimization, just considering how often we call
@@ -418,7 +424,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		}
 		out = append(out, t)
 	}
-	return out
+	return filterTables(out)
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -625,8 +631,8 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	// Ignore everything that is above the readTs and below the sinceTs.
-	if version > it.readTs || version < it.opt.SinceTs {
+	// Ignore everything that is above the readTs and below or at the sinceTs.
+	if version > it.readTs || version <= it.opt.SinceTs {
 		mi.Next()
 		return false
 	}

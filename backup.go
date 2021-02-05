@@ -27,6 +27,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
+	"github.com/pkg/errors"
 )
 
 // flushThreshold determines when a buffer will be flushed. When performing a
@@ -68,6 +69,10 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			item := itr.Item()
 			if !bytes.Equal(item.Key(), key) {
 				return list, nil
+			}
+			if item.Version() < since {
+				return nil, errors.Errorf("Backup: Item Version: %d less than sinceTs: %d",
+					item.Version(), since)
 			}
 
 			var valCopy []byte
