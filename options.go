@@ -23,6 +23,7 @@ import (
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -117,12 +118,18 @@ type Options struct {
 	maxValueThreshold float64
 }
 
+// TODO: move everything from DefaultOptions to here? then MergeAndCheckDefault
+//       will handle overwriting default options with the set flags
+const DefaultFlags = ""
+
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
-func DefaultOptions(path string) Options {
+func DefaultOptions(superflag string) Options {
+	flags := z.NewSuperFlag(superflag).MergeAndCheckDefault(DefaultFlags)
+
 	return Options{
-		Dir:      path,
-		ValueDir: path,
+		Dir:      flags.GetString("path"),
+		ValueDir: flags.GetString("path"),
 
 		MemTableSize:        64 << 20,
 		BaseTableSize:       2 << 20,
