@@ -1826,18 +1826,17 @@ type KVList = pb.KVList
 // At least one prefix should be passed, or an error will be returned.
 // You can use an empty prefix to monitor all changes to the DB.
 // Ignore string is the byte ranges for which prefix matching will be ignored.
-// For example: ignore = "2-3", and prefix = "abcde" will match for keys "abxxe", "abdfe" etc.
+// For example: ignore = "2-3", and prefix = "abc" will match for keys "abxxc", "abdfc" etc.
 // This function blocks until the given context is done or an error occurs.
 // The given function will be called with a new KVList containing the modified keys and the
 // corresponding values.
-func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, ignore string,
-	prefixes ...[]byte) error {
+func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches []pb.Match) error {
 	if cb == nil {
 		return ErrNilCallback
 	}
 
 	c := z.NewCloser(1)
-	recvCh, id := db.pub.newSubscriber(c, ignore, prefixes...)
+	recvCh, id := db.pub.newSubscriber(c, matches)
 	slurp := func(batch *pb.KVList) error {
 		for {
 			select {
