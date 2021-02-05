@@ -508,7 +508,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	persistedMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Lock()
 	require.True(t, db.vlog.discardStats.Len() > 1, "some discardStats should be generated")
-	db.vlog.discardStats.iterate(func(fid, val uint64) {
+	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		persistedMap[fid] = val
 	})
 
@@ -522,7 +522,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
 	db.vlog.discardStats.Lock()
 	statsMap := make(map[uint64]uint64)
-	db.vlog.discardStats.iterate(func(fid, val uint64) {
+	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		statsMap[fid] = val
 	})
 	require.True(t, reflect.DeepEqual(persistedMap, statsMap), "Discard maps are not equal")

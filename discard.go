@@ -39,7 +39,7 @@ type discardStats struct {
 
 const discardFname string = "DISCARD"
 
-func initDiscardStats(opt Options) (*discardStats, error) {
+func InitDiscardStats(opt Options) (*discardStats, error) {
 	fname := filepath.Join(opt.ValueDir, discardFname)
 
 	// 1GB file can store 67M discard entries. Each entry is 16 bytes.
@@ -145,7 +145,7 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 	return int64(discard)
 }
 
-func (lf *discardStats) iterate(f func(fid, stats uint64)) {
+func (lf *discardStats) Iterate(f func(fid, stats uint64)) {
 	for slot := 0; slot < lf.nextEmptySlot; slot++ {
 		idx := 16 * slot
 		f(lf.get(idx), lf.get(idx+8))
@@ -158,7 +158,7 @@ func (lf *discardStats) MaxDiscard() (uint32, int64) {
 	defer lf.Unlock()
 
 	var maxFid, maxVal uint64
-	lf.iterate(func(fid, val uint64) {
+	lf.Iterate(func(fid, val uint64) {
 		if maxVal < val {
 			maxVal = val
 			maxFid = fid
