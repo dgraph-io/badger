@@ -110,7 +110,8 @@ func (p *publisher) publishUpdates(reqs requests) {
 	}
 }
 
-func (p *publisher) newSubscriber(c *z.Closer, ignore string, prefixes ...[]byte) (<-chan *pb.KVList, uint64) {
+func (p *publisher) newSubscriber(c *z.Closer, ignore string,
+	prefixes ...[]byte) (<-chan *pb.KVList, uint64) {
 	p.Lock()
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
