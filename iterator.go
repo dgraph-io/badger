@@ -600,7 +600,8 @@ func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
 // parseItem is a complex function because it needs to handle both forward and reverse iteration
 // implementation. We store keys such that their versions are sorted in descending order. This makes
 // forward iteration efficient, but revese iteration complicated. This tradeoff is better because
-// forward iteration is more common than reverse.
+// forward iteration is more common than reverse. It returns true, if either the iterator is invalid
+// or it has pushed an item into it.data list, else it returns false.
 //
 // This function advances the iterator.
 func (it *Iterator) parseItem() bool {
@@ -615,8 +616,9 @@ func (it *Iterator) parseItem() bool {
 		}
 	}
 
+	isInternalKey := bytes.HasPrefix(key, badgerPrefix)
 	// Skip badger keys.
-	if !it.opt.InternalAccess && bytes.HasPrefix(key, badgerPrefix) {
+	if !it.opt.InternalAccess && isInternalKey {
 		mi.Next()
 		return false
 	}
@@ -625,6 +627,12 @@ func (it *Iterator) parseItem() bool {
 	version := y.ParseTs(key)
 	// Ignore everything that is above the readTs and below the sinceTs.
 	if version > it.readTs || version < it.opt.SinceTs {
+		mi.Next()
+		return false
+	}
+
+	// Skip banned keys only if it does not have badger internal prefix.
+	if !isInternalKey && it.txn.db.isBanned(key) != nil {
 		mi.Next()
 		return false
 	}

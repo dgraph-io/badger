@@ -48,6 +48,8 @@ type Options struct {
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
+	// Sets the Stream.numGo field
+	NumGoroutines int
 
 	// Fine tuning options.
 
@@ -58,7 +60,8 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	ValueThreshold int
+	VLogPercentile float64
+	ValueThreshold int64
 	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
@@ -98,6 +101,9 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
+	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
+	NamespaceOffset int
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -107,6 +113,8 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	maxValueThreshold float64
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -122,6 +130,7 @@ func DefaultOptions(path string) Options {
 		TableSizeMultiplier: 2,
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
+		NumGoroutines:       8,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -154,12 +163,16 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                1 << 10, // 1 KB.
+		ValueLogMaxEntries: 1000000,
+
+		VLogPercentile: 0.0,
+		ValueThreshold: 1 << 10, // 1 KB.
+
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
+		NamespaceOffset:               -1,
 	}
 }
 
@@ -248,6 +261,14 @@ func (opt Options) WithNumVersionsToKeep(val int) Options {
 	return opt
 }
 
+// WithNumGoroutines sets the number of goroutines to be used in Stream.
+//
+// The default value of NumGoroutines is 8.
+func (opt Options) WithNumGoroutines(val int) Options {
+	opt.NumGoroutines = val
+	return opt
+}
+
 // WithReadOnly returns a new Options value with ReadOnly set to the given value.
 //
 // When ReadOnly is true the DB will be opened on read-only mode.
@@ -321,8 +342,25 @@ func (opt Options) WithMaxLevels(val int) Options {
 // tree or separately in the log value files.
 //
 // The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int) Options {
+func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
+	return opt
+}
+
+// WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
+//
+// VLogPercentile with 0.0 means no dynamic thresholding is enabled.
+// MinThreshold value will always act as the value threshold.
+//
+// VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
+// and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
+// [ValueThreshold, Options.maxValueThreshold]
+//
+// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
+//
+// The default value of VLogPercentile is 0.0.
+func (opt Options) WithVLogPercentile(t float64) Options {
+	opt.VLogPercentile = t
 	return opt
 }
 
@@ -573,6 +611,16 @@ func (opt Options) WithIndexCacheSize(size int64) Options {
 // The default value of Detect conflicts is True.
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
+	return opt
+}
+
+// WithNamespaceOffset returns a new Options value with NamespaceOffset set to the given value. DB
+// will expect the namespace in each key at the 8 bytes starting from NamespaceOffset. A negative
+// value means that namespace is not stored in the key.
+//
+// The default value for NamespaceOffset is -1.
+func (opt Options) WithNamespaceOffset(offset int) Options {
+	opt.NamespaceOffset = offset
 	return opt
 }
 

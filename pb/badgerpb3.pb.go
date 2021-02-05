@@ -5,7 +5,7 @@ package pb
 
 import (
 	fmt "fmt"
-	proto "github.com/golang/protobuf/proto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
@@ -20,7 +20,7 @@ var _ = math.Inf
 // is compatible with the proto package it is being compiled against.
 // A compilation error at this line likely means your copy of the
 // proto package needs to be updated.
-const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
+const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 type EncryptionAlgo int32
 
@@ -104,10 +104,7 @@ type KV struct {
 	// Stream id is used to identify which stream the KV came from.
 	StreamId uint32 `protobuf:"varint,10,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
 	// Stream done is used to indicate end of stream.
-	StreamDone           bool     `protobuf:"varint,11,opt,name=stream_done,json=streamDone,proto3" json:"stream_done,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	StreamDone bool `protobuf:"varint,11,opt,name=stream_done,json=streamDone,proto3" json:"stream_done,omitempty"`
 }
 
 func (m *KV) Reset()         { *m = KV{} }
@@ -202,10 +199,7 @@ func (m *KV) GetStreamDone() bool {
 type KVList struct {
 	Kv []*KV `protobuf:"bytes,1,rep,name=kv,proto3" json:"kv,omitempty"`
 	// alloc_ref used internally for memory management.
-	AllocRef             uint64   `protobuf:"varint,10,opt,name=alloc_ref,json=allocRef,proto3" json:"alloc_ref,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	AllocRef uint64 `protobuf:"varint,10,opt,name=alloc_ref,json=allocRef,proto3" json:"alloc_ref,omitempty"`
 }
 
 func (m *KVList) Reset()         { *m = KVList{} }
@@ -257,10 +251,7 @@ func (m *KVList) GetAllocRef() uint64 {
 
 type ManifestChangeSet struct {
 	// A set of changes that are applied atomically.
-	Changes              []*ManifestChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	Changes []*ManifestChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
 }
 
 func (m *ManifestChangeSet) Reset()         { *m = ManifestChangeSet{} }
@@ -304,15 +295,12 @@ func (m *ManifestChangeSet) GetChanges() []*ManifestChange {
 }
 
 type ManifestChange struct {
-	Id                   uint64                   `protobuf:"varint,1,opt,name=Id,proto3" json:"Id,omitempty"`
-	Op                   ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=badgerpb3.ManifestChange_Operation" json:"Op,omitempty"`
-	Level                uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"`
-	KeyId                uint64                   `protobuf:"varint,4,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
-	EncryptionAlgo       EncryptionAlgo           `protobuf:"varint,5,opt,name=encryption_algo,json=encryptionAlgo,proto3,enum=badgerpb3.EncryptionAlgo" json:"encryption_algo,omitempty"`
-	Compression          uint32                   `protobuf:"varint,6,opt,name=compression,proto3" json:"compression,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
-	XXX_unrecognized     []byte                   `json:"-"`
-	XXX_sizecache        int32                    `json:"-"`
+	Id             uint64                   `protobuf:"varint,1,opt,name=Id,proto3" json:"Id,omitempty"`
+	Op             ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=badgerpb3.ManifestChange_Operation" json:"Op,omitempty"`
+	Level          uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"`
+	KeyId          uint64                   `protobuf:"varint,4,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	EncryptionAlgo EncryptionAlgo           `protobuf:"varint,5,opt,name=encryption_algo,json=encryptionAlgo,proto3,enum=badgerpb3.EncryptionAlgo" json:"encryption_algo,omitempty"`
+	Compression    uint32                   `protobuf:"varint,6,opt,name=compression,proto3" json:"compression,omitempty"`
 }
 
 func (m *ManifestChange) Reset()         { *m = ManifestChange{} }
@@ -391,11 +379,8 @@ func (m *ManifestChange) GetCompression() uint32 {
 }
 
 type Checksum struct {
-	Algo                 Checksum_Algorithm `protobuf:"varint,1,opt,name=algo,proto3,enum=badgerpb3.Checksum_Algorithm" json:"algo,omitempty"`
-	Sum                  uint64             `protobuf:"varint,2,opt,name=sum,proto3" json:"sum,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}           `json:"-"`
-	XXX_unrecognized     []byte             `json:"-"`
-	XXX_sizecache        int32              `json:"-"`
+	Algo Checksum_Algorithm `protobuf:"varint,1,opt,name=algo,proto3,enum=badgerpb3.Checksum_Algorithm" json:"algo,omitempty"`
+	Sum  uint64             `protobuf:"varint,2,opt,name=sum,proto3" json:"sum,omitempty"`
 }
 
 func (m *Checksum) Reset()         { *m = Checksum{} }
@@ -446,13 +431,10 @@ func (m *Checksum) GetSum() uint64 {
 }
 
 type DataKey struct {
-	KeyId                uint64   `protobuf:"varint,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
-	Data                 []byte   `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	Iv                   []byte   `protobuf:"bytes,3,opt,name=iv,proto3" json:"iv,omitempty"`
-	CreatedAt            int64    `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	KeyId     uint64 `protobuf:"varint,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	Data      []byte `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	Iv        []byte `protobuf:"bytes,3,opt,name=iv,proto3" json:"iv,omitempty"`
+	CreatedAt int64  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 }
 
 func (m *DataKey) Reset()         { *m = DataKey{} }
@@ -516,6 +498,58 @@ func (m *DataKey) GetCreatedAt() int64 {
 	return 0
 }
 
+type Match struct {
+	Prefix      []byte `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	IgnoreBytes string `protobuf:"bytes,2,opt,name=ignore_bytes,json=ignoreBytes,proto3" json:"ignore_bytes,omitempty"`
+}
+
+func (m *Match) Reset()         { *m = Match{} }
+func (m *Match) String() string { return proto.CompactTextString(m) }
+func (*Match) ProtoMessage()    {}
+func (*Match) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6d729c99bbc38987, []int{6}
+}
+func (m *Match) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *Match) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_Match.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *Match) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_Match.Merge(m, src)
+}
+func (m *Match) XXX_Size() int {
+	return m.Size()
+}
+func (m *Match) XXX_DiscardUnknown() {
+	xxx_messageInfo_Match.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_Match proto.InternalMessageInfo
+
+func (m *Match) GetPrefix() []byte {
+	if m != nil {
+		return m.Prefix
+	}
+	return nil
+}
+
+func (m *Match) GetIgnoreBytes() string {
+	if m != nil {
+		return m.IgnoreBytes
+	}
+	return ""
+}
+
 func init() {
 	proto.RegisterEnum("badgerpb3.EncryptionAlgo", EncryptionAlgo_name, EncryptionAlgo_value)
 	proto.RegisterEnum("badgerpb3.ManifestChange_Operation", ManifestChange_Operation_name, ManifestChange_Operation_value)
@@ -526,50 +560,54 @@ func init() {
 	proto.RegisterType((*ManifestChange)(nil), "badgerpb3.ManifestChange")
 	proto.RegisterType((*Checksum)(nil), "badgerpb3.Checksum")
 	proto.RegisterType((*DataKey)(nil), "badgerpb3.DataKey")
+	proto.RegisterType((*Match)(nil), "badgerpb3.Match")
 }
 
 func init() { proto.RegisterFile("badgerpb3.proto", fileDescriptor_6d729c99bbc38987) }
 
 var fileDescriptor_6d729c99bbc38987 = []byte{
-	// 604 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x53, 0xdd, 0x6e, 0xda, 0x4c,
-	0x10, 0x65, 0x8d, 0xc3, 0xcf, 0x90, 0x10, 0xbe, 0xd5, 0x57, 0xc9, 0x51, 0x15, 0x4a, 0x1d, 0x55,
-	0x42, 0x95, 0x0a, 0x6a, 0x5c, 0xf5, 0x9e, 0x00, 0x52, 0x10, 0x89, 0x22, 0x6d, 0xa3, 0x28, 0xea,
-	0x0d, 0x5a, 0xec, 0x09, 0x58, 0xe0, 0x1f, 0xed, 0x2e, 0x56, 0x79, 0x88, 0xde, 0xf7, 0x91, 0x7a,
-	0xd9, 0x8b, 0x3e, 0x40, 0x95, 0xbe, 0x48, 0xb5, 0x6b, 0xa0, 0x70, 0xd1, 0xbb, 0x99, 0x33, 0xe3,
-	0x39, 0xe3, 0x73, 0x66, 0xe1, 0x74, 0xca, 0x83, 0x19, 0x8a, 0x74, 0xea, 0x75, 0x52, 0x91, 0xa8,
-	0x84, 0x56, 0x77, 0x80, 0xfb, 0x93, 0x80, 0x35, 0x7e, 0xa0, 0x0d, 0x28, 0x2e, 0x70, 0xed, 0x90,
-	0x16, 0x69, 0x1f, 0x33, 0x1d, 0xd2, 0xff, 0xe1, 0x28, 0xe3, 0xcb, 0x15, 0x3a, 0x96, 0xc1, 0xf2,
-	0x84, 0xbe, 0x84, 0xea, 0x4a, 0xa2, 0x98, 0x44, 0xa8, 0xb8, 0x53, 0x34, 0x95, 0x8a, 0x06, 0x6e,
-	0x51, 0x71, 0xea, 0x40, 0x39, 0x43, 0x21, 0xc3, 0x24, 0x76, 0xec, 0x16, 0x69, 0xdb, 0x6c, 0x9b,
-	0xd2, 0x73, 0x00, 0xfc, 0x92, 0x86, 0x02, 0xe5, 0x84, 0x2b, 0xe7, 0xc8, 0x14, 0xab, 0x1b, 0xa4,
-	0xa7, 0x28, 0x05, 0xdb, 0x0c, 0x2c, 0x99, 0x81, 0x26, 0xd6, 0x4c, 0x52, 0x09, 0xe4, 0xd1, 0x24,
-	0x0c, 0x1c, 0x68, 0x91, 0xf6, 0x09, 0xab, 0xe4, 0xc0, 0x28, 0xa0, 0xaf, 0xa0, 0xb6, 0x29, 0x06,
-	0x49, 0x8c, 0x4e, 0xad, 0x45, 0xda, 0x15, 0x06, 0x39, 0x34, 0x48, 0x62, 0x74, 0x07, 0x50, 0x1a,
-	0x3f, 0xdc, 0x84, 0x52, 0xd1, 0x73, 0xb0, 0x16, 0x99, 0x43, 0x5a, 0xc5, 0x76, 0xed, 0xf2, 0xa4,
-	0xf3, 0x57, 0x89, 0xf1, 0x03, 0xb3, 0x16, 0x99, 0xa6, 0xe1, 0xcb, 0x65, 0xe2, 0x4f, 0x04, 0x3e,
-	0x19, 0x1a, 0x9b, 0x55, 0x0c, 0xc0, 0xf0, 0xc9, 0xbd, 0x86, 0xff, 0x6e, 0x79, 0x1c, 0x3e, 0xa1,
-	0x54, 0xfd, 0x39, 0x8f, 0x67, 0xf8, 0x09, 0x15, 0xf5, 0xa0, 0xec, 0x9b, 0x44, 0x6e, 0xa6, 0x9e,
-	0xed, 0x4d, 0x3d, 0x6c, 0x67, 0xdb, 0x4e, 0xf7, 0xab, 0x05, 0xf5, 0xc3, 0x1a, 0xad, 0x83, 0x35,
-	0x0a, 0x8c, 0xe2, 0x36, 0xb3, 0x46, 0x01, 0xf5, 0xc0, 0xba, 0x4b, 0x8d, 0xda, 0xf5, 0xcb, 0x8b,
-	0x7f, 0x8e, 0xec, 0xdc, 0xa5, 0x28, 0xb8, 0x0a, 0x93, 0x98, 0x59, 0x77, 0xa9, 0x76, 0xe9, 0x06,
-	0x33, 0x5c, 0x1a, 0x2f, 0x4e, 0x58, 0x9e, 0xd0, 0x17, 0x50, 0x5a, 0xe0, 0x5a, 0x0b, 0x97, 0xfb,
-	0x70, 0xb4, 0xc0, 0xf5, 0x28, 0xa0, 0x57, 0x70, 0x8a, 0xb1, 0x2f, 0xd6, 0xa9, 0xfe, 0x7c, 0xc2,
-	0x97, 0xb3, 0xc4, 0x58, 0x51, 0x3f, 0xf8, 0x83, 0xe1, 0xae, 0xa3, 0xb7, 0x9c, 0x25, 0xac, 0x8e,
-	0x07, 0x39, 0x6d, 0x41, 0xcd, 0x4f, 0xa2, 0x54, 0xa0, 0x34, 0x3e, 0x97, 0x0c, 0xed, 0x3e, 0xe4,
-	0x5e, 0x40, 0x75, 0xb7, 0x23, 0x05, 0x28, 0xf5, 0xd9, 0xb0, 0x77, 0x3f, 0x6c, 0x14, 0x74, 0x3c,
-	0x18, 0xde, 0x0c, 0xef, 0x87, 0x0d, 0xe2, 0x66, 0x50, 0xe9, 0xcf, 0xd1, 0x5f, 0xc8, 0x55, 0x44,
-	0xdf, 0x83, 0x6d, 0x76, 0x21, 0x66, 0x97, 0xf3, 0xbd, 0x5d, 0xb6, 0x2d, 0x1d, 0x4d, 0x2d, 0x42,
-	0x35, 0x8f, 0x98, 0x69, 0xd5, 0xe7, 0x2a, 0x57, 0x91, 0x11, 0xcb, 0x66, 0x3a, 0x74, 0xdf, 0x40,
-	0x75, 0xd7, 0x94, 0xb3, 0xf6, 0xbd, 0xcb, 0x7e, 0xa3, 0x40, 0x8f, 0xa1, 0xf2, 0xf8, 0x78, 0xcd,
-	0xe5, 0xfc, 0xe3, 0x87, 0x06, 0x71, 0x7d, 0x28, 0x0f, 0xb8, 0xe2, 0x63, 0x5c, 0xef, 0x89, 0x44,
-	0xf6, 0x45, 0xa2, 0x60, 0x07, 0x5c, 0xf1, 0xcd, 0xd9, 0x9b, 0x58, 0x5b, 0x15, 0x66, 0x9b, 0x73,
-	0xb7, 0xc2, 0x4c, 0x9f, 0xb3, 0x2f, 0x90, 0x2b, 0x0c, 0xf4, 0x39, 0x6b, 0x8d, 0x8b, 0xac, 0xba,
-	0x41, 0x7a, 0xea, 0xed, 0x19, 0xd4, 0x0f, 0x55, 0xa4, 0x65, 0x28, 0x72, 0x94, 0x8d, 0xc2, 0x95,
-	0xf7, 0xfd, 0xb9, 0x49, 0x7e, 0x3c, 0x37, 0xc9, 0xaf, 0xe7, 0x26, 0xf9, 0xf6, 0xbb, 0x59, 0xf8,
-	0xfc, 0x7a, 0x16, 0xaa, 0xf9, 0x6a, 0xda, 0xf1, 0x93, 0xa8, 0x1b, 0xcc, 0x04, 0x4f, 0xe7, 0xef,
-	0xc2, 0xa4, 0x9b, 0x6b, 0xd0, 0xcd, 0xbc, 0x6e, 0x3a, 0x9d, 0x96, 0xcc, 0xab, 0xf5, 0xfe, 0x04,
-	0x00, 0x00, 0xff, 0xff, 0xc6, 0x32, 0x33, 0xbc, 0xc8, 0x03, 0x00, 0x00,
+	// 651 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x54, 0x4d, 0x6b, 0xdb, 0x40,
+	0x10, 0xf5, 0xca, 0xf2, 0xd7, 0x38, 0x71, 0xdc, 0xa5, 0x2d, 0x0a, 0x25, 0xae, 0xa3, 0x50, 0x30,
+	0x85, 0xda, 0x34, 0x2e, 0xbd, 0xf4, 0xe4, 0x2f, 0x88, 0x71, 0x42, 0x60, 0x1b, 0x42, 0xe8, 0xc5,
+	0xac, 0xa5, 0xb1, 0x2d, 0x6c, 0x4b, 0x62, 0xb5, 0x16, 0xf1, 0x8f, 0x28, 0xf4, 0x67, 0xf5, 0x98,
+	0x43, 0x0f, 0x3d, 0x96, 0xe4, 0x8f, 0x94, 0x5d, 0x29, 0xae, 0x7d, 0xe8, 0x6d, 0xe6, 0xcd, 0x68,
+	0xde, 0xe8, 0xbd, 0x91, 0xe0, 0x68, 0xc2, 0xdd, 0x19, 0x8a, 0x70, 0xd2, 0x6e, 0x86, 0x22, 0x90,
+	0x01, 0x2d, 0x6d, 0x01, 0xfb, 0x17, 0x01, 0x63, 0x74, 0x4b, 0xab, 0x90, 0x5d, 0xe0, 0xc6, 0x22,
+	0x75, 0xd2, 0x38, 0x60, 0x2a, 0xa4, 0x2f, 0x21, 0x17, 0xf3, 0xe5, 0x1a, 0x2d, 0x43, 0x63, 0x49,
+	0x42, 0xdf, 0x40, 0x69, 0x1d, 0xa1, 0x18, 0xaf, 0x50, 0x72, 0x2b, 0xab, 0x2b, 0x45, 0x05, 0x5c,
+	0xa1, 0xe4, 0xd4, 0x82, 0x42, 0x8c, 0x22, 0xf2, 0x02, 0xdf, 0x32, 0xeb, 0xa4, 0x61, 0xb2, 0xe7,
+	0x94, 0x9e, 0x00, 0xe0, 0x7d, 0xe8, 0x09, 0x8c, 0xc6, 0x5c, 0x5a, 0x39, 0x5d, 0x2c, 0xa5, 0x48,
+	0x47, 0x52, 0x0a, 0xa6, 0x1e, 0x98, 0xd7, 0x03, 0x75, 0xac, 0x98, 0x22, 0x29, 0x90, 0xaf, 0xc6,
+	0x9e, 0x6b, 0x41, 0x9d, 0x34, 0x0e, 0x59, 0x31, 0x01, 0x86, 0x2e, 0x7d, 0x0b, 0xe5, 0xb4, 0xe8,
+	0x06, 0x3e, 0x5a, 0xe5, 0x3a, 0x69, 0x14, 0x19, 0x24, 0x50, 0x3f, 0xf0, 0xd1, 0xee, 0x43, 0x7e,
+	0x74, 0x7b, 0xe9, 0x45, 0x92, 0x9e, 0x80, 0xb1, 0x88, 0x2d, 0x52, 0xcf, 0x36, 0xca, 0xe7, 0x87,
+	0xcd, 0x7f, 0x4a, 0x8c, 0x6e, 0x99, 0xb1, 0x88, 0x15, 0x0d, 0x5f, 0x2e, 0x03, 0x67, 0x2c, 0x70,
+	0xaa, 0x69, 0x4c, 0x56, 0xd4, 0x00, 0xc3, 0xa9, 0x7d, 0x01, 0x2f, 0xae, 0xb8, 0xef, 0x4d, 0x31,
+	0x92, 0xbd, 0x39, 0xf7, 0x67, 0xf8, 0x15, 0x25, 0x6d, 0x43, 0xc1, 0xd1, 0x49, 0x94, 0x4e, 0x3d,
+	0xde, 0x99, 0xba, 0xdf, 0xce, 0x9e, 0x3b, 0xed, 0xef, 0x06, 0x54, 0xf6, 0x6b, 0xb4, 0x02, 0xc6,
+	0xd0, 0xd5, 0x8a, 0x9b, 0xcc, 0x18, 0xba, 0xb4, 0x0d, 0xc6, 0x75, 0xa8, 0xd5, 0xae, 0x9c, 0x9f,
+	0xfd, 0x77, 0x64, 0xf3, 0x3a, 0x44, 0xc1, 0xa5, 0x17, 0xf8, 0xcc, 0xb8, 0x0e, 0x95, 0x4b, 0x97,
+	0x18, 0xe3, 0x52, 0x7b, 0x71, 0xc8, 0x92, 0x84, 0xbe, 0x82, 0xfc, 0x02, 0x37, 0x4a, 0xb8, 0xc4,
+	0x87, 0xdc, 0x02, 0x37, 0x43, 0x97, 0x76, 0xe1, 0x08, 0x7d, 0x47, 0x6c, 0x42, 0xf5, 0xf8, 0x98,
+	0x2f, 0x67, 0x81, 0xb6, 0xa2, 0xb2, 0xf7, 0x06, 0x83, 0x6d, 0x47, 0x67, 0x39, 0x0b, 0x58, 0x05,
+	0xf7, 0x72, 0x5a, 0x87, 0xb2, 0x13, 0xac, 0x42, 0x81, 0x91, 0xf6, 0x39, 0xaf, 0x69, 0x77, 0x21,
+	0xfb, 0x0c, 0x4a, 0xdb, 0x1d, 0x29, 0x40, 0xbe, 0xc7, 0x06, 0x9d, 0x9b, 0x41, 0x35, 0xa3, 0xe2,
+	0xfe, 0xe0, 0x72, 0x70, 0x33, 0xa8, 0x12, 0x3b, 0x86, 0x62, 0x6f, 0x8e, 0xce, 0x22, 0x5a, 0xaf,
+	0xe8, 0x47, 0x30, 0xf5, 0x2e, 0x44, 0xef, 0x72, 0xb2, 0xb3, 0xcb, 0x73, 0x4b, 0x53, 0x51, 0x0b,
+	0x4f, 0xce, 0x57, 0x4c, 0xb7, 0xaa, 0x73, 0x8d, 0xd6, 0x2b, 0x2d, 0x96, 0xc9, 0x54, 0x68, 0xbf,
+	0x83, 0xd2, 0xb6, 0x29, 0x61, 0xed, 0xb5, 0xcf, 0x7b, 0xd5, 0x0c, 0x3d, 0x80, 0xe2, 0xdd, 0xdd,
+	0x05, 0x8f, 0xe6, 0x9f, 0x3f, 0x55, 0x89, 0xed, 0x40, 0xa1, 0xcf, 0x25, 0x1f, 0xe1, 0x66, 0x47,
+	0x24, 0xb2, 0x2b, 0x12, 0x05, 0xd3, 0xe5, 0x92, 0xa7, 0x67, 0xaf, 0x63, 0x65, 0x95, 0x17, 0xa7,
+	0xe7, 0x6e, 0x78, 0xb1, 0x3a, 0x67, 0x47, 0x20, 0x97, 0xe8, 0xaa, 0x73, 0x56, 0x1a, 0x67, 0x59,
+	0x29, 0x45, 0x3a, 0xd2, 0xee, 0x42, 0xee, 0x8a, 0x4b, 0x67, 0x4e, 0x5f, 0x43, 0x3e, 0x14, 0x38,
+	0xf5, 0xee, 0xd3, 0x0f, 0x2b, 0xcd, 0xe8, 0x29, 0x1c, 0x78, 0x33, 0x3f, 0x10, 0x38, 0x9e, 0x6c,
+	0x24, 0x46, 0x9a, 0xab, 0xc4, 0xca, 0x09, 0xd6, 0x55, 0xd0, 0xfb, 0x63, 0xa8, 0xec, 0x3b, 0x41,
+	0x0b, 0x90, 0xe5, 0x18, 0x55, 0x33, 0xdd, 0x2f, 0x3f, 0x1f, 0x6b, 0xe4, 0xe1, 0xb1, 0x46, 0xfe,
+	0x3c, 0xd6, 0xc8, 0x8f, 0xa7, 0x5a, 0xe6, 0xe1, 0xa9, 0x96, 0xf9, 0xfd, 0x54, 0xcb, 0x7c, 0x3b,
+	0x9d, 0x79, 0x72, 0xbe, 0x9e, 0x34, 0x9d, 0x60, 0xd5, 0x72, 0x67, 0x82, 0x87, 0xf3, 0x0f, 0x5e,
+	0xd0, 0x4a, 0xf4, 0x6c, 0xc5, 0xed, 0x56, 0x38, 0x99, 0xe4, 0xf5, 0x1f, 0xa0, 0xfd, 0x37, 0x00,
+	0x00, 0xff, 0xff, 0xa2, 0x8d, 0xa8, 0xf5, 0x14, 0x04, 0x00, 0x00,
 }
 
 func (m *KV) Marshal() (dAtA []byte, err error) {
@@ -592,10 +630,6 @@ func (m *KV) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if m.StreamDone {
 		i--
 		if m.StreamDone {
@@ -672,10 +706,6 @@ func (m *KVList) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if m.AllocRef != 0 {
 		i = encodeVarintBadgerpb3(dAtA, i, uint64(m.AllocRef))
 		i--
@@ -718,10 +748,6 @@ func (m *ManifestChangeSet) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if len(m.Changes) > 0 {
 		for iNdEx := len(m.Changes) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -759,10 +785,6 @@ func (m *ManifestChange) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if m.Compression != 0 {
 		i = encodeVarintBadgerpb3(dAtA, i, uint64(m.Compression))
 		i--
@@ -816,10 +838,6 @@ func (m *Checksum) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if m.Sum != 0 {
 		i = encodeVarintBadgerpb3(dAtA, i, uint64(m.Sum))
 		i--
@@ -853,10 +871,6 @@ func (m *DataKey) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	if m.CreatedAt != 0 {
 		i = encodeVarintBadgerpb3(dAtA, i, uint64(m.CreatedAt))
 		i--
@@ -880,6 +894,43 @@ func (m *DataKey) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintBadgerpb3(dAtA, i, uint64(m.KeyId))
 		i--
 		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *Match) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *Match) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *Match) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.IgnoreBytes) > 0 {
+		i -= len(m.IgnoreBytes)
+		copy(dAtA[i:], m.IgnoreBytes)
+		i = encodeVarintBadgerpb3(dAtA, i, uint64(len(m.IgnoreBytes)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Prefix) > 0 {
+		i -= len(m.Prefix)
+		copy(dAtA[i:], m.Prefix)
+		i = encodeVarintBadgerpb3(dAtA, i, uint64(len(m.Prefix)))
+		i--
+		dAtA[i] = 0xa
 	}
 	return len(dAtA) - i, nil
 }
@@ -929,9 +980,6 @@ func (m *KV) Size() (n int) {
 	if m.StreamDone {
 		n += 2
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
 	return n
 }
 
@@ -950,9 +998,6 @@ func (m *KVList) Size() (n int) {
 	if m.AllocRef != 0 {
 		n += 1 + sovBadgerpb3(uint64(m.AllocRef))
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
 	return n
 }
 
@@ -967,9 +1012,6 @@ func (m *ManifestChangeSet) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovBadgerpb3(uint64(l))
 		}
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
 	}
 	return n
 }
@@ -998,9 +1040,6 @@ func (m *ManifestChange) Size() (n int) {
 	if m.Compression != 0 {
 		n += 1 + sovBadgerpb3(uint64(m.Compression))
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
 	return n
 }
 
@@ -1015,9 +1054,6 @@ func (m *Checksum) Size() (n int) {
 	}
 	if m.Sum != 0 {
 		n += 1 + sovBadgerpb3(uint64(m.Sum))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
 	}
 	return n
 }
@@ -1042,8 +1078,22 @@ func (m *DataKey) Size() (n int) {
 	if m.CreatedAt != 0 {
 		n += 1 + sovBadgerpb3(uint64(m.CreatedAt))
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
+	return n
+}
+
+func (m *Match) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Prefix)
+	if l > 0 {
+		n += 1 + l + sovBadgerpb3(uint64(l))
+	}
+	l = len(m.IgnoreBytes)
+	if l > 0 {
+		n += 1 + l + sovBadgerpb3(uint64(l))
 	}
 	return n
 }
@@ -1302,16 +1352,12 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1409,16 +1455,12 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1497,16 +1539,12 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1665,16 +1703,12 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1757,16 +1791,12 @@ func (m *Checksum) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1917,16 +1947,128 @@ func (m *DataKey) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthBadgerpb3
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthBadgerpb3
 			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *Match) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowBadgerpb3
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: Match: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: Match: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Prefix", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowBadgerpb3
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthBadgerpb3
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthBadgerpb3
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Prefix = append(m.Prefix[:0], dAtA[iNdEx:postIndex]...)
+			if m.Prefix == nil {
+				m.Prefix = []byte{}
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IgnoreBytes", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowBadgerpb3
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthBadgerpb3
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthBadgerpb3
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.IgnoreBytes = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipBadgerpb3(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthBadgerpb3
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
 			iNdEx += skippy
 		}
 	}

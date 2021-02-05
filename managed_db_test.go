@@ -800,7 +800,7 @@ func TestZeroDiscardStats(t *testing.T) {
 			// All data should still be present.
 			require.Equal(t, int(N), numKeys(db))
 
-			db.vlog.discardStats.iterate(func(id, val uint64) {
+			db.vlog.discardStats.Iterate(func(id, val uint64) {
 				// Vlog with id=fid has been re-written, it's discard stats should be zero.
 				if uint32(id) == fid {
 					require.Zero(t, val)
@@ -821,11 +821,11 @@ func TestZeroDiscardStats(t *testing.T) {
 				db.vlog.discardStats.Update(uint32(fid), 1)
 			}
 
-			db.vlog.discardStats.iterate(func(id, val uint64) { require.NotZero(t, val) })
+			db.vlog.discardStats.Iterate(func(id, val uint64) { require.NotZero(t, val) })
 			require.NoError(t, db.DropAll())
 			require.Equal(t, 0, numKeys(db))
 			// We've deleted everything. DS should be zero.
-			db.vlog.discardStats.iterate(func(id, val uint64) { require.Zero(t, val) })
+			db.vlog.discardStats.Iterate(func(id, val uint64) { require.Zero(t, val) })
 		})
 	})
 }
