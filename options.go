@@ -17,13 +17,14 @@
 package badger
 
 import (
+	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -124,12 +125,10 @@ const DefaultFlags = ""
 
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
-func DefaultOptions(superflag string) Options {
-	flags := z.NewSuperFlag(superflag).MergeAndCheckDefault(DefaultFlags)
-
-	return Options{
-		Dir:      flags.GetString("path"),
-		ValueDir: flags.GetString("path"),
+func DefaultOptions(path string) Options {
+	options := Options{
+		Dir:      path,
+		ValueDir: path,
 
 		MemTableSize:        64 << 20,
 		BaseTableSize:       2 << 20,
@@ -181,6 +180,26 @@ func DefaultOptions(superflag string) Options {
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
 	}
+
+	v := reflect.ValueOf(options)
+	typeFields := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		// only iterate over exported fields
+		if v.Field(i).CanInterface() {
+			name := typeFields.Field(i).Name
+			kind := v.Field(i).Kind()
+
+			fmt.Println(name, kind)
+		}
+	}
+
+	return options
+}
+
+// TODO
+func compareOptionFlags() Options {
+	return Options{}
 }
 
 func buildTableOptions(db *DB) table.Options {
