@@ -17,14 +17,15 @@
 package badger
 
 import (
-	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -125,10 +126,10 @@ const DefaultFlags = ""
 
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
-func DefaultOptions(path string) Options {
-	options := Options{
-		Dir:      path,
-		ValueDir: path,
+func DefaultOptions(superflag string) Options {
+	return overwriteOptions(superflag, Options{
+		Dir:      "", // TODO
+		ValueDir: "", // TODO
 
 		MemTableSize:        64 << 20,
 		BaseTableSize:       2 << 20,
@@ -179,27 +180,48 @@ func DefaultOptions(path string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
-	}
+	})
+}
 
-	v := reflect.ValueOf(options)
-	typeFields := v.Type()
+func overwriteOptions(superflag string, options Options) Options {
+	flags := z.NewSuperFlag(superflag)
+
+	v := reflect.ValueOf(&options).Elem()
+	optionsStruct := v.Type()
 
 	for i := 0; i < v.NumField(); i++ {
 		// only iterate over exported fields
-		if v.Field(i).CanInterface() {
-			name := typeFields.Field(i).Name
+		if field := v.Field(i); field.CanInterface() {
+			// z.SuperFlag stores keys as lowercase, keep everything case
+			// insensitive
+			name := strings.ToLower(optionsStruct.Field(i).Name)
 			kind := v.Field(i).Kind()
 
-			fmt.Println(name, kind)
+			// make sure the option exists in the SuperFlag first, otherwise
+			// we'd overwrite the defaults with 0 values
+			if flags.Has(name) {
+				switch kind {
+				case reflect.Bool:
+					f := flags.GetBool(name)
+					field.SetBool(f)
+				case reflect.Int, reflect.Int64:
+					f := flags.GetInt64(name)
+					field.SetInt(f)
+				case reflect.Uint32:
+					f := flags.GetUint32(name)
+					field.SetUint(uint64(f))
+				case reflect.Float64:
+					f := flags.GetFloat64(name)
+					field.SetFloat(f)
+				case reflect.String:
+					f := flags.GetString(name)
+					field.SetString(f)
+				}
+			}
 		}
 	}
 
 	return options
-}
-
-// TODO
-func compareOptionFlags() Options {
-	return Options{}
 }
 
 func buildTableOptions(db *DB) table.Options {
