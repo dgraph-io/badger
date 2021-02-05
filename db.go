@@ -1822,9 +1822,11 @@ func (db *DB) BannedNamespaces() []uint64 {
 // KVList contains a list of key-value pairs.
 type KVList = pb.KVList
 
-// Subscribe can be used to watch key changes for the given key prefixes.
+// Subscribe can be used to watch key changes for the given key prefixes and the ignore string.
 // At least one prefix should be passed, or an error will be returned.
 // You can use an empty prefix to monitor all changes to the DB.
+// Ignore string is the byte ranges for which prefix matching will be ignored.
+// For example: ignore = "2-3", and prefix = "abcde" will match for keys "abxxe", "abdfe" etc.
 // This function blocks until the given context is done or an error occurs.
 // The given function will be called with a new KVList containing the modified keys and the
 // corresponding values.
