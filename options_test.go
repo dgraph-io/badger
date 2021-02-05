@@ -11,13 +11,13 @@ func TestOptions(t *testing.T) {
 	// copy all the default options over to a big SuperFlag string
 	defaultSuperFlag := generateSuperFlag(DefaultOptions(""))
 	// fill an empty Options with values from the SuperFlag
-	generated := overwriteOptions(defaultSuperFlag, Options{})
+	generated := SetSuperFlag(defaultSuperFlag, Options{})
 	// make sure they're equal
 	if !optionsEqual(DefaultOptions(""), generated) {
 		t.Fatal("generated default SuperFlag != default Options")
 	}
 	// check that values are overwritten properly
-	overwritten := DefaultOptions("numgoroutines=1234")
+	overwritten := SetSuperFlag("numgoroutines=1234", DefaultOptions(""))
 	if overwritten.NumGoroutines != 1234 {
 		t.Fatal("Option value not overwritten by SuperFlag value")
 	}

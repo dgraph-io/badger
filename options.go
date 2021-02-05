@@ -122,10 +122,10 @@ type Options struct {
 
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
-func DefaultOptions(superflag string) Options {
-	return overwriteOptions(superflag, Options{
-		Dir:      "", // TODO
-		ValueDir: "", // TODO
+func DefaultOptions(path string) Options {
+	return Options{
+		Dir:      path,
+		ValueDir: path,
 
 		MemTableSize:        64 << 20,
 		BaseTableSize:       2 << 20,
@@ -176,11 +176,20 @@ func DefaultOptions(superflag string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
-	})
+	}
 }
 
-// overwriteOptions replaces Option values if found in superflag
-func overwriteOptions(superflag string, options Options) Options {
+// SetSuperFlag fills Options fields for each flag within the superflag. For
+// example, replacing the default Options.NumGoroutines:
+//
+//	options := SetSuperFlag("numgoroutines=4", DefaultOptions(""))
+//
+// It's important to note that if you pass an empty Options struct, SetSuperFlag
+// will not fill it with default values. SetSuperFlag only writes to the fields
+// present within the superflag string (case insensitive).
+//
+// Unsupported: Options.Logger, Options.EncryptionKey
+func SetSuperFlag(superflag string, options Options) Options {
 	flags := z.NewSuperFlag(superflag)
 	v := reflect.ValueOf(&options).Elem()
 	optionsStruct := v.Type()
