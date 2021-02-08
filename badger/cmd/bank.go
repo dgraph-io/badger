@@ -559,9 +559,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 		subWg.Add(1)
 		go func() {
 			defer subWg.Done()
-			accountIDS := [][]byte{}
+			accountIDS := []pb.Match{}
 			for i := 0; i < numAccounts; i++ {
-				accountIDS = append(accountIDS, key(i))
+				accountIDS = append(accountIDS, pb.Match{Prefix: key(i), IgnoreBytes: ""})
 			}
 			updater := func(kvs *pb.KVList) error {
 				batch := subscribeDB.NewWriteBatch()
@@ -571,7 +571,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 				return batch.Flush()
 			}
-			_ = db.Subscribe(ctx, updater, accountIDS...)
+			_ = db.Subscribe(ctx, updater, accountIDS)
 		}()
 	}
 
