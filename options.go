@@ -387,7 +387,7 @@ func (opt Options) WithMaxLevels(val int) Options {
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
+// The default value of ValueThreshold is 1 MB, but LSMOnlyOptions sets it to maxValueThreshold.
 func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
 	return opt
