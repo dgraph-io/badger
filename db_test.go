@@ -68,9 +68,6 @@ func (s *DB) validate() error { return s.lc.validate() }
 
 func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
-		WithMemTableSize(1 << 15).
-		WithBaseTableSize(1 << 15). // Force more compaction.
-		WithBaseLevelSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false).
 		WithLoggingLevel(WARNING)
 	return opt
@@ -1521,7 +1518,7 @@ func TestWriteDeadlock(t *testing.T) {
 	var count int
 	val := make([]byte, 10000)
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		for i := 0; i < 1500; i++ {
+		for i := 0; i < 1000; i++ {
 			key := fmt.Sprintf("%d", i)
 			rand.Read(val)
 			require.NoError(t, txn.SetEntry(NewEntry([]byte(key), val)))
@@ -1759,7 +1756,6 @@ func TestLSMOnly(t *testing.T) {
 
 	opts := LSMOnlyOptions(dir)
 	dopts := DefaultOptions(dir)
-	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
 	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)

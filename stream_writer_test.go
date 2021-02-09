@@ -326,8 +326,9 @@ func TestStreamWriter5(t *testing.T) {
 // This test tries to insert multiple equal keys(without version) and verifies
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
-
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	opt := getTestOptions("")
+	opt.BaseTableSize = 1 << 15
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		str := []string{"a", "b", "c"}
 		ver := uint64(0)
 		// The baseTable size is 32 KB (1<<15) and the max table size for level
@@ -371,7 +372,9 @@ func TestStreamWriter6(t *testing.T) {
 
 // This test uses a StreamWriter without calling Flush() at the end.
 func TestStreamWriterCancel(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	opt := getTestOptions("")
+	opt.BaseTableSize = 1 << 15
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
 		buf := z.NewBuffer(10 << 20)
