@@ -18,7 +18,11 @@ package badger
 
 import (
 	"os"
+	"reflect"
+	"strings"
 	"time"
+
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
@@ -215,6 +219,48 @@ func LSMOnlyOptions(path string) Options {
 	// of performance reasons, 1KB would be a good option too, allowing
 	// values smaller than 1KB to be collocated with the keys in the LSM tree.
 	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
+}
+
+// FromSuperFlag fills Options fields for each flag within the superflag. For
+// example, replacing the default Options.NumGoroutines:
+//
+//	options := FromSuperFlag("numgoroutines=4", DefaultOptions(""))
+//
+// It's important to note that if you pass an empty Options struct, FromSuperFlag
+// will not fill it with default values. FromSuperFlag only writes to the fields
+// present within the superflag string (case insensitive).
+//
+// Unsupported: Options.Logger, Options.EncryptionKey
+func (opt Options) FromSuperFlag(superflag string) Options {
+	flags := z.NewSuperFlag(superflag)
+	v := reflect.ValueOf(&opt).Elem()
+	optionsStruct := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		// only iterate over exported fields
+		if field := v.Field(i); field.CanInterface() {
+			// z.SuperFlag stores keys as lowercase, keep everything case
+			// insensitive
+			name := strings.ToLower(optionsStruct.Field(i).Name)
+			kind := v.Field(i).Kind()
+			// make sure the option exists in the SuperFlag first, otherwise
+			// we'd overwrite the defaults with 0 values
+			if flags.Has(name) {
+				switch kind {
+				case reflect.Bool:
+					field.SetBool(flags.GetBool(name))
+				case reflect.Int, reflect.Int64:
+					field.SetInt(flags.GetInt64(name))
+				case reflect.Uint32:
+					field.SetUint(uint64(flags.GetUint32(name)))
+				case reflect.Float64:
+					field.SetFloat(flags.GetFloat64(name))
+				case reflect.String:
+					field.SetString(flags.GetString(name))
+				}
+			}
+		}
+	}
+	return opt
 }
 
 // WithDir returns a new Options value with Dir set to the given value.
