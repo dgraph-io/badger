@@ -34,6 +34,7 @@ import (
 )
 
 func TestDynamicValueThreshold(t *testing.T) {
+	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
@@ -140,9 +141,14 @@ func TestValueGCManaged(t *testing.T) {
 	defer removeDir(dir)
 
 	N := 10000
+
 	opt := getTestOptions(dir)
 	opt.ValueLogMaxEntries = uint32(N / 10)
 	opt.managedTxns = true
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
+	opt.MemTableSize = 1 << 15
+
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -202,6 +208,8 @@ func TestValueGC(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
 
 	kv, _ := Open(opt)
 	defer kv.Close()
@@ -253,6 +261,8 @@ func TestValueGC2(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
 
 	kv, _ := Open(opt)
 	defer kv.Close()
@@ -328,6 +338,8 @@ func TestValueGC3(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
@@ -401,6 +413,8 @@ func TestValueGC4(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
@@ -477,6 +491,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt.ValueLogFileSize = 1 << 20
 	// Avoid compaction on close so that the discard map remains the same.
 	opt.CompactL0OnClose = false
+	opt.MemTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
 
 	db, err := Open(opt)
 	require.NoError(t, err)

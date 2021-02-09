@@ -170,7 +170,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries: 1000000,
 
 		VLogPercentile: 0.0,
-		ValueThreshold: 1 << 10, // 1 KB.
+		ValueThreshold: maxValueThreshold,
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
