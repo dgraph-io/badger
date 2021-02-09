@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
@@ -11,13 +27,13 @@ func TestOptions(t *testing.T) {
 	// copy all the default options over to a big SuperFlag string
 	defaultSuperFlag := generateSuperFlag(DefaultOptions(""))
 	// fill an empty Options with values from the SuperFlag
-	generated := SetSuperFlag(defaultSuperFlag, Options{})
+	generated := Options{}.FromSuperFlag(defaultSuperFlag)
 	// make sure they're equal
 	if !optionsEqual(DefaultOptions(""), generated) {
 		t.Fatal("generated default SuperFlag != default Options")
 	}
 	// check that values are overwritten properly
-	overwritten := SetSuperFlag("numgoroutines=1234", DefaultOptions(""))
+	overwritten := DefaultOptions("").FromSuperFlag("numgoroutines=1234")
 	if overwritten.NumGoroutines != 1234 {
 		t.Fatal("Option value not overwritten by SuperFlag value")
 	}

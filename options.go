@@ -17,11 +17,12 @@
 package badger
 
 import (
-	"github.com/dgraph-io/ristretto/z"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
