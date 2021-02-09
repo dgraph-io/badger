@@ -784,6 +784,8 @@ func TestZeroDiscardStats(t *testing.T) {
 	t.Run("after rewrite", func(t *testing.T) {
 		opts := getTestOptions("")
 		opts.ValueLogFileSize = 5 << 20
+		opts.ValueThreshold = 1 << 10
+		opts.MemTableSize = 1 << 15
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			populate(t, db)
 			require.Equal(t, int(N), numKeys(db))
