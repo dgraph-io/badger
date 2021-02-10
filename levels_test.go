@@ -970,8 +970,7 @@ func TestLevelGet(t *testing.T) {
 func TestKeyVersions(t *testing.T) {
 	inMemoryOpt := DefaultOptions("").
 		WithSyncWrites(false).
-		WithInMemory(true).
-		WithMemTableSize(4 << 20)
+		WithInMemory(true)
 
 	t.Run("disk", func(t *testing.T) {
 		t.Run("small table", func(t *testing.T) {
@@ -1034,7 +1033,7 @@ func TestKeyVersions(t *testing.T) {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
 				require.NoError(t, writer.Flush())
-				require.Equal(t, 11, len(db.KeySplits(nil)))
+				require.Equal(t, 10, len(db.KeySplits(nil)))
 			})
 		})
 		t.Run("prefix", func(t *testing.T) {
