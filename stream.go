@@ -47,7 +47,7 @@ type Stream struct {
 	// iterate over the entire DB.
 	Prefix []byte
 
-	// Number of goroutines to use for iterating over key ranges. Defaults to 16.
+	// Number of goroutines to use for iterating over key ranges. Defaults to 8.
 	NumGo int
 
 	// Badger would produce log entries in Infof to indicate the progress of Stream. LogPrefix can
