@@ -273,6 +273,32 @@ func TestIteratePrefix(t *testing.T) {
 
 }
 
+// Sanity test to verify the iterator does not crash the db in readonly mode if data does not exist.
+func TestIteratorReadOnlyWithNoData(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	y.Check(err)
+	defer removeDir(dir)
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	opts.ReadOnly = true
+	db, err = Open(opts)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	require.NoError(t, db.View(func(txn *Txn) error {
+		iopts := DefaultIteratorOptions
+		iopts.Prefix = []byte("xxx")
+		itr := txn.NewIterator(iopts)
+		defer itr.Close()
+		return nil
+	}))
+}
+
 // go test -v -run=XXX -bench=BenchmarkIterate -benchtime=3s
 // Benchmark with opt.Prefix set ===
 // goos: linux
