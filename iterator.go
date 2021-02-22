@@ -473,7 +473,6 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
-
 	res := &Iterator{
 		txn:    txn,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),
@@ -535,6 +534,10 @@ func (it *Iterator) Close() {
 		return
 	}
 	it.closed = true
+	if it.iitr == nil {
+		atomic.AddInt32(&it.txn.numIterators, -1)
+		return
+	}
 
 	it.iitr.Close()
 	// It is important to wait for the fill goroutines to finish. Otherwise, we might leave zombie
@@ -557,6 +560,9 @@ func (it *Iterator) Close() {
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
 // to ensure you have access to a valid it.Item().
 func (it *Iterator) Next() {
+	if it.iitr == nil {
+		return
+	}
 	// Reuse current item
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
 	it.waste.push(it.item)
@@ -715,6 +721,9 @@ func (it *Iterator) prefetch() {
 // smallest key greater than the provided key if iterating in the forward direction.
 // Behavior would be reversed if iterating backwards.
 func (it *Iterator) Seek(key []byte) {
+	if it.iitr == nil {
+		return
+	}
 	if len(key) > 0 {
 		it.txn.addReadKey(key)
 	}
