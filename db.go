@@ -31,13 +31,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/dgraph/x"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
@@ -1947,25 +1945,31 @@ func (db *DB) StreamDB(outOptions Options) error {
 	// TODO: Fix this
 	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
 		a := itr.Alloc
-		ka := a.Copy(key)
 
 		var id uint64
-		k, err := x.Parse(key)
-		if err == nil {
-			var ok bool
-			mp.Lock()
-			id, ok = mp.m[k.Attr]
-			if !ok {
-				mp.nextId++
-				id = mp.nextId
-				mp.m[k.Attr] = id
-			}
-			mp.Unlock()
-		}
-		if err != nil {
-			fmt.Printf("skipping key = %+v\n", key)
-			spew.Dump(key)
-		}
+		// _, err := x.Parse(key)
+		// if err == nil {
+		// 	var ok bool
+		// 	mp.Lock()
+		// 	id, ok = mp.m[k.Attr]
+		// 	if !ok {
+		// 		mp.nextId++
+		// 		id = mp.nextId
+		// 		mp.m[k.Attr] = id
+		// 	}
+		// 	mp.Unlock()
+		// }
+		// if err != nil {
+		// 	fmt.Printf("skipping key = %+v\n", key)
+		// 	spew.Dump(key)
+		// 	return nil, nil
+		// }
+
+		// Format of master.
+		ka := make([]byte, len(key)+8)
+		ka[0] = key[0]
+		binary.BigEndian.PutUint64(ka[1:], id)
+		copy(ka[9:], key[1:])
 
 		list := &pb.KVList{}
 		// first := true
@@ -1982,29 +1986,28 @@ func (db *DB) StreamDB(outOptions Options) error {
 			kv := y.NewKV(a)
 			kv.Key = ka
 
-			if id != 0 {
-				// Change this key to not have predicate.
-				l := binary.BigEndian.Uint16(ka[1:3])
+			// Change this key to not have predicate.
+			// l := len(pk.Attr)
 
-				// We trimmed the len+len(attr) bytes.
-				// kv.Key = append([]byte{ka[0]}, ka[3+l:]...)
-				kv.Key = make([]byte, 1+8+len(ka[3+l:]))
+			// // We trimmed the len+len(attr) bytes.
+			// // kv.Key = append([]byte{ka[0]}, ka[3+l:]...)
+			// kv.Key = make([]byte, 1+8+len(ka[3+l:]))
 
-				kv.Key[0] = ka[0]
-				binary.BigEndian.PutUint64(kv.Key[1:], id)
-				copy(kv.Key[9:], ka[3+l:])
+			// kv.Key[0] = ka[0]
+			// binary.BigEndian.PutUint64(kv.Key[1:], id)
+			// copy(kv.Key[9:], ka[3+l:])
 
-				// if first && id < 10 {
-				// 	fmt.Printf("k = %+v\n", k)
-				// 	fmt.Printf("ka = %+v\n", ka)
-				// 	fmt.Printf("k.Attr = %+v\n", k.Attr)
-				// 	fmt.Printf("id = %+v\n", math.MaxUint64-id)
-				// 	fmt.Printf("kv.Key = %+v\n", kv.Key)
-				// 	fmt.Printf("string(ka) = %+v\n", string(ka))
-				// 	fmt.Printf("string(kv.Key) = %+v\n", string(kv.Key))
-				// 	first = false
-				// }
-			}
+			// if first && id < 10 {
+			// 	fmt.Printf("k = %+v\n", k)
+			// 	fmt.Printf("ka = %+v\n", ka)
+			// 	fmt.Printf("k.Attr = %+v\n", k.Attr)
+			// 	fmt.Printf("id = %+v\n", math.MaxUint64-id)
+			// 	fmt.Printf("kv.Key = %+v\n", kv.Key)
+			// 	fmt.Printf("string(ka) = %+v\n", string(ka))
+			// 	fmt.Printf("string(kv.Key) = %+v\n", string(kv.Key))
+			// 	first = false
+			// }
+
 			if err := item.Value(func(val []byte) error {
 				kv.Value = a.Copy(val)
 				return nil
