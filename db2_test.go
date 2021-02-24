@@ -664,6 +664,7 @@ func TestL0GCBug(t *testing.T) {
 // Step 3 - Re-open the same badger. We should be able to read all the data
 //          inserted in the first step.
 func TestWindowsDataLoss(t *testing.T) {
+	t.Skipf("Skipping because we mmap .mem files as well.")
 	if runtime.GOOS != "windows" {
 		t.Skip("The test is only for Windows.")
 	}
