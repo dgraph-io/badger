@@ -932,6 +932,7 @@ func TestTxnReadTs(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	require.Equal(t, 1, int(db.orc.readTs()))
+	require.NoError(t, db.Close())
 }
 
 // This tests failed for stream writer with jemalloc and compression enabled.
