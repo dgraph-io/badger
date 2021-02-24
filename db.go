@@ -31,11 +31,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/dgraph/x"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
@@ -1935,6 +1937,98 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
+	mp := struct {
+		sync.Mutex
+		m      map[string]uint64
+		nextId uint64
+	}{}
+	mp.m = make(map[string]uint64)
+
+	// TODO: Fix this
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		a := itr.Alloc
+		ka := a.Copy(key)
+
+		var id uint64
+		k, err := x.Parse(key)
+		if err == nil {
+			var ok bool
+			mp.Lock()
+			id, ok = mp.m[k.Attr]
+			if !ok {
+				mp.nextId++
+				id = mp.nextId
+				mp.m[k.Attr] = id
+			}
+			mp.Unlock()
+		}
+		if err != nil {
+			fmt.Printf("skipping key = %+v\n", key)
+			spew.Dump(key)
+		}
+
+		list := &pb.KVList{}
+		// first := true
+		for ; itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if item.IsDeletedOrExpired() {
+				break
+			}
+			if !bytes.Equal(key, item.Key()) {
+				// Break out on the first encounter with another key.
+				break
+			}
+
+			kv := y.NewKV(a)
+			kv.Key = ka
+
+			if id != 0 {
+				// Change this key to not have predicate.
+				l := binary.BigEndian.Uint16(ka[1:3])
+
+				// We trimmed the len+len(attr) bytes.
+				// kv.Key = append([]byte{ka[0]}, ka[3+l:]...)
+				kv.Key = make([]byte, 1+8+len(ka[3+l:]))
+
+				kv.Key[0] = ka[0]
+				binary.BigEndian.PutUint64(kv.Key[1:], id)
+				copy(kv.Key[9:], ka[3+l:])
+
+				// if first && id < 10 {
+				// 	fmt.Printf("k = %+v\n", k)
+				// 	fmt.Printf("ka = %+v\n", ka)
+				// 	fmt.Printf("k.Attr = %+v\n", k.Attr)
+				// 	fmt.Printf("id = %+v\n", math.MaxUint64-id)
+				// 	fmt.Printf("kv.Key = %+v\n", kv.Key)
+				// 	fmt.Printf("string(ka) = %+v\n", string(ka))
+				// 	fmt.Printf("string(kv.Key) = %+v\n", string(kv.Key))
+				// 	first = false
+				// }
+			}
+			if err := item.Value(func(val []byte) error {
+				kv.Value = a.Copy(val)
+				return nil
+
+			}); err != nil {
+				return nil, err
+			}
+			kv.Version = item.Version()
+			kv.ExpiresAt = item.ExpiresAt()
+			kv.UserMeta = a.Copy([]byte{item.UserMeta()})
+
+			list.Kv = append(list.Kv, kv)
+			if db.opt.NumVersionsToKeep == 1 {
+				break
+			}
+
+			if item.DiscardEarlierVersions() {
+				break
+			}
+		}
+		return list, nil
+	}
+
+	// stream.NumGo = 1
 	stream.Send = func(buf *z.Buffer) error {
 		return writer.Write(buf)
 	}
