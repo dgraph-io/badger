@@ -640,6 +640,11 @@ func (vlog *valueLog) Close() error {
 			err = terr
 		}
 	}
+	if vlog.discardStats != nil {
+		if terr := vlog.discardStats.Close(-1); terr != nil && err == nil {
+			err = terr
+		}
+	}
 	return err
 }
 
