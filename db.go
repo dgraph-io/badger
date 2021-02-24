@@ -31,11 +31,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/dgraph/x"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
@@ -1947,29 +1949,36 @@ func (db *DB) StreamDB(outOptions Options) error {
 		a := itr.Alloc
 
 		var id uint64
-		// _, err := x.Parse(key)
-		// if err == nil {
-		// 	var ok bool
-		// 	mp.Lock()
-		// 	id, ok = mp.m[k.Attr]
-		// 	if !ok {
-		// 		mp.nextId++
-		// 		id = mp.nextId
-		// 		mp.m[k.Attr] = id
-		// 	}
-		// 	mp.Unlock()
-		// }
-		// if err != nil {
-		// 	fmt.Printf("skipping key = %+v\n", key)
-		// 	spew.Dump(key)
-		// 	return nil, nil
-		// }
 
-		// Format of master.
-		ka := make([]byte, len(key)+8)
+		// FORMAT OF UINT PREDICATE:
+		pk, err := x.Parse(key)
+		if err == nil {
+			var ok bool
+			mp.Lock()
+			id, ok = mp.m[pk.Attr]
+			if !ok {
+				mp.nextId++
+				id = mp.nextId
+				mp.m[pk.Attr] = id
+			}
+			mp.Unlock()
+		}
+		if err != nil {
+			fmt.Printf("skipping key = %+v\n", key)
+			spew.Dump(key)
+			return nil, nil
+		}
+		l := len(pk.Attr)
+		ka := make([]byte, len(key)-(2+l)+8)
 		ka[0] = key[0]
 		binary.BigEndian.PutUint64(ka[1:], id)
-		copy(ka[9:], key[1:])
+		copy(ka[9:], key[1+2+l:])
+
+		// // FORMAT OF MASTER.
+		// ka := make([]byte, len(key)+8)
+		// ka[0] = key[0]
+		// binary.BigEndian.PutUint64(ka[1:], id)
+		// copy(ka[9:], key[1:])
 
 		list := &pb.KVList{}
 		// first := true
