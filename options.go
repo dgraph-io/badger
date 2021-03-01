@@ -136,6 +136,7 @@ func DefaultOptions(path string) Options {
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
 		NumGoroutines:       8,
+		MetricsEnabled:      true,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
