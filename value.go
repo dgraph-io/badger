@@ -888,8 +888,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 			bytesWritten += buf.Len()
 			// No need to flush anything, we write to file directly via mmap.
 		}
-		y.NumWrites.Add(int64(written))
-		y.NumBytesWritten.Add(int64(bytesWritten))
+		y.AddIntMetric(vlog.opt.MetricsEnabled, y.NumWrites, int64(written))
+		y.AddIntMetric(vlog.opt.MetricsEnabled, y.NumBytesWritten, int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
 		vlog.db.threshold.update(valueSizes)

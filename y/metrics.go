@@ -18,6 +18,12 @@ package y
 
 import "expvar"
 
+// DO NOT USE these variables directly to update metrics. Badger has the option Metrics Enabled
+// to enable/disable these metrics. Always use function AddIntMetric, AddMapMetric, StoreMapMetric
+// and GetMapMetric to access these variables. They handle those configuration well.
+//
+// We cannot use an atomic variable here to manage the state of metrics because that will be global
+// and can be messed up with multiple initialization of badger instances.
 var (
 	// LSMSize has size of the LSM in bytes
 	LSMSize *expvar.Map
@@ -68,4 +74,36 @@ func init() {
 	VlogSize = expvar.NewMap("badger_v3_vlog_size_bytes")
 	PendingWrites = expvar.NewMap("badger_v3_pending_writes_total")
 	NumCompactionTables = expvar.NewInt("badger_v3_compactions_current")
+}
+
+func AddIntMetric(enabled bool, metric *expvar.Int, val int64) {
+	if !enabled {
+		return
+	}
+
+	metric.Add(val)
+}
+
+func AddMapMetric(enabled bool, metric *expvar.Map, key string, val int64) {
+	if !enabled {
+		return
+	}
+
+	metric.Add(key, val)
+}
+
+func StoreMapMetric(enabled bool, metric *expvar.Map, key string, val expvar.Var) {
+	if !enabled {
+		return
+	}
+
+	metric.Set(key, val)
+}
+
+func GetMapMetric(enabled bool, metric *expvar.Map, key string) expvar.Var {
+	if !enabled {
+		return nil
+	}
+
+	return metric.Get(key)
 }
