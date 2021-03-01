@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -31,6 +32,7 @@ import (
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
+	"gopkg.in/square/go-jose.v2/json"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
@@ -167,12 +169,90 @@ func writeRandom(db *badger.DB, num uint64) error {
 	return batch.Flush()
 }
 
-func readTest(db *badger.DB, dur time.Duration) {
-	now := time.Now()
+type sampleKeys struct {
+	Keys [][]byte `json:"keys"`
+}
+
+func dumpKeys(filename string, db *badger.DB, debug bool) {
+	var err error
 	keys, err := getSampleKeys(db)
 	if err != nil {
 		panic(err)
 	}
+	if debug {
+		count := 0
+		for _, key := range keys {
+			fmt.Printf("key: %v [%s] %#x\n", key, key, string(key))
+			count++
+			if count == 20 {
+				break
+			}
+		}
+	}
+	fmt.Println("length", len(keys))
+	if b, err := json.Marshal(sampleKeys{Keys: keys}); err == nil {
+		f, err := os.Create(filename)
+		y.Check(err)
+		defer f.Close()
+		n, err := f.Write(b)
+		y.Check(err)
+		y.AssertTrue(n == len(b))
+	}
+}
+
+func readData(filename string, version int, debug bool) [][]byte {
+	data, _ := ioutil.ReadFile(filename)
+	var skeys sampleKeys
+	err := json.Unmarshal(data, &skeys)
+	y.Check(err)
+	keys := skeys.Keys
+
+	var mapping badger.Map
+	mdata, _ := ioutil.ReadFile("map.json")
+	y.Check(json.Unmarshal(mdata, &mapping))
+	mp := mapping.Mapping
+
+	if version == 2011 {
+		fmt.Println("Converting format")
+		for i := range keys {
+			nk := make([]byte, len(keys[i])-8)
+			nk[0] = keys[i][0]
+			copy(nk[1:], keys[i][9:])
+			keys[i] = nk
+		}
+	} else if version == 3000 {
+		fmt.Println("Converting format to 3000")
+		for i := range keys {
+			l := int(binary.BigEndian.Uint16(keys[i][9:11]))
+			attr := string(keys[i][11 : 11+l])
+			id, ok := mp[attr]
+			y.AssertTrue(ok)
+
+			nk := make([]byte, len(keys[i])-(l+2))
+			nk[0] = keys[i][0]
+			binary.BigEndian.PutUint64(nk[1:], id)
+			copy(nk[3:5], keys[i][9:11])
+			copy(nk[9:], keys[i][1+8+2+l:])
+			keys[i] = nk
+		}
+	}
+	fmt.Println(keys[:10])
+	return keys
+}
+func readTest(db *badger.DB, dur time.Duration) {
+	var keys [][]byte
+	filename := "keys.json"
+	write := false
+	version := 2011
+	debug := true
+	if write {
+		dumpKeys(filename, db, debug)
+		return
+	} else {
+		keys = readData(filename, version, debug)
+	}
+
+	now := time.Now()
 	fmt.Println("*********************************************************")
 	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
 	fmt.Println("*********************************************************")

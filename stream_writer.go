@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
 )
 
 // StreamWriter is used to write data coming from multiple streams. The streams must not have any
@@ -352,10 +354,10 @@ func (w *sortedWriter) handleRequests() {
 
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
-	// if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
-	// 	return errors.Errorf("keys not in sorted order (last key: \n%s, key: \n%s)",
-	// 		hex.Dump(w.lastKey), hex.Dump(key))
-	// }
+	if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
+		return errors.Errorf("keys not in sorted order (last key: \n%s, key: \n%s)",
+			hex.Dump(w.lastKey), hex.Dump(key))
+	}
 
 	sameKey := y.SameKey(key, w.lastKey)
 

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"math"
@@ -31,13 +32,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/dgraph/x"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
@@ -1917,6 +1916,10 @@ func createDirs(opt Options) error {
 	return nil
 }
 
+type Map struct {
+	Mapping map[string]uint64 `json:mapping`
+}
+
 // Stream the contents of this DB to a new DB with options outOptions that will be
 // created in outDir.
 func (db *DB) StreamDB(outOptions Options) error {
@@ -1943,6 +1946,33 @@ func (db *DB) StreamDB(outOptions Options) error {
 		nextId uint64
 	}{}
 	mp.m = make(map[string]uint64)
+	pow := func(a, b int) int {
+		var x int
+		x = 1
+		for b > 0 {
+			x *= a
+			b--
+		}
+		return x
+	}
+	getId := func(attr string) uint64 {
+		var id int
+		s := strings.Split(attr, ".")
+		fmt.Println(attr)
+		N := 4
+		ids := make([]int, N+1)
+		ids[0] = (int(s[0][0]-'a') + 1)
+		if len(s) > 1 {
+			for i := 0; len(s[1]) > i && i < N; i++ {
+				ids[i+1] = (int(s[1][i]-'a') + 1)
+			}
+		}
+
+		for i := N - 1; i >= 0; i-- {
+			id += ids[i] * pow(28, N-i)
+		}
+		return uint64(id)
+	}
 
 	// TODO: Fix this
 	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
@@ -1951,30 +1981,32 @@ func (db *DB) StreamDB(outOptions Options) error {
 		var id uint64
 
 		// FORMAT OF UINT PREDICATE:
-		pk, err := x.Parse(key)
+		l := int(binary.BigEndian.Uint16(key[1:3]))
+		attr := string(key[3 : 3+l])
 		if err == nil {
 			var ok bool
 			mp.Lock()
-			id, ok = mp.m[pk.Attr]
+			id, ok = mp.m[attr]
 			if !ok {
-				mp.nextId++
-				id = mp.nextId
-				mp.m[pk.Attr] = id
+				// mp.nextId++
+				// id = mp.nextId
+				id = getId(attr)
+				fmt.Printf("================= %#x %s\n", id, attr)
+				mp.m[attr] = id
 			}
 			mp.Unlock()
 		}
 		if err != nil {
 			fmt.Printf("skipping key = %+v\n", key)
-			spew.Dump(key)
 			return nil, nil
 		}
-		l := len(pk.Attr)
-		ka := make([]byte, len(key)-(2+l)+8)
+		ka := make([]byte, len(key)-(l+2)+8)
 		ka[0] = key[0]
 		binary.BigEndian.PutUint64(ka[1:], id)
-		copy(ka[9:], key[1+2+l:])
+		copy(ka[3:5], key[1:3])
+		copy(ka[9:], key[3+l:])
 
-		// // FORMAT OF MASTER.
+		// FORMAT OF MASTER.
 		// ka := make([]byte, len(key)+8)
 		// ka[0] = key[0]
 		// binary.BigEndian.PutUint64(ka[1:], id)
@@ -2049,6 +2081,15 @@ func (db *DB) StreamDB(outOptions Options) error {
 	}
 	if err := writer.Flush(); err != nil {
 		return y.Wrapf(err, "cannot flush writer")
+	}
+	filename := "map.json"
+	if b, err := json.Marshal(Map{Mapping: mp.m}); err == nil {
+		f, err := os.Create(filename)
+		y.Check(err)
+		defer f.Close()
+		n, err := f.Write(b)
+		y.Check(err)
+		y.AssertTrue(n == len(b))
 	}
 	return nil
 }

@@ -166,26 +166,24 @@ func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 	}
 }
 
-func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
+func lookupForKey(db *badger.DB, key []byte) uint64 {
+	var sz uint64
+	// var cnt int
 	err := db.View(func(txn *badger.Txn) error {
 		iopt := badger.DefaultIteratorOptions
 		iopt.AllVersions = true
 		it := txn.NewKeyIterator(key, iopt)
 		defer it.Close()
 
-		cnt := 0
 		for it.Seek(key); it.Valid(); it.Next() {
 			itm := it.Item()
 			sz += uint64(itm.EstimatedSize())
-			cnt++
-			if cnt == 10 {
-				break
-			}
+			// cnt++
 		}
 		return nil
 	})
 	y.Check(err)
-	return
+	return sz
 }
 
 // getSampleKeys uses stream framework internally, to get keys in random order.
