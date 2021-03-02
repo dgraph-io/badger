@@ -339,6 +339,8 @@ func (opt Options) WithReadOnly(val bool) Options {
 // This flag is useful for use cases like in Dgraph where we open temporary badger instances to
 // index data. In those cases we don't want badger metrics to be polluted with the noise from
 // those temporary instances.
+//
+// Default value is set to true
 func (opt Options) WithMetricsEnabled(val bool) Options {
 	opt.MetricsEnabled = val
 	return opt
