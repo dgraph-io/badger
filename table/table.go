@@ -683,12 +683,12 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 		return false
 	}
 
-	y.AddMapMetric(t.opt.MetricsEnabled, y.NumLSMBloomHits, "DoesNotHave_ALL", 1)
+	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_ALL", 1)
 	index := t.fetchIndex()
 	bf := index.BloomFilterBytes()
 	mayContain := y.Filter(bf).MayContain(hash)
 	if !mayContain {
-		y.AddMapMetric(t.opt.MetricsEnabled, y.NumLSMBloomHits, "DoesNotHave_HIT", 1)
+		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
 	}
 	return !mayContain
 }

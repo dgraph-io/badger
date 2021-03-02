@@ -408,8 +408,8 @@ func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 		buf = lf.Data[offset : offset+valsz]
 		nbr = int64(valsz)
 	}
-	y.AddIntMetric(lf.opt.MetricsEnabled, y.NumReads, 1)
-	y.AddIntMetric(lf.opt.MetricsEnabled, y.NumBytesRead, nbr)
+	y.NumReadsAdd(lf.opt.MetricsEnabled, 1)
+	y.NumBytesReadAdd(lf.opt.MetricsEnabled, nbr)
 	return buf, err
 }
 

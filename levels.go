@@ -879,8 +879,8 @@ func (s *levelsController) compactBuildTables(
 	botTables := cd.bot
 
 	numTables := int64(len(topTables) + len(botTables))
-	y.AddIntMetric(s.kv.opt.MetricsEnabled, y.NumCompactionTables, numTables)
-	defer y.AddIntMetric(s.kv.opt.MetricsEnabled, y.NumCompactionTables, -numTables)
+	y.NumCompactionTablesAdd(s.kv.opt.MetricsEnabled, numTables)
+	defer y.NumCompactionTablesAdd(s.kv.opt.MetricsEnabled, -numTables)
 
 	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
 		len(topTables), len(botTables))
