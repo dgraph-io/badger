@@ -73,129 +73,97 @@ func init() {
 }
 
 func NumReadsAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numReads.Add(val)
+	addInt(enabled, numReads, val)
 }
 
 func NumWritesAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numWrites.Add(val)
+	addInt(enabled, numWrites, val)
 }
 
 func NumBytesReadAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numBytesRead.Add(val)
+	addInt(enabled, numBytesRead, val)
 }
 
 func NumBytesWrittenAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numBytesWritten.Add(val)
+	addInt(enabled, numBytesWritten, val)
 }
 
 func NumGetsAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numGets.Add(val)
+	addInt(enabled, numGets, val)
 }
 
 func NumPutsAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numPuts.Add(val)
+	addInt(enabled, numPuts, val)
 }
 
 func NumBlockedPutsAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numBlockedPuts.Add(val)
+	addInt(enabled, numBlockedPuts, val)
 }
 
 func NumMemtableGetsAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numMemtableGets.Add(val)
+	addInt(enabled, numMemtableGets, val)
 }
 
 func NumCompactionTablesAdd(enabled bool, val int64) {
-	if !enabled {
-		return
-	}
-
-	numCompactionTables.Add(val)
+	addInt(enabled, numCompactionTables, val)
 }
 
 func LSMSizeSet(enabled bool, key string, val expvar.Var) {
-	if !enabled {
-		return
-	}
-
-	lsmSize.Set(key, val)
+	storeToMap(enabled, lsmSize, key, val)
 }
 
 func VlogSizeSet(enabled bool, key string, val expvar.Var) {
-	if !enabled {
-		return
-	}
-
-	vlogSize.Set(key, val)
+	storeToMap(enabled, vlogSize, key, val)
 }
 
 func PendingWritesSet(enabled bool, key string, val expvar.Var) {
-	if !enabled {
-		return
-	}
-
-	pendingWrites.Set(key, val)
+	storeToMap(enabled, pendingWrites, key, val)
 }
 
 func NumLSMBloomHitsAdd(enabled bool, key string, val int64) {
-	if !enabled {
-		return
-	}
-
-	numLSMBloomHits.Add(key, val)
+	addToMap(enabled, numLSMBloomHits, key, val)
 }
 
 func NumLSMGetsAdd(enabled bool, key string, val int64) {
+	addToMap(enabled, numLSMGets, key, val)
+}
+
+func LSMSizeGet(enabled bool, key string) expvar.Var {
+	return getFromMap(enabled, lsmSize, key)
+}
+
+func VlogSizeGet(enabled bool, key string) expvar.Var {
+	return getFromMap(enabled, vlogSize, key)
+}
+
+func addInt(enabled bool, metric *expvar.Int, val int64) {
 	if !enabled {
 		return
 	}
 
-	numLSMGets.Add(key, val)
+	metric.Add(val)
 }
 
-func LSMSizeGet(enabled bool, key string) expvar.Var {
+func addToMap(enabled bool, metric *expvar.Map, key string, val int64) {
+	if !enabled {
+		return
+	}
+
+	metric.Add(key, val)
+}
+
+func storeToMap(enabled bool, metric *expvar.Map, key string, val expvar.Var) {
+	if !enabled {
+		return
+	}
+
+	metric.Set(key, val)
+}
+
+func getFromMap(enabled bool, metric *expvar.Map, key string) expvar.Var {
 	if !enabled {
 		return nil
 	}
 
-	return lsmSize.Get(key)
-}
-
-func VlogSizeGet(enabled bool, key string) expvar.Var {
-	if !enabled {
-		return nil
-	}
-
-	return vlogSize.Get(key)
+	return metric.Get(key)
 }
