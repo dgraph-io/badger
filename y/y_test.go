@@ -280,7 +280,7 @@ func TestEncodedSize(t *testing.T) {
 }
 
 func TestAllocatorReuse(t *testing.T) {
-	a := z.NewAllocator(1024)
+	a := z.NewAllocator(1024, "test")
 	defer a.Release()
 
 	N := 1024

@@ -43,7 +43,7 @@ func main() {
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
 
-	out := z.CallocNoRef(1)
+	out := z.CallocNoRef(1, "Badger.Main")
 	fmt.Printf("jemalloc enabled: %v\n", len(out) > 0)
 	z.StatsPrint()
 	z.Free(out)

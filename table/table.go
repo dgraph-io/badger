@@ -756,7 +756,7 @@ func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 
 	var dst []byte
 	if viaCalloc {
-		dst = z.Calloc(len(data))
+		dst = z.Calloc(len(data), "Table.Decrypt")
 	} else {
 		dst = make([]byte, len(data))
 	}
@@ -807,9 +807,9 @@ func (t *Table) decompress(b *block) error {
 		return nil
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
-			dst = z.Calloc(sz)
+			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4) // Take a guess.
+			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
@@ -818,7 +818,7 @@ func (t *Table) decompress(b *block) error {
 		}
 	case options.ZSTD:
 		sz := int(float64(t.opt.BlockSize) * 1.2)
-		dst = z.Calloc(sz)
+		dst = z.Calloc(sz, "Table.Decompress")
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			z.Free(dst)
