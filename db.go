@@ -738,10 +738,10 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	var maxVs y.ValueStruct
 	version := y.ParseTs(key)
 
-	y.NumGets.Add(1)
+	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].sl.Get(key)
-		y.NumMemtableGets.Add(1)
+		y.NumMemtableGetsAdd(db.opt.MetricsEnabled, 1)
 		if vs.Meta == 0 && vs.Value == nil {
 			continue
 		}
@@ -879,7 +879,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
 	db.writeCh <- req // Handled in doWrites.
-	y.NumPuts.Add(int64(len(entries)))
+	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
 
 	return req, nil
 }
@@ -897,7 +897,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 
 	// This variable tracks the number of pending writes.
 	reqLen := new(expvar.Int)
-	y.PendingWrites.Set(db.opt.Dir, reqLen)
+	y.PendingWritesSet(db.opt.MetricsEnabled, db.opt.Dir, reqLen)
 
 	reqs := make([]*request, 0, 10)
 	for {
@@ -1155,12 +1155,12 @@ func (db *DB) calculateSize() {
 	}
 
 	lsmSize, vlogSize := totalSize(db.opt.Dir)
-	y.LSMSize.Set(db.opt.Dir, newInt(lsmSize))
+	y.LSMSizeSet(db.opt.MetricsEnabled, db.opt.Dir, newInt(lsmSize))
 	// If valueDir is different from dir, we'd have to do another walk.
 	if db.opt.ValueDir != db.opt.Dir {
 		_, vlogSize = totalSize(db.opt.ValueDir)
 	}
-	y.VlogSize.Set(db.opt.ValueDir, newInt(vlogSize))
+	y.VlogSizeSet(db.opt.MetricsEnabled, db.opt.ValueDir, newInt(vlogSize))
 }
 
 func (db *DB) updateSize(lc *z.Closer) {
@@ -1224,12 +1224,12 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
 // call RunValueLogGC.
 func (db *DB) Size() (lsm, vlog int64) {
-	if y.LSMSize.Get(db.opt.Dir) == nil {
+	if y.LSMSizeGet(db.opt.MetricsEnabled, db.opt.Dir) == nil {
 		lsm, vlog = 0, 0
 		return
 	}
-	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
-	vlog = y.VlogSize.Get(db.opt.ValueDir).(*expvar.Int).Value()
+	lsm = y.LSMSizeGet(db.opt.MetricsEnabled, db.opt.Dir).(*expvar.Int).Value()
+	vlog = y.VlogSizeGet(db.opt.MetricsEnabled, db.opt.ValueDir).(*expvar.Int).Value()
 	return
 }
 

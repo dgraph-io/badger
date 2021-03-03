@@ -52,6 +52,7 @@ type Options struct {
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
+	MetricsEnabled    bool
 	// Sets the Stream.numGo field
 	NumGoroutines int
 
@@ -135,6 +136,7 @@ func DefaultOptions(path string) Options {
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
 		NumGoroutines:       8,
+		MetricsEnabled:      true,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -186,6 +188,7 @@ func buildTableOptions(db *DB) table.Options {
 	y.Check(err)
 	return table.Options{
 		ReadOnly:             opt.ReadOnly,
+		MetricsEnabled:       db.opt.MetricsEnabled,
 		TableSize:            uint64(opt.BaseTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
@@ -325,6 +328,21 @@ func (opt Options) WithNumGoroutines(val int) Options {
 // The default value of ReadOnly is false.
 func (opt Options) WithReadOnly(val bool) Options {
 	opt.ReadOnly = val
+	return opt
+}
+
+// WithMetricsEnabled returns a new Options value with MetricsEnabled set to the given value.
+//
+// When MetricsEnabled is set to false, then the DB will be opened and no badger metrics
+// will be logged. Metrics are defined in metric.go file.
+//
+// This flag is useful for use cases like in Dgraph where we open temporary badger instances to
+// index data. In those cases we don't want badger metrics to be polluted with the noise from
+// those temporary instances.
+//
+// Default value is set to true
+func (opt Options) WithMetricsEnabled(val bool) Options {
+	opt.MetricsEnabled = val
 	return opt
 }
 

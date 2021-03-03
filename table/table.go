@@ -51,7 +51,8 @@ type Options struct {
 	// Options for Opening/Building Table.
 
 	// Open tables in read only mode.
-	ReadOnly bool
+	ReadOnly       bool
+	MetricsEnabled bool
 
 	// Maximum size of the table.
 	TableSize     uint64
@@ -682,12 +683,12 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 		return false
 	}
 
-	y.NumLSMBloomHits.Add("DoesNotHave_ALL", 1)
+	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_ALL", 1)
 	index := t.fetchIndex()
 	bf := index.BloomFilterBytes()
 	mayContain := y.Filter(bf).MayContain(hash)
 	if !mayContain {
-		y.NumLSMBloomHits.Add("DoesNotHave_HIT", 1)
+		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
 	}
 	return !mayContain
 }
