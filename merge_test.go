@@ -92,6 +92,38 @@ func TestGetMergeOperator(t *testing.T) {
 		})
 	})
 
+	t.Run("Get after Delete", func(t *testing.T) {
+		key := []byte("merge")
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+
+			err := m.Add(uint64ToBytes(1))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(2))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(3))
+			require.NoError(t, err)
+
+			m.Stop()
+			res, err := m.Get()
+			require.NoError(t, err)
+			require.Equal(t, uint64(6), bytesToUint64(res))
+
+			db.Update(func(txn *Txn) error {
+				return txn.Delete(key)
+			})
+
+			m = db.GetMergeOperator(key, add, 200*time.Millisecond)
+			err = m.Add(uint64ToBytes(1))
+			require.NoError(t, err)
+			m.Stop()
+
+			res, err = m.Get()
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), bytesToUint64(res))
+		})
+	})
+
 	t.Run("Get after Stop", func(t *testing.T) {
 		key := []byte("merge")
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
