@@ -2060,7 +2060,7 @@ func TestForceFlushMemtable(t *testing.T) {
 	// We want to make sure that memtable is flushed on disk. While flushing memtable to disk,
 	// latest head is also stored in it. Hence we will try to read head from disk. To make sure
 	// this. we will truncate all memtables.
-	db.Lock()
+	db.lock.Lock()
 	db.mt.DecrRef()
 	for _, mt := range db.imm {
 		mt.DecrRef()
