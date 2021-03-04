@@ -440,7 +440,7 @@ func (db *DB) MaxVersion() uint64 {
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
-	db.Unlock()
+	db.lock.Unlock()
 	for _, ti := range db.Tables() {
 		update(ti.MaxVersion)
 	}
@@ -583,7 +583,7 @@ func (db *DB) close() (err error) {
 			for {
 				pushedFlushTask := func() bool {
 					db.lock.Lock()
-					defer db.Unlock()
+					defer db.lock.Unlock()
 					y.AssertTrue(db.mt != nil)
 					select {
 					case db.flushChan <- flushTask{mt: db.mt}:
@@ -985,7 +985,7 @@ var errNoRoom = errors.New("No room for write")
 func (db *DB) ensureRoomForWrite() error {
 	var err error
 	db.lock.Lock()
-	defer db.Unlock()
+	defer db.lock.Unlock()
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	if !db.mt.isFull() {
@@ -1098,7 +1098,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 				y.AssertTrue(ft.mt == db.imm[0])
 				db.imm = db.imm[1:]
 				ft.mt.DecrRef() // Return memory.
-				db.Unlock()
+				db.lock.Unlock()
 
 				break
 			}
@@ -1426,7 +1426,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		}
 
 		db.lock.Lock()
-		defer db.Unlock()
+		defer db.lock.Unlock()
 		var memTables []*memTable
 		memTables = append(memTables, db.imm...)
 		for _, mt := range memTables {
@@ -1661,7 +1661,7 @@ func (db *DB) dropAll() (func(), error) {
 	}
 	// Block all foreign interactions with memory tables.
 	db.lock.Lock()
-	defer db.Unlock()
+	defer db.lock.Unlock()
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
 	db.mt.DecrRef()
@@ -1725,7 +1725,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	}
 	// Block all foreign interactions with memory tables.
 	db.lock.Lock()
-	defer db.Unlock()
+	defer db.lock.Unlock()
 
 	db.imm = append(db.imm, db.mt)
 	for _, memtable := range db.imm {

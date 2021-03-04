@@ -2068,7 +2068,7 @@ func TestForceFlushMemtable(t *testing.T) {
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable()
 	require.NoError(t, err)
-	db.Unlock()
+	db.lock.Unlock()
 
 	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation.
 	require.True(t, db.nextMemFid == 3,
