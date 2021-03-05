@@ -689,8 +689,8 @@ func (db *DB) Sync() error {
 
 // getMemtables returns the current memtables and get references.
 func (db *DB) getMemTables() ([]*memTable, func()) {
-	db.RLock()
-	defer db.RUnlock()
+	db.lock.RLock()
+	defer db.lock.RUnlock()
 
 	var tables []*memTable
 
