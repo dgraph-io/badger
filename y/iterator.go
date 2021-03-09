@@ -51,8 +51,11 @@ func (v *ValueStruct) EncodedSize() uint32 {
 	return uint32(sz + enc)
 }
 
-// TODO: Maybe expose this variable.
-const bitDelete = 1 << 0 // this value is copied from badger package.
+// TODO: Maybe expose this variable. // this value is copied from badger package.
+const (
+	bitDelete                      = 1 << 0
+	bitDiscardEarlierVersions byte = 1 << 2
+)
 
 // IsDeleteOrExpired checks if the value struct contains deleted item.
 func (v *ValueStruct) IsDeletedOrExpired() bool {
@@ -63,6 +66,11 @@ func (v *ValueStruct) IsDeletedOrExpired() bool {
 		return false
 	}
 	return v.ExpiresAt <= uint64(time.Now().Unix())
+}
+
+// IsDeleteOrExpired checks if the value struct contains deleted item.
+func (v *ValueStruct) DiscardEarlierVersions() bool {
+	return v.Meta&bitDiscardEarlierVersions > 0
 }
 
 // Decode uses the length of the slice to infer the length of the Value field.

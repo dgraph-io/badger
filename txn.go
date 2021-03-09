@@ -490,10 +490,15 @@ func (txn *Txn) GetValues(key []byte) ([]y.ValueStruct, error) {
 	// less than deleted keys.
 	var idx int
 	for _, vs := range values {
-		if vs.IsDeletedOrExpired() {
+		switch {
+		case vs.IsDeletedOrExpired():
 			break
+		case vs.DiscardEarlierVersions():
+			idx++
+			break
+		default:
+			idx++
 		}
-		idx++
 	}
 	// TODO: call yield value here. For the case when value is stored in value log.
 	return values[:idx], nil

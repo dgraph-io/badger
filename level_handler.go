@@ -303,7 +303,7 @@ func (s *levelHandler) _get(key []byte) ([]y.ValueStruct, error) {
 				continue
 			}
 			values = append(values, vs)
-			if vs.IsDeletedOrExpired() {
+			if vs.IsDeletedOrExpired() || vs.DiscardEarlierVersions() {
 				// We will remove this item in the end in txn.GetValues()
 				return values, nil
 			}
