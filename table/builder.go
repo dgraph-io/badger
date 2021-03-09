@@ -128,7 +128,7 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc: opts.AllocPool.Get(sz),
+		alloc: opts.AllocPool.Get(sz, "TableBuilder"),
 		opts:  &opts,
 	}
 	b.alloc.Tag = "Builder"
