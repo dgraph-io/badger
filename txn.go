@@ -439,6 +439,66 @@ func (txn *Txn) Delete(key []byte) error {
 	return txn.modify(e)
 }
 
+// GetValues works like a KeyIterator that returns all the values at once.
+// TODO; It does not support iterator options like Reverse.
+// Should this return items instead?
+func (txn *Txn) GetValues(key []byte) ([]y.ValueStruct, error) {
+	if len(key) == 0 {
+		return nil, ErrEmptyKey
+	} else if txn.discarded {
+		return nil, ErrDiscardedTxn
+	}
+
+	if err := txn.db.isBanned(key); err != nil {
+		return nil, err
+	}
+
+	if txn.update {
+		return nil, ErrReadOnlyTxn
+		// if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+		// 	if isDeletedOrExpired(e.meta, e.ExpiresAt) {
+		// 		return nil, ErrKeyNotFound
+		// 	}
+		// 	// Fulfill from cache.
+		// 	item.meta = e.meta
+		// 	item.val = e.Value
+		// 	item.userMeta = e.UserMeta
+		// 	item.key = key
+		// 	item.status = prefetched
+		// 	item.version = txn.readTs
+		// 	item.expiresAt = e.ExpiresAt
+		// 	// We probably don't need to set db on item here.
+		// 	return item, nil
+		// }
+		// // Only track reads if this is update txn. No need to track read if txn serviced it
+		// // internally.
+		// txn.addReadKey(key)
+	}
+
+	seek := y.KeyWithTs(key, txn.readTs)
+	values, err := txn.db._get(seek)
+	if err != nil {
+		return nil, y.Wrapf(err, "DB::Get key: %q", key)
+	}
+
+	sort.Slice(values, func(i, j int) bool {
+		// Sort the value structs in decreasing order of versions.
+		return values[i].Version > values[j].Version
+	})
+
+	// We need to get the version for deleted key, so that we can ignore keys with version
+	// less than deleted keys.
+	var idx int
+	for _, vs := range values {
+		if vs.IsDeletedOrExpired() {
+			break
+		}
+		idx++
+	}
+	// TODO: call yield value here. For the case when value is stored in db.
+	return values[:idx], nil
+}
+
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item *Item, rerr error) {

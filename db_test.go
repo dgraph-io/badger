@@ -2509,3 +2509,60 @@ func TestBannedAtZeroOffset(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestTxnGetValues(t *testing.T) {
+
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opts := DefaultOptions(dir)
+	opts.ValueThreshold = 100
+	opts.NumVersionsToKeep = math.MaxInt32
+	opts.MemTableSize = 1 << 12
+	// opts.BaseTableSize = 1 << 10
+	// opts.BaseLevelSize = 5 << 10
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := 10000
+	key := []byte("mykey")
+	for i := 0; i < N; i++ {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.Set(key, []byte(fmt.Sprintf("val-%d", i)))
+		}))
+	}
+	fmt.Println("Done writing")
+
+	require.NoError(t, db.View(func(txn *Txn) error {
+		vals, err := txn.GetValues(key)
+		require.NoError(t, err)
+		require.Equal(t, N, len(vals))
+		return nil
+	}))
+
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Delete(key)
+	}))
+
+	require.NoError(t, db.View(func(txn *Txn) error {
+		vals, err := txn.GetValues(key)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(vals))
+		return nil
+	}))
+
+	for i := 0; i < N; i++ {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.Set(key, []byte(fmt.Sprintf("val-%d", i)))
+		}))
+	}
+	fmt.Println("Done writing")
+
+	require.NoError(t, db.View(func(txn *Txn) error {
+		vals, err := txn.GetValues(key)
+		require.NoError(t, err)
+		require.Equal(t, N, len(vals))
+		return nil
+	}))
+}

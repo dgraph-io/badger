@@ -19,6 +19,7 @@ package y
 import (
 	"bytes"
 	"encoding/binary"
+	"time"
 )
 
 // ValueStruct represents the value info that can be associated with a key, but also the internal
@@ -48,6 +49,20 @@ func (v *ValueStruct) EncodedSize() uint32 {
 	sz := len(v.Value) + 2 // meta, usermeta.
 	enc := sizeVarint(v.ExpiresAt)
 	return uint32(sz + enc)
+}
+
+// TODO: Maybe expose this variable.
+const bitDelete = 1 << 0 // this value is copied from badger package.
+
+// IsDeleteOrExpired checks if the value struct contains deleted item.
+func (v *ValueStruct) IsDeletedOrExpired() bool {
+	if v.Meta&bitDelete > 0 {
+		return true
+	}
+	if v.ExpiresAt == 0 {
+		return false
+	}
+	return v.ExpiresAt <= uint64(time.Now().Unix())
 }
 
 // Decode uses the length of the slice to infer the length of the Value field.

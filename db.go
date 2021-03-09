@@ -756,6 +756,44 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs, 0)
 }
 
+func (db *DB) _get(key []byte) ([]y.ValueStruct, error) {
+	if db.IsClosed() {
+		return nil, ErrDBClosed
+	}
+	tables, decr := db.getMemTables() // Lock should be released.
+	defer decr()
+
+	var values []y.ValueStruct
+
+	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
+	for i := 0; i < len(tables); i++ {
+		itr := tables[i].sl.NewIterator()
+		// Seek to the key with version math.MaxUint64 and then find all such values.
+		for itr.Seek(y.KeyWithTs(keyNoTs, math.MaxUint64)); itr.Valid(); itr.Next() {
+			vs := itr.Value()
+			vs.Version = y.ParseTs(itr.Key())
+			// We can't break out of loop even if we find a deleted item. This is because some key
+			// with discard mark from lower level (say L6) might have come here in memtables due to
+			// value log GC.
+			if vs.Meta == 0 && vs.Value == nil {
+				continue
+			}
+			if vs.Version > version {
+				break
+			}
+			values = append(values, vs)
+		}
+	}
+
+	// fmt.Println("from memtables", len(values), len(tables))
+	// Now get the KVs from the levels.
+	vals, err := db.lc._get(key, 0)
+	if err != nil {
+		return nil, err
+	}
+	return append(values, vals...), nil
+}
+
 var requestPool = sync.Pool{
 	New: func() interface{} {
 		return new(request)

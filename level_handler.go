@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -235,6 +236,81 @@ func (s *levelHandler) close() error {
 		}
 	}
 	return y.Wrap(err, "levelHandler.close")
+}
+
+// getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
+func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error) {
+	s.RLock()
+	defer s.RUnlock()
+
+	if s.level == 0 {
+		// For level 0, we need to check every table. Remember to make a copy as s.tables may change
+		// once we exit this function, and we don't want to lock s.tables while seeking in tables.
+		// CAUTION: Reverse the tables.
+		out := make([]*table.Table, 0, len(s.tables))
+		for i := len(s.tables) - 1; i >= 0; i-- {
+			out = append(out, s.tables[i])
+			s.tables[i].IncrRef()
+		}
+		return out, func() error {
+			for _, t := range out {
+				if err := t.DecrRef(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
+	iopts := &IteratorOptions{Prefix: y.ParseKey(key), AllVersions: true, prefixIsKey: true}
+	tables := iopts.pickTables(s.tables)
+	for _, tbl := range tables {
+		tbl.IncrRef()
+	}
+	return tables, func() error {
+		for _, t := range tables {
+			if err := t.DecrRef(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// get returns value for a given key or the key after that. If not found, return nil.
+func (s *levelHandler) _get(key []byte) ([]y.ValueStruct, error) {
+	tables, decr := s._getTableForKey(key)
+	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
+
+	hash := y.Hash(keyNoTs)
+	var values []y.ValueStruct
+	for _, th := range tables {
+		if th.DoesNotHave(hash) {
+			y.NumLSMBloomHitsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
+			continue
+		}
+
+		it := th.NewIterator(0)
+		defer it.Close()
+
+		for it.Seek(y.KeyWithTs(keyNoTs, math.MaxUint64)); it.Valid(); it.Next() {
+			if !y.SameKey(key, it.Key()) || y.ParseTs(it.Key()) > version {
+				return values, nil
+			}
+			vs := it.ValueCopy()
+			vs.Version = y.ParseTs(it.Key())
+			if vs.Meta == 0 && vs.Value == nil {
+				// TODO: When does this happen?
+				continue
+			}
+			values = append(values, vs)
+			if vs.IsDeletedOrExpired() {
+				// We will remove this item in the end.
+				return values, nil
+			}
+		}
+	}
+	return values, decr()
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.

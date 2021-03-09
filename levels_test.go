@@ -45,7 +45,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	// Add all keys and versions to the table.
 	for _, item := range td {
 		key := y.KeyWithTs([]byte(item.key), uint64(item.version))
-		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
+		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta, Version: uint64(item.version)}
 		b.Add(key, val, 0)
 	}
 	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
@@ -125,6 +125,43 @@ func TestCheckOverlap(t *testing.T) {
 			// Level 2 and 3 should not overlap with level 0 tables.
 			require.False(t, db.lc.checkOverlap(db.lc.levels[0].tables, 2))
 			require.False(t, db.lc.checkOverlap(db.lc.levels[0].tables, 3))
+		})
+	})
+}
+
+func TestTxnGetValues2(t *testing.T) {
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(math.MaxInt32)
+	opt.managedTxns = true
+
+	t.Run("basic", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			key := "foo"
+			l0 := []keyValVersion{{key, "x", 2, 0}, {key, "x", 3, 0}, {"goo", "bar", 3, 0}}
+			l1 := []keyValVersion{{key, "bar", 1, 0}}
+			createAndOpen(db, l0, 0)
+			createAndOpen(db, l1, 1)
+
+			txn := db.NewTransactionAt(5, false)
+			vals, err := txn.GetValues([]byte(key))
+			require.NoError(t, err)
+			require.Equal(t, 3, len(vals))
+		})
+	})
+
+	t.Run("with delete markers", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			key := "foo"
+			l0 := []keyValVersion{{key, "x", 3, 0}, {key, "x", 4, 0}, {"goo", "bar", 3, 0}}
+			l1 := []keyValVersion{{key, "bar", 1, 0}}
+			l2 := []keyValVersion{{key, "xxx", 2, bitDelete}}
+			createAndOpen(db, l0, 0)
+			createAndOpen(db, l1, 1)
+			createAndOpen(db, l2, 2)
+
+			txn := db.NewTransactionAt(5, false)
+			vals, err := txn.GetValues([]byte(key))
+			require.NoError(t, err)
+			require.Equal(t, 2, len(vals))
 		})
 	})
 }

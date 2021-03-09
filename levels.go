@@ -1615,6 +1615,34 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 	return maxVs, nil
 }
 
+// get searches for a given key in all the levels of the LSM tree. It returns
+// key version <= the expected version (maxVs). If not found, it returns an empty
+// y.ValueStruct.
+func (s *levelsController) _get(key []byte, startLevel int) (
+	[]y.ValueStruct, error) {
+	if s.kv.IsClosed() {
+		return nil, ErrDBClosed
+	}
+	// It's important that we iterate the levels from 0 on upward. The reason is, if we iterated
+	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
+	// read level L's tables post-compaction and level L+1's tables pre-compaction. (If we do
+	// parallelize this, we will need to call the h.RLock() function by increasing order of level
+	// number.)
+	var values []y.ValueStruct
+	for _, h := range s.levels {
+		// Ignore all levels below startLevel. This is useful for GC when L0 is kept in memory.
+		if h.level < startLevel {
+			continue
+		}
+		vals, err := h._get(key) // Calls h.RLock() and h.RUnlock().
+		if err != nil {
+			return nil, y.Wrapf(err, "get key: %q", key)
+		}
+		values = append(values, vals...)
+	}
+	return values, nil
+}
+
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
