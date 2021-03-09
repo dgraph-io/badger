@@ -7,7 +7,7 @@ go 1.12
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20210303184538-12d7dcf7c838
+	github.com/dgraph-io/ristretto v0.0.4-0.20210309073149-3836124cdc5a
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-delve/delve v1.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2
