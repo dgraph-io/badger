@@ -2087,7 +2087,7 @@ func TestVerifyChecksum(t *testing.T) {
 			y.Check2(rand.Read(value))
 			st := 0
 
-			buf := z.NewBuffer(10 << 20)
+			buf := z.NewBuffer(10 << 20, "test")
 			defer buf.Release()
 			for i := 0; i < 1000; i++ {
 				key := make([]byte, 8)
