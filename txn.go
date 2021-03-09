@@ -495,7 +495,7 @@ func (txn *Txn) GetValues(key []byte) ([]y.ValueStruct, error) {
 		}
 		idx++
 	}
-	// TODO: call yield value here. For the case when value is stored in db.
+	// TODO: call yield value here. For the case when value is stored in value log.
 	return values[:idx], nil
 }
 

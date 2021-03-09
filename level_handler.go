@@ -300,12 +300,11 @@ func (s *levelHandler) _get(key []byte) ([]y.ValueStruct, error) {
 			vs := it.ValueCopy()
 			vs.Version = y.ParseTs(it.Key())
 			if vs.Meta == 0 && vs.Value == nil {
-				// TODO: When does this happen?
 				continue
 			}
 			values = append(values, vs)
 			if vs.IsDeletedOrExpired() {
-				// We will remove this item in the end.
+				// We will remove this item in the end in txn.GetValues()
 				return values, nil
 			}
 		}
