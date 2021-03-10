@@ -442,7 +442,7 @@ func (txn *Txn) Delete(key []byte) error {
 // GetValues works like a KeyIterator that returns all the values at once.
 // TODO; It does not support iterator options like Reverse.
 // Should this return items instead?
-func (txn *Txn) GetValues(key []byte) ([]y.ValueStruct, error) {
+func (txn *Txn) GetValues(key []byte) ([]*Item, error) {
 	if len(key) == 0 {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
@@ -500,8 +500,22 @@ func (txn *Txn) GetValues(key []byte) ([]y.ValueStruct, error) {
 			idx++
 		}
 	}
-	// TODO: call yield value here. For the case when value is stored in value log.
-	return values[:idx], nil
+
+	values = values[:idx]
+	items := make([]*Item, 0, len(values))
+	for _, vs := range values {
+		item := new(Item)
+		item.key = key
+		item.version = vs.Version
+		item.meta = vs.Meta
+		item.userMeta = vs.UserMeta
+		item.vptr = y.SafeCopy(item.vptr, vs.Value)
+		item.txn = txn
+		item.expiresAt = vs.ExpiresAt
+
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 // Get looks for key and returns corresponding Item.
