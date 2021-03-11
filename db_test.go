@@ -2088,7 +2088,7 @@ func TestVerifyChecksum(t *testing.T) {
 			y.Check2(rand.Read(value))
 			st := 0
 
-			buf := z.NewBuffer(10 << 20, "test")
+			buf := z.NewBuffer(10<<20, "test")
 			defer buf.Release()
 			for i := 0; i < 1000; i++ {
 				key := make([]byte, 8)
@@ -2520,10 +2520,11 @@ func TestTxnGetValues(t *testing.T) {
 	opts.ValueThreshold = 100
 	opts.NumVersionsToKeep = math.MaxInt32
 	opts.MemTableSize = 1 << 12
-	// opts.BaseTableSize = 1 << 10
-	// opts.BaseLevelSize = 5 << 10
+	opts.BaseTableSize = 1 << 10
+	opts.BaseLevelSize = 5 << 10
 	db, err := Open(opts)
 	require.NoError(t, err)
+	defer db.Close()
 
 	N := 10000
 	key := []byte("mykey")
@@ -2537,7 +2538,15 @@ func TestTxnGetValues(t *testing.T) {
 	require.NoError(t, db.View(func(txn *Txn) error {
 		vals, err := txn.GetValues(key)
 		require.NoError(t, err)
-		require.Equal(t, N, len(vals))
+		if len(vals) != N {
+			// mp := make(map[uint64]int)
+			// for _, v := range vals {
+			// 	mp[v.Version()]++
+			// }
+			// fmt.Println(mp)
+			require.Fail(t, "failed")
+		}
+		// require.Equal(t, N, len(vals))
 		return nil
 	}))
 
@@ -2548,13 +2557,13 @@ func TestTxnGetValues(t *testing.T) {
 	require.NoError(t, db.View(func(txn *Txn) error {
 		vals, err := txn.GetValues(key)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(vals))
+		require.Equal(t, 1, len(vals)) // Deleted
 		return nil
 	}))
 
 	for i := 0; i < N; i++ {
 		require.NoError(t, db.Update(func(txn *Txn) error {
-			return txn.Set(key, []byte(fmt.Sprintf("val-%d", i)))
+			return txn.Set(key, []byte(fmt.Sprintf("val-%d", N+i)))
 		}))
 	}
 	fmt.Println("Done writing")
@@ -2562,7 +2571,15 @@ func TestTxnGetValues(t *testing.T) {
 	require.NoError(t, db.View(func(txn *Txn) error {
 		vals, err := txn.GetValues(key)
 		require.NoError(t, err)
-		require.Equal(t, N, len(vals))
+		if len(vals) != N {
+			// mp := make(map[uint64]int)
+			// for _, v := range vals {
+			// 	mp[v.Version()]++
+			// }
+			// fmt.Println(mp)
+			require.Fail(t, "failed")
+		}
+		// require.Equal(t, N, len(vals))
 		return nil
 	}))
 }

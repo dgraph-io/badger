@@ -761,22 +761,26 @@ func (db *DB) _get(key []byte) ([]y.ValueStruct, error) {
 		return nil, ErrDBClosed
 	}
 	tables, decr := db.getMemTables() // Lock should be released.
+	// TODO: Can we release the lock after we are done over memtables.
 	defer decr()
 
 	var values []y.ValueStruct
 
-	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
+	version := y.ParseTs(key)
+	var maxDeletedVersion uint64
 	for i := 0; i < len(tables); i++ {
 		itr := tables[i].sl.NewIterator()
-		// Seek to the key with version 0 (ts=math.MaxUint64) and forward iterate.
-		for itr.Seek(y.KeyWithTs(keyNoTs, math.MaxUint64)); itr.Valid(); itr.Next() {
-			if !y.SameKey(key, itr.Key()) || y.ParseTs(itr.Key()) > version {
-				return values, nil
+		for itr.Seek(key); itr.Valid(); itr.Next() {
+			if !y.SameKey(key, itr.Key()) {
+				break
+			}
+			if y.ParseTs(itr.Key()) > version {
+				panic("lol")
 			}
 			vs := itr.Value()
 			vs.Version = y.ParseTs(itr.Key())
-			if vs.Meta == 0 && vs.Value == nil {
-				continue
+			if vs.IsDeletedOrExpired() {
+				maxDeletedVersion = y.Max(maxDeletedVersion, vs.Version)
 			}
 			// We can't break out of loop even if we find a deleted item. This is because some key
 			// with discard mark from lower level (say L6) might have come here in memtables due to
@@ -787,7 +791,7 @@ func (db *DB) _get(key []byte) ([]y.ValueStruct, error) {
 
 	// fmt.Println("from memtables", len(values), len(tables))
 	// Now get the KVs from the levels.
-	vals, err := db.lc._get(key, 0)
+	vals, err := db.lc._get(key, 0, &maxDeletedVersion)
 	if err != nil {
 		return nil, err
 	}

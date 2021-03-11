@@ -18,7 +18,6 @@ package badger
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"sync"
 
@@ -278,7 +277,7 @@ func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error
 }
 
 // get returns value for a given key or the key after that. If not found, return nil.
-func (s *levelHandler) _get(key []byte) ([]y.ValueStruct, error) {
+func (s *levelHandler) _get(key []byte, maxDeletedVersion *uint64) ([]y.ValueStruct, error) {
 	tables, decr := s._getTableForKey(key)
 	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
 
@@ -293,19 +292,35 @@ func (s *levelHandler) _get(key []byte) ([]y.ValueStruct, error) {
 		it := th.NewIterator(0)
 		defer it.Close()
 
-		for it.Seek(y.KeyWithTs(keyNoTs, math.MaxUint64)); it.Valid(); it.Next() {
-			if !y.SameKey(key, it.Key()) || y.ParseTs(it.Key()) > version {
-				return values, nil
+		for it.Seek(key); it.Valid(); it.Next() {
+			if !y.SameKey(key, it.Key()) {
+				if s.level == 0 {
+					// Tables in L0 are not sorted by key ranges, so we need to look into each of the table.
+					break
+				}
+				return values, decr()
 			}
+
+			if y.ParseTs(it.Key()) > version {
+				panic("lol")
+			}
+
 			vs := it.ValueCopy()
 			vs.Version = y.ParseTs(it.Key())
-			if vs.Meta == 0 && vs.Value == nil {
-				continue
+			if vs.Version < *maxDeletedVersion {
+				if s.level == 0 {
+					break
+				}
+				return values, decr()
 			}
 			values = append(values, vs)
 			if vs.IsDeletedOrExpired() || vs.DiscardEarlierVersions() {
+				*maxDeletedVersion = y.Max(*maxDeletedVersion, vs.Version)
+				if s.level == 0 {
+					break
+				}
 				// We will remove this item in the end in txn.GetValues()
-				return values, nil
+				return values, decr()
 			}
 		}
 	}

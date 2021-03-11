@@ -515,3 +515,10 @@ func NewKV(alloc *z.Allocator) *pb.KV {
 	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }
+
+func Max(x, y uint64) uint64 {
+	if x > y {
+		return x
+	}
+	return y
+}

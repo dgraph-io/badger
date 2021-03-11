@@ -1618,7 +1618,7 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 // get searches for a given key in all the levels of the LSM tree. It returns
 // key version <= the expected version (maxVs). If not found, it returns an empty
 // y.ValueStruct.
-func (s *levelsController) _get(key []byte, startLevel int) (
+func (s *levelsController) _get(key []byte, startLevel int, maxDeletedVersion *uint64) (
 	[]y.ValueStruct, error) {
 	if s.kv.IsClosed() {
 		return nil, ErrDBClosed
@@ -1634,7 +1634,7 @@ func (s *levelsController) _get(key []byte, startLevel int) (
 		if h.level < startLevel {
 			continue
 		}
-		vals, err := h._get(key) // Calls h.RLock() and h.RUnlock().
+		vals, err := h._get(key, maxDeletedVersion) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return nil, y.Wrapf(err, "get key: %q", key)
 		}

@@ -454,25 +454,8 @@ func (txn *Txn) GetValues(key []byte) ([]*Item, error) {
 	}
 
 	if txn.update {
+		// TODO: Allow write transactions also.
 		return nil, ErrReadOnlyTxn
-		// if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
-		// 	if isDeletedOrExpired(e.meta, e.ExpiresAt) {
-		// 		return nil, ErrKeyNotFound
-		// 	}
-		// 	// Fulfill from cache.
-		// 	item.meta = e.meta
-		// 	item.val = e.Value
-		// 	item.userMeta = e.UserMeta
-		// 	item.key = key
-		// 	item.status = prefetched
-		// 	item.version = txn.readTs
-		// 	item.expiresAt = e.ExpiresAt
-		// 	// We probably don't need to set db on item here.
-		// 	return item, nil
-		// }
-		// // Only track reads if this is update txn. No need to track read if txn serviced it
-		// // internally.
-		// txn.addReadKey(key)
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
@@ -486,22 +469,6 @@ func (txn *Txn) GetValues(key []byte) ([]*Item, error) {
 		return values[i].Version > values[j].Version
 	})
 
-	// We need to get the version for deleted key, so that we can ignore keys with version
-	// less than deleted keys.
-	var idx int
-	for _, vs := range values {
-		switch {
-		case vs.IsDeletedOrExpired():
-			break
-		case vs.DiscardEarlierVersions():
-			idx++
-			break
-		default:
-			idx++
-		}
-	}
-
-	values = values[:idx]
 	items := make([]*Item, 0, len(values))
 	for _, vs := range values {
 		item := new(Item)
@@ -514,6 +481,11 @@ func (txn *Txn) GetValues(key []byte) ([]*Item, error) {
 		item.expiresAt = vs.ExpiresAt
 
 		items = append(items, item)
+		if vs.DiscardEarlierVersions() || vs.IsDeletedOrExpired() {
+			// Lets emit out the last deleted item as well. Let the caller handle that
+			// case.
+			break
+		}
 	}
 	return items, nil
 }

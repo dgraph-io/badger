@@ -388,7 +388,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
 		// table.Biggest >= opt.prefix
-		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
+		// if opt.Prefix > table.Biggest, then surely it is not in any of the preceding tables.
 		return opt.compareToPrefix(all[i].Biggest()) >= 0
 	})
 	if sIdx == len(all) {
