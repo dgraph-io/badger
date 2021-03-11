@@ -180,7 +180,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
-	outList := z.NewBuffer(2 * batchSize, "Stream.ProduceKVs")
+	outList := z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
 	defer func() {
 		// The outList variable changes. So, we need to evaluate the variable in the defer. DO NOT
 		// call `defer outList.Release()`.
@@ -196,7 +196,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		itr.ThreadId = threadId
 		defer itr.Close()
 
-		itr.Alloc = z.NewAllocator(1 << 20, "Stream.Iterate")
+		itr.Alloc = z.NewAllocator(1<<20, "Stream.Iterate")
 		defer itr.Alloc.Release()
 
 		// This unique stream id is used to identify all the keys from this iteration.
@@ -205,7 +205,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
-				outList = z.NewBuffer(2 * batchSize, "Stream.ProduceKVs")
+				outList = z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
 			case <-ctx.Done():
 				return ctx.Err()
 			}
