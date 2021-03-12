@@ -238,7 +238,7 @@ func (s *levelHandler) close() error {
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
-func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error) {
+func (s *levelHandler) _getTableForKey(key []byte) []*table.Table {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -251,14 +251,7 @@ func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error
 			out = append(out, s.tables[i])
 			s.tables[i].IncrRef()
 		}
-		return out, func() error {
-			for _, t := range out {
-				if err := t.DecrRef(); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
+		return out
 	}
 
 	iopts := &IteratorOptions{Prefix: y.ParseKey(key), AllVersions: true, prefixIsKey: true}
@@ -266,7 +259,16 @@ func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error
 	for _, tbl := range tables {
 		tbl.IncrRef()
 	}
-	return tables, func() error {
+	return tables
+}
+
+// get returns value for a given key or the key after that. If not found, return nil.
+func (s *levelHandler) _get(key []byte, maxDeletedVersion *uint64) ([]y.ValueStruct, error) {
+	tables := s._getTableForKey(key)
+	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
+
+	decr := func() error {
+		// Decrement the table references.
 		for _, t := range tables {
 			if err := t.DecrRef(); err != nil {
 				return err
@@ -274,12 +276,6 @@ func (s *levelHandler) _getTableForKey(key []byte) ([]*table.Table, func() error
 		}
 		return nil
 	}
-}
-
-// get returns value for a given key or the key after that. If not found, return nil.
-func (s *levelHandler) _get(key []byte, maxDeletedVersion *uint64) ([]y.ValueStruct, error) {
-	tables, decr := s._getTableForKey(key)
-	keyNoTs, version := y.ParseKey(key), y.ParseTs(key)
 
 	hash := y.Hash(keyNoTs)
 	var values []y.ValueStruct
