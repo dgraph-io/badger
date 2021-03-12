@@ -174,16 +174,15 @@ func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 }
 
 func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
+
 	err := db.View(func(txn *badger.Txn) error {
 		if ro.iterNew {
 			items, err := txn.GetValues(key)
 			if err != nil {
 				return err
 			}
-			cnt := 0
 			for _, item := range items {
 				sz += uint64(item.EstimatedSize())
-				cnt++
 			}
 			return nil
 		}
@@ -193,12 +192,33 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 		it := txn.NewKeyIterator(key, iopt)
 		defer it.Close()
 
-		cnt := 0
+		// var keys [][]byte
+		// var values [][]byte
 		for it.Seek(key); it.Valid(); it.Next() {
 			itm := it.Item()
 			sz += uint64(itm.EstimatedSize())
-			cnt++
+			// v, err := itm.ValueCopy(nil)
+			// if err != nil {
+			// 	panic("lol")
+			// }
+			// keys = append(keys, itm.KeyCopy(nil))
+			// values = append(values, v)
 		}
+
+		// if len(items) != len(keys) || len(items) == 0 {
+		// 	panic("length different")
+		// }
+		// for i, itm := range items {
+		// 	v1, err := itm.ValueCopy(nil)
+		// 	if err != nil {
+		// 		panic("err while reading value")
+		// 	}
+		// 	if !bytes.Equal(v1, values[i]) {
+		// 		fmt.Printf("New: %+v, Old: %+v\n", items, keys)
+		// 		fmt.Printf("New: %+v, Old: %+v\n", v1, values[i])
+		// 		panic("different values")
+		// 	}
+		// }
 		return nil
 	})
 	y.Check(err)
