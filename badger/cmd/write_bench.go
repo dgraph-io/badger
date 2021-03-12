@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -31,6 +32,7 @@ import (
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
+	"gopkg.in/square/go-jose.v2/json"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
@@ -167,12 +169,59 @@ func writeRandom(db *badger.DB, num uint64) error {
 	return batch.Flush()
 }
 
-func readTest(db *badger.DB, dur time.Duration) {
-	now := time.Now()
+type sampleKeys struct {
+	Keys [][]byte `json:"keys"`
+}
+
+func dumpKeys(filename string, db *badger.DB) {
+	var err error
 	keys, err := getSampleKeys(db)
 	if err != nil {
 		panic(err)
 	}
+	// Print some keys
+	count := 0
+	for _, key := range keys {
+		fmt.Printf("key: %v [%s] %#x\n", key, key, string(key))
+		count++
+		if count == 20 {
+			break
+		}
+	}
+
+	// Write to file
+	fmt.Println("length", len(keys))
+	if b, err := json.Marshal(sampleKeys{Keys: keys}); err == nil {
+		f, err := os.Create(filename)
+		y.Check(err)
+		defer f.Close()
+		n, err := f.Write(b)
+		y.Check(err)
+		y.AssertTrue(n == len(b))
+	}
+}
+
+func readData(filename string) [][]byte {
+	data, _ := ioutil.ReadFile(filename)
+	var skeys sampleKeys
+	err := json.Unmarshal(data, &skeys)
+	y.Check(err)
+	keys := skeys.Keys
+
+	fmt.Println(keys[:10])
+	return keys
+}
+func readTest(db *badger.DB, dur time.Duration) {
+	var keys [][]byte
+	filename := "keys.json"
+	if ro.dump {
+		dumpKeys(filename, db)
+		return
+	} else {
+		keys = readData(filename)
+	}
+
+	now := time.Now()
 	fmt.Println("*********************************************************")
 	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
 	fmt.Println("*********************************************************")
@@ -210,7 +259,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvBuf := z.NewBuffer(5 << 20, "Benchmark.WriteSorted")
+		kvBuf := z.NewBuffer(5<<20, "Benchmark.WriteSorted")
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
@@ -229,7 +278,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 
 			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvBuf
-				kvBuf = z.NewBuffer(1 << 20, "Benchmark.WriteSorted")
+				kvBuf = z.NewBuffer(1<<20, "Benchmark.WriteSorted")
 				sz = 0
 			}
 		}

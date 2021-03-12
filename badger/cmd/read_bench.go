@@ -55,6 +55,9 @@ var (
 		keysOnly   bool
 		readOnly   bool
 		fullScan   bool
+
+		dump    bool
+		iterNew bool
 	}{}
 )
 
@@ -74,6 +77,10 @@ func init() {
 		&ro.fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
 	readBenchCmd.Flags().Int64Var(&ro.blockCacheSize, "block-cache", 256, "Max size of block cache in MB")
 	readBenchCmd.Flags().Int64Var(&ro.indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
+	readBenchCmd.Flags().BoolVar(
+		&ro.dump, "dump-keys", false, "If true, it will dump the keys used for read-bench.")
+	readBenchCmd.Flags().BoolVar(
+		&ro.iterNew, "iter-new", false, "If true, run key iterator's GetValues function.")
 }
 
 // Scan the whole database using the iterators
@@ -168,27 +175,30 @@ func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 
 func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 	err := db.View(func(txn *badger.Txn) error {
-		items, err := txn.GetValues(key)
-		if err != nil {
-			return err
+		if ro.iterNew {
+			items, err := txn.GetValues(key)
+			if err != nil {
+				return err
+			}
+			cnt := 0
+			for _, item := range items {
+				sz += uint64(item.EstimatedSize())
+				cnt++
+			}
+			return nil
 		}
+
+		iopt := badger.DefaultIteratorOptions
+		iopt.AllVersions = true
+		it := txn.NewKeyIterator(key, iopt)
+		defer it.Close()
+
 		cnt := 0
-		for _, item := range items {
-			sz += uint64(item.EstimatedSize())
+		for it.Seek(key); it.Valid(); it.Next() {
+			itm := it.Item()
+			sz += uint64(itm.EstimatedSize())
 			cnt++
 		}
-
-		// iopt := badger.DefaultIteratorOptions
-		// iopt.AllVersions = true
-		// it := txn.NewKeyIterator(key, iopt)
-		// defer it.Close()
-
-		// cnt := 0
-		// for it.Seek(key); it.Valid(); it.Next() {
-		// 	itm := it.Item()
-		// 	sz += uint64(itm.EstimatedSize())
-		// 	cnt++
-		// }
 		return nil
 	})
 	y.Check(err)
