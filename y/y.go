@@ -515,3 +515,23 @@ func NewKV(alloc *z.Allocator) *pb.KV {
 	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }
+
+// IBytesToString converts size in bytes to human readable format.
+// The code is copied from humanize library and changed to provide
+// value upto 1 decimal place when it exceeds 1 GiB.
+func IBytesToString(size uint64) string {
+	sizes := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	base := float64(1024)
+	if size < 10 {
+		return fmt.Sprintf("%d B", size)
+	}
+	e := math.Floor(math.Log(float64(size)) / math.Log(base))
+	suffix := sizes[int(e)]
+	val := math.Floor(float64(size)/math.Pow(base, e)*10+0.5) / 10
+	f := "%.0f %s"
+	if val < 10 || e > 2 {
+		f = "%.1f %s"
+	}
+
+	return fmt.Sprintf(f, val, suffix)
+}
