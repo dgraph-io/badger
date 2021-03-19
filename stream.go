@@ -354,7 +354,7 @@ outer:
 			scanned := atomic.LoadUint64(&st.scanned)
 			st.db.opt.Infof("%s Time elapsed: %s, scanned: ~%s/%s, bytes sent: %s, speed: %s/sec,"+
 				"jemalloc: %s\n", st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(scanned),
-				humanize.IBytes(uncompressedSize), humanize.IBytes(bytesSent),
+				humanize.IBytes(uncompressedSize), y.IBytesToString(bytesSent, 1),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:

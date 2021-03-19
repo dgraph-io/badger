@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -514,4 +515,22 @@ func NewKV(alloc *z.Allocator) *pb.KV {
 	}
 	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
+}
+
+// IBytesToString converts size in bytes to human readable format.
+// The code is taken from humanize library and changed to provide
+// value upto custom decimal precision.
+// IBytesToString(12312412, 1) -> 11.7 MiB
+func IBytesToString(size uint64, precision int) string {
+	sizes := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	base := float64(1024)
+	if size < 10 {
+		return fmt.Sprintf("%d B", size)
+	}
+	e := math.Floor(math.Log(float64(size)) / math.Log(base))
+	suffix := sizes[int(e)]
+	val := float64(size) / math.Pow(base, e)
+	f := "%." + strconv.Itoa(precision) + "f %s"
+
+	return fmt.Sprintf(f, val, suffix)
 }
