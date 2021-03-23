@@ -489,19 +489,22 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	var backOff int
+	// var backOff int
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
-			if z.NumAllocBytes() > 16<<30 {
-				// Back off. We're already using a lot of memory.
-				backOff++
-				if backOff%1000 == 0 {
-					s.kv.opt.Infof("Compaction backed off %d times\n", backOff)
-				}
-				break
-			}
+			// Note (manish): We need a flag to enable this properly, so we can decide when to back
+			// off. We'll do that in the latest branch of Badger. For now, just disable.
+			//
+			// if z.NumAllocBytes() > 16<<30 {
+			// 	// Back off. We're already using a lot of memory.
+			// 	backOff++
+			// 	if backOff%1000 == 0 {
+			// 		s.kv.opt.Infof("Compaction backed off %d times\n", backOff)
+			// 	}
+			// 	break
+			// }
 			runOnce()
 		case <-lc.HasBeenClosed():
 			return
