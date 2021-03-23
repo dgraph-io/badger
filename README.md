@@ -169,7 +169,6 @@ Below is a list of known projects that use Badger:
 * [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
-* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
