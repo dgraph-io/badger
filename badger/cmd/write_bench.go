@@ -210,7 +210,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvBuf := z.NewBuffer(5 << 20)
+		kvBuf := z.NewBuffer(5 << 20, "Benchmark.WriteSorted")
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
@@ -229,7 +229,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 
 			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvBuf
-				kvBuf = z.NewBuffer(1 << 20)
+				kvBuf = z.NewBuffer(1 << 20, "Benchmark.WriteSorted")
 				sz = 0
 			}
 		}
