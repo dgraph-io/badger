@@ -187,7 +187,7 @@ func TestValueGCManaged(t *testing.T) {
 	files, err := ioutil.ReadDir(dir)
 	require.NoError(t, err)
 	for _, fi := range files {
-		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
+		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.IBytes(uint64(fi.Size())))
 	}
 
 	db.SetDiscardTs(math.MaxUint32)

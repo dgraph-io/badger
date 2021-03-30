@@ -253,7 +253,7 @@ func printKey(item *badger.Item, showValue bool) error {
 }
 
 func hbytes(sz int64) string {
-	return humanize.Bytes(uint64(sz))
+	return humanize.IBytes(uint64(sz))
 }
 
 func dur(src, dst time.Time) string {
