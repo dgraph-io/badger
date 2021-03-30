@@ -146,7 +146,7 @@ func printStats(c *z.Closer) {
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
 				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				humanize.IBytes(sz), humanize.IBytes(bytesRate), entries, entriesRate)
 		}
 	}
 }

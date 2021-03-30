@@ -210,7 +210,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvBuf := z.NewBuffer(5 << 20, "Benchmark.WriteSorted")
+		kvBuf := z.NewBuffer(5<<20, "Benchmark.WriteSorted")
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
@@ -229,7 +229,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 
 			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvBuf
-				kvBuf = z.NewBuffer(1 << 20, "Benchmark.WriteSorted")
+				kvBuf = z.NewBuffer(1<<20, "Benchmark.WriteSorted")
 				sz = 0
 			}
 		}
@@ -368,7 +368,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			// fetch directory contents
 			if wo.showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
-					fileSize := humanize.Bytes(uint64(info.Size()))
+					fileSize := humanize.IBytes(uint64(info.Size()))
 					files = append(files, "[Content] "+path+" "+fileSize)
 					if filepath.Ext(path) == ".vlog" {
 						vlogCount++
@@ -397,7 +397,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, jemalloc: %s\n",
 				y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
+				humanize.IBytes(sz), humanize.IBytes(bytesRate), entries, entriesRate,
 				humanize.IBytes(uint64(z.NumAllocBytes())))
 
 			if count%10 == 0 {
@@ -508,7 +508,7 @@ func printReadStats(c *z.Closer, startTime time.Time) {
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[READ] Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
 				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				humanize.IBytes(sz), humanize.IBytes(bytesRate), entries, entriesRate)
 		}
 	}
 }
