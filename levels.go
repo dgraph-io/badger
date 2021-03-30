@@ -504,20 +504,11 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	count := 0
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	var backOff int
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
 			count++
-			if z.NumAllocBytes() > 16<<30 {
-				// Back off. We're already using a lot of memory.
-				backOff++
-				if backOff%1000 == 0 {
-					s.kv.opt.Infof("Compaction backed off %d times\n", backOff)
-				}
-				break
-			}
 			// Each ticker is 50ms so 50*200=10seconds.
 			if s.kv.opt.LmaxCompaction && id == 2 && count >= 200 {
 				tryLmaxToLmaxCompaction()
