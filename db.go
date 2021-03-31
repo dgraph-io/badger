@@ -1383,8 +1383,11 @@ func (db *DB) KeySplits(prefix []byte) []string {
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {
-		// We don't use ti.Left, because that has a tendency to store !badger
-		// keys.
+		// We don't use ti.Left, because that has a tendency to store !badger keys. Skip over tables
+		// at upper levels. Only choose tables from the last level.
+		if ti.Level != db.opt.MaxLevels-1 {
+			continue
+		}
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}

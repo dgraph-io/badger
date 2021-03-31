@@ -90,6 +90,7 @@ type Stream struct {
 	nextStreamId uint32
 	doneMarkers  bool
 	scanned      uint64 // used to estimate the ETA for data scan.
+	numProducers int32
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -145,10 +146,9 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 func (st *Stream) produceRanges(ctx context.Context) {
 	splits := st.db.KeySplits(st.Prefix)
 
-	// We don't need to create more key ranges than NumGo goroutines. This way, we will have limited
-	// number of "streams" coming out, which then helps limit the memory used by SSWriter.
 	{
-		pickEvery := int(math.Floor(float64(len(splits)) / float64(st.NumGo)))
+		// Get number of splits = double the number of goroutines for better distribution of ranges.
+		pickEvery := int(math.Floor(float64(len(splits)) / float64(2*st.NumGo)))
 		if pickEvery < 1 {
 			pickEvery = 1
 		}
@@ -161,6 +161,7 @@ func (st *Stream) produceRanges(ctx context.Context) {
 		splits = filtered
 	}
 
+	st.db.opt.Infof("Number of splits found: %d\n", len(splits))
 	start := y.SafeCopy(nil, st.Prefix)
 	for _, key := range splits {
 		st.rangeCh <- keyRange{left: start, right: y.SafeCopy(nil, []byte(key))}
@@ -174,6 +175,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
 func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
+	atomic.AddInt32(&st.numProducers, 1)
+	defer atomic.AddInt32(&st.numProducers, -1)
+
 	var txn *Txn
 	if st.readTs > 0 {
 		txn = st.db.NewTransactionAt(st.readTs, false)
@@ -287,13 +291,53 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 }
 
+type RateMonitor struct {
+	start       time.Time
+	lastSent    uint64
+	lastCapture time.Time
+	rates       []float64
+	idx         int
+}
+
+func NewRateMonitor(numSamples int) *RateMonitor {
+	return &RateMonitor{
+		start: time.Now(),
+		rates: make([]float64, numSamples),
+	}
+}
+
+// Capture captures the current number of sent bytes. This number should be monotonically
+// increasing.
+func (rm *RateMonitor) Capture(sent uint64) {
+	diff := sent - rm.lastSent
+	dur := time.Since(rm.lastCapture)
+	rm.lastCapture, rm.lastSent = time.Now(), sent
+
+	rate := float64(diff) / dur.Seconds()
+	rm.rates[rm.idx] = rate
+	rm.idx = (rm.idx + 1) % len(rm.rates)
+}
+
+// Rate returns the average rate of transmission smoothed out by the number of samples.
+func (rm *RateMonitor) Rate() uint64 {
+	var avg float64
+	den := float64(len(rm.rates))
+	for _, r := range rm.rates {
+		avg += r / den
+	}
+	return uint64(avg)
+}
+
 func (st *Stream) streamKVs(ctx context.Context) error {
 	onDiskSize, uncompressedSize := st.db.EstimateSize(st.Prefix)
+	// Manish has seen uncompressed size to be in 20% error margin.
+	uncompressedSize = uint64(float64(uncompressedSize) * 1.2)
 	st.db.opt.Infof("%s Streaming about %s of uncompressed data (%s on disk)\n",
 		st.LogPrefix, humanize.IBytes(uncompressedSize), humanize.IBytes(onDiskSize))
 
+	tickerDur := 5 * time.Second
 	var bytesSent uint64
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(tickerDur)
 	defer t.Stop()
 	now := time.Now()
 
@@ -304,7 +348,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			return nil
 		}
 		bytesSent += sz
-		st.db.opt.Infof("%s Sending batch of size: %s.\n", st.LogPrefix, humanize.IBytes(sz))
+		// st.db.opt.Infof("%s Sending batch of size: %s.\n", st.LogPrefix, humanize.IBytes(sz))
 		if err := st.Send(batch); err != nil {
 			st.db.opt.Warningf("Error while sending: %v\n", err)
 			return err
@@ -335,8 +379,9 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			}
 		}
 		return sendBatch(batch)
-	}
+	} // end of slurp.
 
+	rm := NewRateMonitor(20)
 outer:
 	for {
 		var batch *z.Buffer
@@ -345,17 +390,18 @@ outer:
 			return ctx.Err()
 
 		case <-t.C:
-			dur := time.Since(now)
-			durSec := uint64(dur.Seconds())
-			if durSec == 0 {
-				continue
-			}
-			speed := bytesSent / durSec
+			// Instead of calculating speed over the entire lifetime, we average the speed over
+			// ticker duration.
+			rm.Capture(bytesSent)
 			scanned := atomic.LoadUint64(&st.scanned)
-			st.db.opt.Infof("%s Time elapsed: %s, scanned: ~%s/%s, bytes sent: %s, speed: %s/sec,"+
-				"jemalloc: %s\n", st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(scanned),
-				humanize.IBytes(uncompressedSize), y.IBytesToString(bytesSent, 1),
-				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
+			numProducers := atomic.LoadInt32(&st.numProducers)
+
+			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s. Sent: %s. Speed: %s/sec."+
+				" jemalloc: %s\n",
+				st.LogPrefix, y.FixedDuration(time.Since(now)), numProducers,
+				y.IBytesToString(scanned, 1), humanize.IBytes(uncompressedSize),
+				y.IBytesToString(bytesSent, 1), humanize.IBytes(rm.Rate()),
+				humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
