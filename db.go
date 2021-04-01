@@ -1375,16 +1375,20 @@ func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
 	return onDiskSize, uncompressedSize
 }
 
-// KeySplits can be used to get rough key ranges to divide up iteration over
-// the DB.
-func (db *DB) KeySplits(prefix []byte) []string {
+// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
+// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
+// first range would have nil as left key, and the last range would have nil as the right key.
+func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	var splits []string
 	tables := db.Tables()
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {
-		// We don't use ti.Left, because that has a tendency to store !badger
-		// keys.
+		// We don't use ti.Left, because that has a tendency to store !badger keys. Skip over tables
+		// at upper levels. Only choose tables from the last level.
+		if ti.Level != db.opt.MaxLevels-1 {
+			continue
+		}
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}
@@ -1435,29 +1439,56 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		mtSplits(db.mt)
 	}
 
+	// We have our splits now. Let's convert them to ranges.
 	sort.Strings(splits)
+	var ranges []*keyRange
+	var start []byte
+	for _, key := range splits {
+		ranges = append(ranges, &keyRange{left: start, right: y.SafeCopy(nil, []byte(key))})
+		start = y.SafeCopy(nil, []byte(key))
+	}
+	ranges = append(ranges, &keyRange{left: start})
 
-	// Limit the maximum number of splits returned by this function. We check against
-	// maxNumberSplits * 2 so that the jump variable has a value of at least two.
-	// Otherwise, the entire list would be returned without any reduction in size.
-	if len(splits) > maxNumSplits*2 {
-		newSplits := make([]string, 0)
-		jump := len(splits) / maxNumSplits
-		if jump < 2 {
-			jump = 2
-		}
-
-		for i := 0; i < len(splits); i += jump {
-			if i >= len(splits) {
-				i = len(splits) - 1
+	// Figure out the approximate table size this range has to deal with.
+	for _, t := range tables {
+		tr := keyRange{left: t.Left, right: t.Right}
+		for _, r := range ranges {
+			if len(r.left) == 0 || len(r.right) == 0 {
+				continue
 			}
-			newSplits = append(newSplits, splits[i])
+			if r.overlapsWith(tr) {
+				r.size += int64(t.UncompressedSize)
+			}
 		}
-
-		splits = newSplits
 	}
 
-	return splits
+	var total int64
+	for _, r := range ranges {
+		total += r.size
+	}
+	if total == 0 {
+		return ranges
+	}
+	// Figure out the average size, so we know how to bin the ranges together.
+	avg := total / int64(numRanges)
+
+	var out []*keyRange
+	var i int
+	for i < len(ranges) {
+		r := ranges[i]
+		cur := &keyRange{left: r.left, size: r.size, right: r.right}
+		i++
+		for ; i < len(ranges); i++ {
+			next := ranges[i]
+			if cur.size+next.size > avg {
+				break
+			}
+			cur.right = next.right
+			cur.size += next.size
+		}
+		out = append(out, cur)
+	}
+	return out
 }
 
 // MaxBatchCount returns max possible entries in batch
