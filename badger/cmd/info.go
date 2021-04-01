@@ -304,11 +304,6 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalIndex)))
 	fmt.Printf("Mean Compression Ratio: %.2f\n", totalCompressionRatio/float64(len(tables)))
 	fmt.Println()
-	splits := db.KeySplits(nil)
-	for i, s := range splits {
-		fmt.Printf("Split %d: %x\n", i, s)
-	}
-	fmt.Println()
 }
 
 func printInfo(dir, valueDir string) error {

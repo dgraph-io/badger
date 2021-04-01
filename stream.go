@@ -19,7 +19,7 @@ package badger
 import (
 	"bytes"
 	"context"
-	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -144,32 +144,21 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // keyRange is [start, end), including start, excluding end. Do ensure that the start,
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
-	splits := st.db.KeySplits(st.Prefix)
+	ranges := st.db.Ranges(st.Prefix, 16)
+	y.AssertTrue(len(ranges) > 0)
+	y.AssertTrue(ranges[0].left == nil)
+	y.AssertTrue(ranges[len(ranges)-1].right == nil)
+	st.db.opt.Infof("Number of ranges found: %d\n", len(ranges))
 
-	{
-		// Get number of splits = double the number of goroutines for better distribution of ranges.
-		pickEvery := int(math.Floor(float64(len(splits)) / float64(2*st.NumGo)))
-		if pickEvery < 1 {
-			pickEvery = 1
-		}
-		filtered := splits[:0]
-		for i, split := range splits {
-			if (i+1)%pickEvery == 0 {
-				filtered = append(filtered, split)
-			}
-		}
-		splits = filtered
+	// Sort in descending order of size.
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].size > ranges[j].size
+	})
+	for i, r := range ranges {
+		st.rangeCh <- *r
+		st.db.opt.Infof("Sent range %d for iteration: [%x, %x) of size: %s\n",
+			i, r.left, r.right, humanize.IBytes(uint64(r.size)))
 	}
-
-	st.db.opt.Infof("Number of splits found: %d\n", len(splits))
-	start := y.SafeCopy(nil, st.Prefix)
-	for _, key := range splits {
-		st.rangeCh <- keyRange{left: start, right: y.SafeCopy(nil, []byte(key))}
-		start = y.SafeCopy(nil, []byte(key))
-	}
-	// Edge case: prefix is empty and no splits exist. In that case, we should have at least one
-	// keyRange output.
-	st.rangeCh <- keyRange{left: start}
 	close(st.rangeCh)
 }
 
@@ -381,7 +370,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		return sendBatch(batch)
 	} // end of slurp.
 
-	rm := NewRateMonitor(20)
+	writeRate := NewRateMonitor(20)
+	scanRate := NewRateMonitor(20)
 outer:
 	for {
 		var batch *z.Buffer
@@ -392,15 +382,17 @@ outer:
 		case <-t.C:
 			// Instead of calculating speed over the entire lifetime, we average the speed over
 			// ticker duration.
-			rm.Capture(bytesSent)
+			writeRate.Capture(bytesSent)
 			scanned := atomic.LoadUint64(&st.scanned)
+			scanRate.Capture(scanned)
 			numProducers := atomic.LoadInt32(&st.numProducers)
 
-			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s. Sent: %s. Speed: %s/sec."+
+			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s, rate: %s/sec. Sent: %s, rate: %s/sec."+
 				" jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(time.Since(now)), numProducers,
 				y.IBytesToString(scanned, 1), humanize.IBytes(uncompressedSize),
-				y.IBytesToString(bytesSent, 1), humanize.IBytes(rm.Rate()),
+				humanize.IBytes(scanRate.Rate()),
+				y.IBytesToString(bytesSent, 1), humanize.IBytes(writeRate.Rate()),
 				humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:

@@ -31,6 +31,7 @@ type keyRange struct {
 	left  []byte
 	right []byte
 	inf   bool
+	size  int64 // size is used for Key splits.
 }
 
 func (r keyRange) isEmpty() bool {
@@ -82,10 +83,12 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 		return true
 	}
 
+	// r is to the right of dst.
 	// If my left is greater than dst right, we have no overlap.
 	if y.CompareKeys(r.left, dst.right) > 0 {
 		return false
 	}
+	// r is to the left of dst.
 	// If my right is less than dst left, we have no overlap.
 	if y.CompareKeys(r.right, dst.left) < 0 {
 		return false
