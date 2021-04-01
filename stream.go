@@ -280,43 +280,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 }
 
-type RateMonitor struct {
-	start       time.Time
-	lastSent    uint64
-	lastCapture time.Time
-	rates       []float64
-	idx         int
-}
-
-func NewRateMonitor(numSamples int) *RateMonitor {
-	return &RateMonitor{
-		start: time.Now(),
-		rates: make([]float64, numSamples),
-	}
-}
-
-// Capture captures the current number of sent bytes. This number should be monotonically
-// increasing.
-func (rm *RateMonitor) Capture(sent uint64) {
-	diff := sent - rm.lastSent
-	dur := time.Since(rm.lastCapture)
-	rm.lastCapture, rm.lastSent = time.Now(), sent
-
-	rate := float64(diff) / dur.Seconds()
-	rm.rates[rm.idx] = rate
-	rm.idx = (rm.idx + 1) % len(rm.rates)
-}
-
-// Rate returns the average rate of transmission smoothed out by the number of samples.
-func (rm *RateMonitor) Rate() uint64 {
-	var avg float64
-	den := float64(len(rm.rates))
-	for _, r := range rm.rates {
-		avg += r / den
-	}
-	return uint64(avg)
-}
-
 func (st *Stream) streamKVs(ctx context.Context) error {
 	onDiskSize, uncompressedSize := st.db.EstimateSize(st.Prefix)
 	// Manish has seen uncompressed size to be in 20% error margin.
@@ -370,8 +333,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		return sendBatch(batch)
 	} // end of slurp.
 
-	writeRate := NewRateMonitor(20)
-	scanRate := NewRateMonitor(20)
+	writeRate := y.NewRateMonitor(20)
+	scanRate := y.NewRateMonitor(20)
 outer:
 	for {
 		var batch *z.Buffer
@@ -387,7 +350,7 @@ outer:
 			scanRate.Capture(scanned)
 			numProducers := atomic.LoadInt32(&st.numProducers)
 
-			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s, rate: %s/sec. Sent: %s, rate: %s/sec."+
+			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s at %s/sec. Sent: %s at %s/sec."+
 				" jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(time.Since(now)), numProducers,
 				y.IBytesToString(scanned, 1), humanize.IBytes(uncompressedSize),

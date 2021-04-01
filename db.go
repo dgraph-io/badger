@@ -1443,7 +1443,6 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	sort.Strings(splits)
 	var ranges []*keyRange
 	var start []byte
-	// start := y.SafeCopy(nil, prefix)
 	for _, key := range splits {
 		ranges = append(ranges, &keyRange{left: start, right: y.SafeCopy(nil, []byte(key))})
 		start = y.SafeCopy(nil, []byte(key))
