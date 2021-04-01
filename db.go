@@ -1439,9 +1439,11 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	}
 
 	// We have our splits now. Let's convert them to ranges.
+	// TODO: These ranges are not considering the prefix. We should ensure those are considered.
 	sort.Strings(splits)
 	var ranges []*keyRange
-	start := y.SafeCopy(nil, prefix)
+	var start []byte
+	// start := y.SafeCopy(nil, prefix)
 	for _, key := range splits {
 		ranges = append(ranges, &keyRange{left: start, right: y.SafeCopy(nil, []byte(key))})
 		start = y.SafeCopy(nil, []byte(key))
@@ -1452,7 +1454,7 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	for _, t := range tables {
 		tr := keyRange{left: t.Left, right: t.Right}
 		for _, r := range ranges {
-			if r.left == nil || r.right == nil {
+			if len(r.left) == 0 || len(r.right) == 0 {
 				continue
 			}
 			if r.overlapsWith(tr) {
