@@ -1375,8 +1375,9 @@ func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
 	return onDiskSize, uncompressedSize
 }
 
-// Ranges can be used to get rough key ranges to divide up iteration over
-// the DB.
+// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
+// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
+// first range would have nil as left key, and the last range would have nil as the right key.
 func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	var splits []string
 	tables := db.Tables()
@@ -1439,7 +1440,6 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	}
 
 	// We have our splits now. Let's convert them to ranges.
-	// TODO: These ranges are not considering the prefix. We should ensure those are considered.
 	sort.Strings(splits)
 	var ranges []*keyRange
 	var start []byte
