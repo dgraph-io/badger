@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"strconv"
@@ -24,7 +25,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/golang/glog"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v3/options"
@@ -229,7 +229,7 @@ func LSMOnlyOptions(path string) Options {
 
 // parseCompression returns badger.compressionType and compression level given compression string
 // of format compression-type:compression-level
-func parseCompression(cStr string) (options.CompressionType, int) {
+func parseCompression(cStr string) (options.CompressionType, int, error) {
 	cStrSplit := strings.Split(cStr, ":")
 	cType := cStrSplit[0]
 	level := 3
@@ -239,21 +239,21 @@ func parseCompression(cStr string) (options.CompressionType, int) {
 		level, err = strconv.Atoi(cStrSplit[1])
 		y.Check(err)
 		if level <= 0 {
-			glog.Fatalf("ERROR: compression level(%v) must be greater than zero", level)
+			return 0, 0,
+				errors.Errorf("ERROR: compression level(%v) must be greater than zero", level)
 		}
 	} else if len(cStrSplit) > 2 {
-		glog.Fatalf("ERROR: Invalid badger.compression argument")
+		return 0, 0, errors.Errorf("ERROR: Invalid badger.compression argument")
 	}
 	switch cType {
 	case "zstd":
-		return options.ZSTD, level
+		return options.ZSTD, level, nil
 	case "snappy":
-		return options.Snappy, 0
+		return options.Snappy, 0, nil
 	case "none":
-		return options.None, 0
+		return options.None, 0, nil
 	}
-	glog.Fatalf("ERROR: compression type (%s) invalid", cType)
-	return 0, 0
+	return 0, 0, errors.Errorf("ERROR: compression type (%s) invalid", cType)
 }
 
 // getCachePercentages returns the slice of cache percentages given the "," (comma) separated
@@ -288,6 +288,39 @@ func getCachePercentages(cpString string, numExpected int) ([]int64, error) {
 	return cachePercent, nil
 }
 
+// generateSuperFlag generates an identical SuperFlag string from the provided Options.
+func generateSuperFlag(options Options) string {
+	superflag := ""
+	v := reflect.ValueOf(&options).Elem()
+	optionsStruct := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		if field := v.Field(i); field.CanInterface() {
+			name := strings.ToLower(optionsStruct.Field(i).Name)
+			kind := v.Field(i).Kind()
+			switch kind {
+			case reflect.Bool:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Bool())
+			case reflect.Int, reflect.Int64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Int())
+			case reflect.Uint32, reflect.Uint64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Uint())
+			case reflect.Float64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Float())
+			case reflect.String:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.String())
+			default:
+				continue
+			}
+		}
+	}
+	return superflag
+}
+
 // FromSuperFlag fills Options fields for each flag within the superflag. For
 // example, replacing the default Options.NumGoroutines:
 //
@@ -297,20 +330,31 @@ func getCachePercentages(cpString string, numExpected int) ([]int64, error) {
 // will not fill it with default values. FromSuperFlag only writes to the fields
 // present within the superflag string (case insensitive).
 //
-// Does special handling of compression, cache_mb, cache_percentage sub flags.
+// Special Handling: compression, cache-mb, cache-percentage sub-flags.
+// Valid values for special flags:
+// compression: valid options are {none,snappy,zstd:<level>}
+// cache-mb: uint
+// cache-percentage: 2 comma-separated values summing upto 100. Format: blockCache,indexCache
+// goroutines: alias for numgoroutines.
+// Example: compression=zstd:3; cache-mb=2048; cache-percentage=70,30; goroutines=8;
 // Unsupported: Options.Logger, Options.EncryptionKey
 func (opt Options) FromSuperFlag(superflag string) Options {
-	flags := z.NewSuperFlag(superflag)
-	v := reflect.ValueOf(&opt).Elem()
-	optionsStruct := v.Type()
-
-	specialFlags := map[string]struct{}{
+	var specialFlags = map[string]struct{}{
 		"compression":      {},
 		"goroutines":       {},
-		"cache_mb":         {},
-		"cache_percentage": {},
+		"cache-mb":         {},
+		"cache-percentage": {},
 	}
 
+	// currentOptions act as a default value for the options superflag.
+	currentOptions := generateSuperFlag(opt)
+	for flag := range specialFlags {
+		currentOptions += fmt.Sprintf("%s=; ", flag)
+	}
+
+	flags := z.NewSuperFlag(superflag).MergeAndCheckDefault(currentOptions)
+	v := reflect.ValueOf(&opt).Elem()
+	optionsStruct := v.Type()
 	for i := 0; i < v.NumField(); i++ {
 		// only iterate over exported fields
 		if field := v.Field(i); field.CanInterface() {
@@ -318,45 +362,50 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 			// insensitive
 			name := strings.ToLower(optionsStruct.Field(i).Name)
 			if _, ok := specialFlags[name]; ok {
+				// We will specially handle these flags later. Skip them here.
 				continue
 			}
 			kind := v.Field(i).Kind()
-			// make sure the option exists in the SuperFlag first, otherwise
-			// we'd overwrite the defaults with 0 values
-			if flags.Has(name) {
-				switch kind {
-				case reflect.Bool:
-					field.SetBool(flags.GetBool(name))
-				case reflect.Int, reflect.Int64:
-					field.SetInt(flags.GetInt64(name))
-				case reflect.Uint32:
-					field.SetUint(uint64(flags.GetUint32(name)))
-				case reflect.Float64:
-					field.SetFloat(flags.GetFloat64(name))
-				case reflect.String:
-					field.SetString(flags.GetString(name))
-				}
+			switch kind {
+			case reflect.Bool:
+				field.SetBool(flags.GetBool(name))
+			case reflect.Int, reflect.Int64:
+				field.SetInt(flags.GetInt64(name))
+			case reflect.Uint32, reflect.Uint64:
+				field.SetUint(uint64(flags.GetUint64(name)))
+			case reflect.Float64:
+				field.SetFloat(flags.GetFloat64(name))
+			case reflect.String:
+				field.SetString(flags.GetString(name))
 			}
 		}
 	}
 
-	if flags.Has("compresssion") {
-		ctype, clevel := parseCompression(flags.GetString("compression"))
-		opt.Compression = ctype
-		opt.ZSTDCompressionLevel = clevel
+	// Only update the options for special flags that were present in the input superflag.
+	inputFlag := z.NewSuperFlag(superflag)
+	if inputFlag.Has("compression") {
+		ctype, clevel, err := parseCompression(flags.GetString("compression"))
+		switch err {
+		case nil:
+			opt.Compression = ctype
+			opt.ZSTDCompressionLevel = clevel
+		default:
+			ctype = options.CompressionType(flags.GetUint32("compression"))
+			y.AssertTruef(ctype <= 2, "ERROR: Invalid format or compression type. Got: %s",
+				flags.GetString("compression"))
+			opt.Compression = ctype
+		}
 	}
-
-	if flags.Has("cache_mb") {
-		totalCache := flags.GetInt64("cache_mb")
+	if inputFlag.Has("cache-mb") {
+		totalCache := flags.GetInt64("cache-mb")
 		y.AssertTruef(totalCache >= 0, "ERROR: Cache size must be non-negative")
-		cachePercentage := flags.GetString("cache_percentage")
+		cachePercentage := flags.GetString("cache-percentage")
 		cachePercent, err := getCachePercentages(cachePercentage, 2)
 		y.Check(err)
 		opt.BlockCacheSize = (cachePercent[0] * (totalCache << 20)) / 100
 		opt.IndexCacheSize = (cachePercent[1] * (totalCache << 20)) / 100
 	}
-
-	if flags.Has("goroutines") {
+	if inputFlag.Has("goroutines") {
 		opt.NumGoroutines = int(flags.GetUint32("goroutines"))
 	}
 

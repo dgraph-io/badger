@@ -17,60 +17,48 @@
 package badger
 
 import (
-	"fmt"
 	"reflect"
-	"strings"
 	"testing"
+
+	"github.com/dgraph-io/badger/v3/options"
 )
 
 func TestOptions(t *testing.T) {
-	// copy all the default options over to a big SuperFlag string
-	defaultSuperFlag := generateSuperFlag(DefaultOptions(""))
-	// fill an empty Options with values from the SuperFlag
-	generated := Options{}.FromSuperFlag(defaultSuperFlag)
-	// make sure they're equal
-	if !optionsEqual(DefaultOptions(""), generated) {
-		t.Fatal("generated default SuperFlag != default Options")
-	}
-	// check that values are overwritten properly
-	overwritten := DefaultOptions("").FromSuperFlag("numgoroutines=1234")
-	if overwritten.NumGoroutines != 1234 {
-		t.Fatal("Option value not overwritten by SuperFlag value")
-	}
-}
-
-// generateSuperFlag generates an identical SuperFlag string from the provided
-// Options--useful for testing.
-func generateSuperFlag(options Options) string {
-	superflag := ""
-	v := reflect.ValueOf(&options).Elem()
-	optionsStruct := v.Type()
-	for i := 0; i < v.NumField(); i++ {
-		if field := v.Field(i); field.CanInterface() {
-			name := strings.ToLower(optionsStruct.Field(i).Name)
-			kind := v.Field(i).Kind()
-			switch kind {
-			case reflect.Bool:
-				superflag += name + "="
-				superflag += fmt.Sprintf("%v; ", field.Bool())
-			case reflect.Int, reflect.Int64:
-				superflag += name + "="
-				superflag += fmt.Sprintf("%v; ", field.Int())
-			case reflect.Uint32, reflect.Uint64:
-				superflag += name + "="
-				superflag += fmt.Sprintf("%v; ", field.Uint())
-			case reflect.Float64:
-				superflag += name + "="
-				superflag += fmt.Sprintf("%v; ", field.Float())
-			case reflect.String:
-				superflag += name + "="
-				superflag += fmt.Sprintf("%v; ", field.String())
-			default:
-				continue
-			}
+	t.Run("default options", func(t *testing.T) {
+		// copy all the default options over to a big SuperFlag string
+		defaultSuperFlag := generateSuperFlag(DefaultOptions(""))
+		// fill an empty Options with values from the SuperFlag
+		generated := Options{}.FromSuperFlag(defaultSuperFlag)
+		// make sure they're equal
+		if !optionsEqual(DefaultOptions(""), generated) {
+			t.Fatal("generated default SuperFlag != default Options")
 		}
-	}
-	return superflag
+		// check that values are overwritten properly
+		overwritten := DefaultOptions("").FromSuperFlag("numgoroutines=1234")
+		if overwritten.NumGoroutines != 1234 {
+			t.Fatal("Option value not overwritten by SuperFlag value")
+		}
+	})
+
+	t.Run("special flags", func(t *testing.T) {
+		o1 := DefaultOptions("")
+		o1.NamespaceOffset = 10
+		o1.Compression = options.ZSTD
+		o1.ZSTDCompressionLevel = 2
+		o1.BlockCacheSize = 70 << 20
+		o1.IndexCacheSize = 30 << 20
+		o1.NumGoroutines = 20
+
+		o2 := DefaultOptions("")
+		o2.NamespaceOffset = 10
+		o2 = o2.FromSuperFlag("compression=zstd:2; cache-mb=100; cache-percentage=70,30; " +
+			"goroutines=20;")
+
+		// make sure they're equal
+		if !optionsEqual(o1, o2) {
+			t.Fatal("generated superFlag != expected options")
+		}
+	})
 }
 
 // optionsEqual just compares the values of two Options structs
