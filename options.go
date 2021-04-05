@@ -256,38 +256,6 @@ func parseCompression(cStr string) (options.CompressionType, int, error) {
 	return 0, 0, errors.Errorf("ERROR: compression type (%s) invalid", cType)
 }
 
-// getCachePercentages returns the slice of cache percentages given the "," (comma) separated
-// cache percentages(integers) string and expected number of caches.
-func getCachePercentages(cpString string, numExpected int) ([]int64, error) {
-	cp := strings.Split(cpString, ",")
-	// Sanity checks
-	if len(cp) != numExpected {
-		return nil, errors.Errorf("ERROR: expected %d cache percentages, got %d",
-			numExpected, len(cp))
-	}
-
-	var cachePercent []int64
-	percentSum := 0
-	for _, percent := range cp {
-		x, err := strconv.Atoi(percent)
-		if err != nil {
-			return nil, errors.Errorf("ERROR: unable to parse cache percentage(%s)", percent)
-		}
-		if x < 0 {
-			return nil, errors.Errorf("ERROR: cache percentage(%s) cannot be negative", percent)
-		}
-		cachePercent = append(cachePercent, int64(x))
-		percentSum += x
-	}
-
-	if percentSum != 100 {
-		return nil, errors.Errorf("ERROR: cache percentages (%s) does not sum up to 100",
-			strings.Join(cp, "+"))
-	}
-
-	return cachePercent, nil
-}
-
 // generateSuperFlag generates an identical SuperFlag string from the provided Options.
 func generateSuperFlag(options Options) string {
 	superflag := ""
@@ -330,27 +298,14 @@ func generateSuperFlag(options Options) string {
 // will not fill it with default values. FromSuperFlag only writes to the fields
 // present within the superflag string (case insensitive).
 //
-// Special Handling: compression, cache-mb, cache-percentage sub-flags.
-// Valid values for special flags:
-// compression: valid options are {none,snappy,zstd:<level>}
-// cache-mb: uint
-// cache-percentage: 2 comma-separated values summing upto 100. Format: blockCache,indexCache
-// goroutines: alias for numgoroutines.
-// Example: compression=zstd:3; cache-mb=2048; cache-percentage=70,30; goroutines=8;
+// It specially handles compression subflag.
+// Valid options are {none,snappy,zstd:<level>}
+// Example: compression=zstd:3;
 // Unsupported: Options.Logger, Options.EncryptionKey
 func (opt Options) FromSuperFlag(superflag string) Options {
-	var specialFlags = map[string]struct{}{
-		"compression":      {},
-		"goroutines":       {},
-		"cache-mb":         {},
-		"cache-percentage": {},
-	}
-
 	// currentOptions act as a default value for the options superflag.
 	currentOptions := generateSuperFlag(opt)
-	for flag := range specialFlags {
-		currentOptions += fmt.Sprintf("%s=; ", flag)
-	}
+	currentOptions += "compression=;"
 
 	flags := z.NewSuperFlag(superflag).MergeAndCheckDefault(currentOptions)
 	v := reflect.ValueOf(&opt).Elem()
@@ -361,8 +316,8 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 			// z.SuperFlag stores keys as lowercase, keep everything case
 			// insensitive
 			name := strings.ToLower(optionsStruct.Field(i).Name)
-			if _, ok := specialFlags[name]; ok {
-				// We will specially handle these flags later. Skip them here.
+			if name == "compression" {
+				// We will specially handle this later. Skip it here.
 				continue
 			}
 			kind := v.Field(i).Kind()
@@ -395,18 +350,6 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 				flags.GetString("compression"))
 			opt.Compression = ctype
 		}
-	}
-	if inputFlag.Has("cache-mb") {
-		totalCache := flags.GetInt64("cache-mb")
-		y.AssertTruef(totalCache >= 0, "ERROR: Cache size must be non-negative")
-		cachePercentage := flags.GetString("cache-percentage")
-		cachePercent, err := getCachePercentages(cachePercentage, 2)
-		y.Check(err)
-		opt.BlockCacheSize = (cachePercent[0] * (totalCache << 20)) / 100
-		opt.IndexCacheSize = (cachePercent[1] * (totalCache << 20)) / 100
-	}
-	if inputFlag.Has("goroutines") {
-		opt.NumGoroutines = int(flags.GetUint32("goroutines"))
 	}
 
 	return opt
