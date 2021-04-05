@@ -45,14 +45,11 @@ func TestOptions(t *testing.T) {
 		o1.NamespaceOffset = 10
 		o1.Compression = options.ZSTD
 		o1.ZSTDCompressionLevel = 2
-		o1.BlockCacheSize = 70 << 20
-		o1.IndexCacheSize = 30 << 20
 		o1.NumGoroutines = 20
 
 		o2 := DefaultOptions("")
 		o2.NamespaceOffset = 10
-		o2 = o2.FromSuperFlag("compression=zstd:2; cache-mb=100; cache-percentage=70,30; " +
-			"goroutines=20;")
+		o2 = o2.FromSuperFlag("compression=zstd:2; numgoroutines=20;")
 
 		// make sure they're equal
 		if !optionsEqual(o1, o2) {
