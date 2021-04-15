@@ -17,12 +17,15 @@
 package badger
 
 import (
+	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
@@ -224,6 +227,68 @@ func LSMOnlyOptions(path string) Options {
 	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
 }
 
+// parseCompression returns badger.compressionType and compression level given compression string
+// of format compression-type:compression-level
+func parseCompression(cStr string) (options.CompressionType, int, error) {
+	cStrSplit := strings.Split(cStr, ":")
+	cType := cStrSplit[0]
+	level := 3
+
+	var err error
+	if len(cStrSplit) == 2 {
+		level, err = strconv.Atoi(cStrSplit[1])
+		y.Check(err)
+		if level <= 0 {
+			return 0, 0,
+				errors.Errorf("ERROR: compression level(%v) must be greater than zero", level)
+		}
+	} else if len(cStrSplit) > 2 {
+		return 0, 0, errors.Errorf("ERROR: Invalid badger.compression argument")
+	}
+	switch cType {
+	case "zstd":
+		return options.ZSTD, level, nil
+	case "snappy":
+		return options.Snappy, 0, nil
+	case "none":
+		return options.None, 0, nil
+	}
+	return 0, 0, errors.Errorf("ERROR: compression type (%s) invalid", cType)
+}
+
+// generateSuperFlag generates an identical SuperFlag string from the provided Options.
+func generateSuperFlag(options Options) string {
+	superflag := ""
+	v := reflect.ValueOf(&options).Elem()
+	optionsStruct := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		if field := v.Field(i); field.CanInterface() {
+			name := strings.ToLower(optionsStruct.Field(i).Name)
+			kind := v.Field(i).Kind()
+			switch kind {
+			case reflect.Bool:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Bool())
+			case reflect.Int, reflect.Int64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Int())
+			case reflect.Uint32, reflect.Uint64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Uint())
+			case reflect.Float64:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.Float())
+			case reflect.String:
+				superflag += name + "="
+				superflag += fmt.Sprintf("%v; ", field.String())
+			default:
+				continue
+			}
+		}
+	}
+	return superflag
+}
+
 // FromSuperFlag fills Options fields for each flag within the superflag. For
 // example, replacing the default Options.NumGoroutines:
 //
@@ -233,9 +298,16 @@ func LSMOnlyOptions(path string) Options {
 // will not fill it with default values. FromSuperFlag only writes to the fields
 // present within the superflag string (case insensitive).
 //
+// It specially handles compression subflag.
+// Valid options are {none,snappy,zstd:<level>}
+// Example: compression=zstd:3;
 // Unsupported: Options.Logger, Options.EncryptionKey
 func (opt Options) FromSuperFlag(superflag string) Options {
-	flags := z.NewSuperFlag(superflag)
+	// currentOptions act as a default value for the options superflag.
+	currentOptions := generateSuperFlag(opt)
+	currentOptions += "compression=;"
+
+	flags := z.NewSuperFlag(superflag).MergeAndCheckDefault(currentOptions)
 	v := reflect.ValueOf(&opt).Elem()
 	optionsStruct := v.Type()
 	for i := 0; i < v.NumField(); i++ {
@@ -244,25 +316,42 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 			// z.SuperFlag stores keys as lowercase, keep everything case
 			// insensitive
 			name := strings.ToLower(optionsStruct.Field(i).Name)
+			if name == "compression" {
+				// We will specially handle this later. Skip it here.
+				continue
+			}
 			kind := v.Field(i).Kind()
-			// make sure the option exists in the SuperFlag first, otherwise
-			// we'd overwrite the defaults with 0 values
-			if flags.Has(name) {
-				switch kind {
-				case reflect.Bool:
-					field.SetBool(flags.GetBool(name))
-				case reflect.Int, reflect.Int64:
-					field.SetInt(flags.GetInt64(name))
-				case reflect.Uint32:
-					field.SetUint(uint64(flags.GetUint32(name)))
-				case reflect.Float64:
-					field.SetFloat(flags.GetFloat64(name))
-				case reflect.String:
-					field.SetString(flags.GetString(name))
-				}
+			switch kind {
+			case reflect.Bool:
+				field.SetBool(flags.GetBool(name))
+			case reflect.Int, reflect.Int64:
+				field.SetInt(flags.GetInt64(name))
+			case reflect.Uint32, reflect.Uint64:
+				field.SetUint(uint64(flags.GetUint64(name)))
+			case reflect.Float64:
+				field.SetFloat(flags.GetFloat64(name))
+			case reflect.String:
+				field.SetString(flags.GetString(name))
 			}
 		}
 	}
+
+	// Only update the options for special flags that were present in the input superflag.
+	inputFlag := z.NewSuperFlag(superflag)
+	if inputFlag.Has("compression") {
+		ctype, clevel, err := parseCompression(flags.GetString("compression"))
+		switch err {
+		case nil:
+			opt.Compression = ctype
+			opt.ZSTDCompressionLevel = clevel
+		default:
+			ctype = options.CompressionType(flags.GetUint32("compression"))
+			y.AssertTruef(ctype <= 2, "ERROR: Invalid format or compression type. Got: %s",
+				flags.GetString("compression"))
+			opt.Compression = ctype
+		}
+	}
+
 	return opt
 }
 

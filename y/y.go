@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -514,4 +515,73 @@ func NewKV(alloc *z.Allocator) *pb.KV {
 	}
 	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
+}
+
+// IBytesToString converts size in bytes to human readable format.
+// The code is taken from humanize library and changed to provide
+// value upto custom decimal precision.
+// IBytesToString(12312412, 1) -> 11.7 MiB
+func IBytesToString(size uint64, precision int) string {
+	sizes := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	base := float64(1024)
+	if size < 10 {
+		return fmt.Sprintf("%d B", size)
+	}
+	e := math.Floor(math.Log(float64(size)) / math.Log(base))
+	suffix := sizes[int(e)]
+	val := float64(size) / math.Pow(base, e)
+	f := "%." + strconv.Itoa(precision) + "f %s"
+
+	return fmt.Sprintf(f, val, suffix)
+}
+
+type RateMonitor struct {
+	start       time.Time
+	lastSent    uint64
+	lastCapture time.Time
+	rates       []float64
+	idx         int
+}
+
+func NewRateMonitor(numSamples int) *RateMonitor {
+	return &RateMonitor{
+		start: time.Now(),
+		rates: make([]float64, numSamples),
+	}
+}
+
+const minRate = 0.0001
+
+// Capture captures the current number of sent bytes. This number should be monotonically
+// increasing.
+func (rm *RateMonitor) Capture(sent uint64) {
+	diff := sent - rm.lastSent
+	dur := time.Since(rm.lastCapture)
+	rm.lastCapture, rm.lastSent = time.Now(), sent
+
+	rate := float64(diff) / dur.Seconds()
+	if rate < minRate {
+		rate = minRate
+	}
+	rm.rates[rm.idx] = rate
+	rm.idx = (rm.idx + 1) % len(rm.rates)
+}
+
+// Rate returns the average rate of transmission smoothed out by the number of samples.
+func (rm *RateMonitor) Rate() uint64 {
+	var total float64
+	var den float64
+	for _, r := range rm.rates {
+		if r < minRate {
+			// Ignore this. We always set minRate, so this is a zero.
+			// Typically at the start of the rate monitor, we'd have zeros.
+			continue
+		}
+		total += r
+		den += 1.0
+	}
+	if den < minRate {
+		return 0
+	}
+	return uint64(total / den)
 }

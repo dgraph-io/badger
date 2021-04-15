@@ -93,7 +93,7 @@ func (lk *lockedKeys) all() []uint64 {
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
-	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
+	lock sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *directoryLockGuard
 	// nil if Dir and ValueDir are the same
@@ -432,7 +432,7 @@ func (db *DB) MaxVersion() uint64 {
 			maxVersion = a
 		}
 	}
-	db.Lock()
+	db.lock.Lock()
 	// In read only mode, we do not create new mem table.
 	if !db.opt.ReadOnly {
 		update(db.mt.maxVersion)
@@ -440,7 +440,7 @@ func (db *DB) MaxVersion() uint64 {
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
-	db.Unlock()
+	db.lock.Unlock()
 	for _, ti := range db.Tables() {
 		update(ti.MaxVersion)
 	}
@@ -582,8 +582,8 @@ func (db *DB) close() (err error) {
 			db.opt.Debugf("Flushing memtable")
 			for {
 				pushedFlushTask := func() bool {
-					db.Lock()
-					defer db.Unlock()
+					db.lock.Lock()
+					defer db.lock.Unlock()
 					y.AssertTrue(db.mt != nil)
 					select {
 					case db.flushChan <- flushTask{mt: db.mt}:
@@ -689,8 +689,8 @@ func (db *DB) Sync() error {
 
 // getMemtables returns the current memtables and get references.
 func (db *DB) getMemTables() ([]*memTable, func()) {
-	db.RLock()
-	defer db.RUnlock()
+	db.lock.RLock()
+	defer db.lock.RUnlock()
 
 	var tables []*memTable
 
@@ -984,8 +984,8 @@ var errNoRoom = errors.New("No room for write")
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
 	var err error
-	db.Lock()
-	defer db.Unlock()
+	db.lock.Lock()
+	defer db.lock.Unlock()
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	if !db.mt.isFull() {
@@ -1089,7 +1089,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 			err := db.handleFlushTask(ft)
 			if err == nil {
 				// Update s.imm. Need a lock.
-				db.Lock()
+				db.lock.Lock()
 				// This is a single-threaded operation. ft.mt corresponds to the head of
 				// db.imm list. Once we flush it, we advance db.imm. The next ft.mt
 				// which would arrive here would match db.imm[0], because we acquire a
@@ -1098,7 +1098,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 				y.AssertTrue(ft.mt == db.imm[0])
 				db.imm = db.imm[1:]
 				ft.mt.DecrRef() // Return memory.
-				db.Unlock()
+				db.lock.Unlock()
 
 				break
 			}
@@ -1235,7 +1235,7 @@ func (db *DB) Size() (lsm, vlog int64) {
 
 // Sequence represents a Badger sequence.
 type Sequence struct {
-	sync.Mutex
+	lock      sync.Mutex
 	db        *DB
 	key       []byte
 	next      uint64
@@ -1246,8 +1246,8 @@ type Sequence struct {
 // Next would return the next integer in the sequence, updating the lease by running a transaction
 // if needed.
 func (seq *Sequence) Next() (uint64, error) {
-	seq.Lock()
-	defer seq.Unlock()
+	seq.lock.Lock()
+	defer seq.lock.Unlock()
 	if seq.next >= seq.leased {
 		if err := seq.updateLease(); err != nil {
 			return 0, err
@@ -1262,8 +1262,8 @@ func (seq *Sequence) Next() (uint64, error) {
 // before closing the associated DB. However it is valid to use the sequence after
 // it was released, causing a new lease with full bandwidth.
 func (seq *Sequence) Release() error {
-	seq.Lock()
-	defer seq.Unlock()
+	seq.lock.Lock()
+	defer seq.lock.Unlock()
 	err := seq.db.Update(func(txn *Txn) error {
 		item, err := txn.Get(seq.key)
 		if err != nil {
@@ -1375,16 +1375,20 @@ func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
 	return onDiskSize, uncompressedSize
 }
 
-// KeySplits can be used to get rough key ranges to divide up iteration over
-// the DB.
-func (db *DB) KeySplits(prefix []byte) []string {
+// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
+// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
+// first range would have nil as left key, and the last range would have nil as the right key.
+func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	var splits []string
 	tables := db.Tables()
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {
-		// We don't use ti.Left, because that has a tendency to store !badger
-		// keys.
+		// We don't use ti.Left, because that has a tendency to store !badger keys. Skip over tables
+		// at upper levels. Only choose tables from the last level.
+		if ti.Level != db.opt.MaxLevels-1 {
+			continue
+		}
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}
@@ -1425,8 +1429,8 @@ func (db *DB) KeySplits(prefix []byte) []string {
 			_ = iter.Close()
 		}
 
-		db.Lock()
-		defer db.Unlock()
+		db.lock.Lock()
+		defer db.lock.Unlock()
 		var memTables []*memTable
 		memTables = append(memTables, db.imm...)
 		for _, mt := range memTables {
@@ -1435,29 +1439,56 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		mtSplits(db.mt)
 	}
 
+	// We have our splits now. Let's convert them to ranges.
 	sort.Strings(splits)
+	var ranges []*keyRange
+	var start []byte
+	for _, key := range splits {
+		ranges = append(ranges, &keyRange{left: start, right: y.SafeCopy(nil, []byte(key))})
+		start = y.SafeCopy(nil, []byte(key))
+	}
+	ranges = append(ranges, &keyRange{left: start})
 
-	// Limit the maximum number of splits returned by this function. We check against
-	// maxNumberSplits * 2 so that the jump variable has a value of at least two.
-	// Otherwise, the entire list would be returned without any reduction in size.
-	if len(splits) > maxNumSplits*2 {
-		newSplits := make([]string, 0)
-		jump := len(splits) / maxNumSplits
-		if jump < 2 {
-			jump = 2
-		}
-
-		for i := 0; i < len(splits); i += jump {
-			if i >= len(splits) {
-				i = len(splits) - 1
+	// Figure out the approximate table size this range has to deal with.
+	for _, t := range tables {
+		tr := keyRange{left: t.Left, right: t.Right}
+		for _, r := range ranges {
+			if len(r.left) == 0 || len(r.right) == 0 {
+				continue
 			}
-			newSplits = append(newSplits, splits[i])
+			if r.overlapsWith(tr) {
+				r.size += int64(t.UncompressedSize)
+			}
 		}
-
-		splits = newSplits
 	}
 
-	return splits
+	var total int64
+	for _, r := range ranges {
+		total += r.size
+	}
+	if total == 0 {
+		return ranges
+	}
+	// Figure out the average size, so we know how to bin the ranges together.
+	avg := total / int64(numRanges)
+
+	var out []*keyRange
+	var i int
+	for i < len(ranges) {
+		r := ranges[i]
+		cur := &keyRange{left: r.left, size: r.size, right: r.right}
+		i++
+		for ; i < len(ranges); i++ {
+			next := ranges[i]
+			if cur.size+next.size > avg {
+				break
+			}
+			cur.right = next.right
+			cur.size += next.size
+		}
+		out = append(out, cur)
+	}
+	return out
 }
 
 // MaxBatchCount returns max possible entries in batch
@@ -1543,7 +1574,7 @@ func (db *DB) Flatten(workers int) error {
 	}
 
 	hbytes := func(sz int64) string {
-		return humanize.Bytes(uint64(sz))
+		return humanize.IBytes(uint64(sz))
 	}
 
 	t := db.lc.levelTargets()
@@ -1660,8 +1691,8 @@ func (db *DB) dropAll() (func(), error) {
 		f()
 	}
 	// Block all foreign interactions with memory tables.
-	db.Lock()
-	defer db.Unlock()
+	db.lock.Lock()
+	defer db.lock.Unlock()
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
 	db.mt.DecrRef()
@@ -1724,8 +1755,8 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 		return nil
 	}
 	// Block all foreign interactions with memory tables.
-	db.Lock()
-	defer db.Unlock()
+	db.lock.Lock()
+	defer db.lock.Unlock()
 
 	db.imm = append(db.imm, db.mt)
 	for _, memtable := range db.imm {
