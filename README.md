@@ -191,6 +191,7 @@ Below is a list of known projects that use Badger:
 * [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
 * [Pyroscope](https://github.com/pyroscope-io/pyroscope) - Open source confinuous profiling platform built with BadgerDB
 * [Veri](https://github.com/bgokden/veri) - A distributed feature store optimized for Search and Recommendation tasks.
+* [bIter](https://github.com/MikkelHJuul/bIter) - A library and Iterator interface for working with the `badger.Iterator`, simplifying from-to, and prefix mechanics.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
