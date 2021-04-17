@@ -647,8 +647,7 @@ func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 // block will be compressed using the specified algorithm.  This option doesn't affect existing
 // tables. Only the newly created tables will be compressed.
 //
-// The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
-// snappy. Compression is enabled by default.
+// The default compression algorithm used is snappy. Compression is enabled by default.
 func (opt Options) WithCompression(cType options.CompressionType) Options {
 	opt.Compression = cType
 	return opt
