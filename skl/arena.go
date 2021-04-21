@@ -64,9 +64,7 @@ func (s *Arena) putNode(height int) uint32 {
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
 	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	y.AssertTrue(int(n) <= len(s.buf))
 
 	// Return the aligned offset.
 	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
@@ -80,9 +78,7 @@ func (s *Arena) putNode(height int) uint32 {
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
 	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	y.AssertTrue(int(n) <= len(s.buf))
 	m := n - l
 	v.Encode(s.buf[m:])
 	return m
@@ -91,9 +87,7 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 func (s *Arena) putKey(key []byte) uint32 {
 	l := uint32(len(key))
 	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	y.AssertTrue(int(n) <= len(s.buf))
 	// m is the offset where you should write.
 	// n = new len - key len give you the offset at which you should write.
 	m := n - l

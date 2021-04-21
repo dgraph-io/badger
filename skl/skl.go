@@ -33,6 +33,7 @@ Key differences:
 package skl
 
 import (
+	"fmt"
 	"math"
 	"sync/atomic"
 	"unsafe"
@@ -522,3 +523,46 @@ func (s *UniIterator) Valid() bool { return s.iter.Valid() }
 
 // Close implements y.Interface (and frees up the iter's resources)
 func (s *UniIterator) Close() error { return s.iter.Close() }
+
+// Builder can be used to efficiently create a skiplist given that the keys are known to be in a
+// sorted order.
+type Builder struct {
+	s       *Skiplist
+	prev    [maxHeight + 1]*node
+	prevKey []byte
+}
+
+func NewBuilder(arenaSize int64) *Builder {
+	s := NewSkiplist(arenaSize)
+	b := &Builder{s: s}
+	for i := 0; i < maxHeight+1; i++ {
+		b.prev[i] = s.head
+	}
+	return b
+}
+
+const debug = false
+
+// Add must be used to add keys in a sorted order.
+func (b *Builder) Add(k []byte, v y.ValueStruct) {
+	if debug {
+		if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
+			panic(fmt.Sprintf("new key: %s <= prev key: %s\n",
+				y.ParseKey(k), y.ParseKey(b.prevKey)))
+		}
+		b.prevKey = append(b.prevKey[:0], k...)
+	}
+	s := b.s
+	height := s.randomHeight()
+	if int32(height) > s.height {
+		s.height = int32(height)
+	}
+
+	x := newNode(s.arena, k, v, height)
+	nodeOffset := s.arena.getNodeOffset(x)
+	for i := 0; i < height; i++ {
+		node := b.prev[i]
+		node.tower[i] = nodeOffset
+		b.prev[i] = x
+	}
+}
