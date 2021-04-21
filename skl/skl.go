@@ -569,3 +569,7 @@ func (b *Builder) Add(k []byte, v y.ValueStruct) {
 		b.prev[i] = x
 	}
 }
+
+func (b *Builder) Skiplist() *Skiplist {
+	return b.s
+}
