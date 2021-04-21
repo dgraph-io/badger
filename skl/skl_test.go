@@ -461,15 +461,14 @@ func randomKey(rng *rand.Rand) []byte {
 func TestBuilder(t *testing.T) {
 	N := 1 << 16
 	b := NewBuilder(32 << 20)
+	buf := make([]byte, 8)
 	for i := 0; i < N; i++ {
-		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(i))
 		key := y.KeyWithTs(buf, 0)
 		b.Add(key, y.ValueStruct{Value: []byte("00072")})
 	}
 	l := b.s
 	for i := 0; i < N; i++ {
-		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(i))
 		key := y.KeyWithTs(buf, 0)
 		v := l.Get(key)
@@ -551,12 +550,22 @@ func BenchmarkWrite(b *testing.B) {
 	})
 }
 
+// $ go test -run=XXX -v -bench BenchmarkSortedWrites
+//
+// BenchmarkSortedWrites
+// BenchmarkSortedWrites/builder
+// BenchmarkSortedWrites/builder-8         	 4911162	       219 ns/op
+// BenchmarkSortedWrites/skiplist
+// BenchmarkSortedWrites/skiplist-8        	 2311384	       587 ns/op
+// BenchmarkSortedWrites/buffer
+// BenchmarkSortedWrites/buffer-8          	12662366	        94.9 ns/op
+
 func BenchmarkSortedWrites(b *testing.B) {
 	b.Run("builder", func(b *testing.B) {
 		bl := NewBuilder(int64((b.N + 1) * MaxNodeSize))
+		buf := make([]byte, 8)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			buf := make([]byte, 8)
 			binary.BigEndian.PutUint64(buf, uint64(i))
 			key := y.KeyWithTs(buf, 0)
 			bl.Add(key, y.ValueStruct{Value: []byte("00072")})
@@ -565,9 +574,9 @@ func BenchmarkSortedWrites(b *testing.B) {
 
 	b.Run("skiplist", func(b *testing.B) {
 		bl := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+		buf := make([]byte, 8)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			buf := make([]byte, 8)
 			binary.BigEndian.PutUint64(buf, uint64(i))
 			key := y.KeyWithTs(buf, 0)
 			bl.Put(key, y.ValueStruct{Value: []byte("00072")})
@@ -576,9 +585,9 @@ func BenchmarkSortedWrites(b *testing.B) {
 
 	b.Run("buffer", func(b *testing.B) {
 		var bl bytes.Buffer
+		buf := make([]byte, 8)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			buf := make([]byte, 8)
 			binary.BigEndian.PutUint64(buf, uint64(i))
 			key := y.KeyWithTs(buf, 0)
 			v := y.ValueStruct{Value: []byte("00072")}
