@@ -144,7 +144,7 @@ func DefaultOptions(path string) Options {
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 15,
-		NumMemtables:            5,
+		NumMemtables:            15,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
 		SyncWrites:              false,

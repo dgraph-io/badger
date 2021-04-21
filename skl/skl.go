@@ -282,6 +282,9 @@ func (s *Skiplist) getHeight() int32 {
 	return atomic.LoadInt32(&s.height)
 }
 
+func (s *Skiplist) PutSorted(key []byte, v y.ValueStruct) {
+}
+
 // Put inserts the key-value pair.
 func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
