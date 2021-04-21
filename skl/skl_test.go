@@ -566,13 +566,9 @@ func BenchmarkWrite(b *testing.B) {
 
 // $ go test -run=XXX -v -bench BenchmarkSortedWrites
 //
-// BenchmarkSortedWrites
-// BenchmarkSortedWrites/builder
-// BenchmarkSortedWrites/builder-8         	 4911162	       219 ns/op
-// BenchmarkSortedWrites/skiplist
-// BenchmarkSortedWrites/skiplist-8        	 2311384	       587 ns/op
-// BenchmarkSortedWrites/buffer
-// BenchmarkSortedWrites/buffer-8          	12662366	        94.9 ns/op
+// BenchmarkSortedWrites/builder-8         	11298607	       106 ns/op
+// BenchmarkSortedWrites/skiplist-8        	 2523454	       495 ns/op
+// BenchmarkSortedWrites/buffer-8          	10377798	       108 ns/op
 
 func BenchmarkSortedWrites(b *testing.B) {
 	b.Run("builder", func(b *testing.B) {
