@@ -468,7 +468,6 @@ func TestBuilder(t *testing.T) {
 		b.Add(key, y.ValueStruct{Value: []byte("00072")})
 	}
 	l := b.s
-
 	for i := 0; i < N; i++ {
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(i))

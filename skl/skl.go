@@ -524,10 +524,12 @@ func (s *UniIterator) Valid() bool { return s.iter.Valid() }
 // Close implements y.Interface (and frees up the iter's resources)
 func (s *UniIterator) Close() error { return s.iter.Close() }
 
+// Builder can be used to efficiently create a skiplist given that the keys are known to be in a
+// sorted order.
 type Builder struct {
-	prevKey []byte
-	prev    [maxHeight + 1]*node
 	s       *Skiplist
+	prev    [maxHeight + 1]*node
+	prevKey []byte
 }
 
 func NewBuilder(arenaSize int64) *Builder {
@@ -539,6 +541,7 @@ func NewBuilder(arenaSize int64) *Builder {
 	return b
 }
 
+// Add must be used to add keys in a sorted order.
 func (b *Builder) Add(k []byte, v y.ValueStruct) {
 	if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
 		panic(fmt.Sprintf("new key: %s <= prev key: %s\n", y.ParseKey(k), y.ParseKey(b.prevKey)))
