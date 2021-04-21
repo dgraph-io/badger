@@ -467,14 +467,28 @@ func TestBuilder(t *testing.T) {
 		key := y.KeyWithTs(buf, 0)
 		b.Add(key, y.ValueStruct{Value: []byte("00072")})
 	}
-	l := b.s
+	sl := b.s
 	for i := 0; i < N; i++ {
 		binary.BigEndian.PutUint64(buf, uint64(i))
 		key := y.KeyWithTs(buf, 0)
-		v := l.Get(key)
-		require.True(t, v.Value != nil)
+		v := sl.Get(key)
+		require.NotNil(t, v.Value)
 		require.EqualValues(t, "00072", string(v.Value))
 	}
+	it := sl.NewIterator()
+	defer it.Close()
+
+	require.False(t, it.Valid())
+	it.SeekToFirst()
+	i := 0
+	for it.Valid() {
+		binary.BigEndian.PutUint64(buf, uint64(i))
+		key := y.KeyWithTs(buf, 0)
+		require.Equal(t, key, it.Key())
+		it.Next()
+		i++
+	}
+	require.Equal(t, N, i)
 }
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have

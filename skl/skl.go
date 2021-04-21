@@ -541,12 +541,16 @@ func NewBuilder(arenaSize int64) *Builder {
 	return b
 }
 
+const debug = false
+
 // Add must be used to add keys in a sorted order.
 func (b *Builder) Add(k []byte, v y.ValueStruct) {
-	if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
-		panic(fmt.Sprintf("new key: %s <= prev key: %s\n", y.ParseKey(k), y.ParseKey(b.prevKey)))
+	if debug {
+		if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
+			panic(fmt.Sprintf("new key: %s <= prev key: %s\n", y.ParseKey(k), y.ParseKey(b.prevKey)))
+		}
+		b.prevKey = append(b.prevKey[:0], k...)
 	}
-	b.prevKey = append(b.prevKey[:0], k...)
 	s := b.s
 	height := s.randomHeight()
 	if int32(height) > s.height {
