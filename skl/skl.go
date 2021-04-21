@@ -33,6 +33,7 @@ Key differences:
 package skl
 
 import (
+	"fmt"
 	"math"
 	"sync/atomic"
 	"unsafe"
@@ -522,3 +523,37 @@ func (s *UniIterator) Valid() bool { return s.iter.Valid() }
 
 // Close implements y.Interface (and frees up the iter's resources)
 func (s *UniIterator) Close() error { return s.iter.Close() }
+
+type Builder struct {
+	prevKey []byte
+	prev    [maxHeight + 1]*node
+	s       *Skiplist
+}
+
+func NewBuilder(arenaSize int64) *Builder {
+	s := NewSkiplist(arenaSize)
+	b := &Builder{s: s}
+	for i := 0; i < maxHeight+1; i++ {
+		b.prev[i] = s.head
+	}
+	return b
+}
+
+func (b *Builder) Add(k []byte, v y.ValueStruct) {
+	if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
+		panic(fmt.Sprintf("new key: %s <= prev key: %s\n", y.ParseKey(k), y.ParseKey(b.prevKey)))
+	}
+	b.prevKey = append(b.prevKey[:0], k...)
+	s := b.s
+	height := s.randomHeight()
+	if int32(height) > s.height {
+		s.height = int32(height)
+	}
+
+	x := newNode(s.arena, k, v, height)
+	for i := 0; i < height; i++ {
+		node := b.prev[i]
+		node.tower[i] = s.arena.getNodeOffset(x)
+		b.prev[i] = x
+	}
+}

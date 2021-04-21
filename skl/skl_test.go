@@ -17,6 +17,7 @@
 package skl
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -457,6 +458,27 @@ func randomKey(rng *rand.Rand) []byte {
 	return y.KeyWithTs(b, 0)
 }
 
+func TestBuilder(t *testing.T) {
+	N := 1 << 16
+	b := NewBuilder(32 << 20)
+	for i := 0; i < N; i++ {
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(i))
+		key := y.KeyWithTs(buf, 0)
+		b.Add(key, y.ValueStruct{Value: []byte("00072")})
+	}
+	l := b.s
+
+	for i := 0; i < N; i++ {
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(i))
+		key := y.KeyWithTs(buf, 0)
+		v := l.Get(key)
+		require.True(t, v.Value != nil)
+		require.EqualValues(t, "00072", string(v.Value))
+	}
+}
+
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
 func BenchmarkReadWrite(b *testing.B) {
@@ -526,6 +548,46 @@ func BenchmarkWrite(b *testing.B) {
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for pb.Next() {
 			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+		}
+	})
+}
+
+func BenchmarkSortedWrites(b *testing.B) {
+	b.Run("builder", func(b *testing.B) {
+		bl := NewBuilder(int64((b.N + 1) * MaxNodeSize))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			buf := make([]byte, 8)
+			binary.BigEndian.PutUint64(buf, uint64(i))
+			key := y.KeyWithTs(buf, 0)
+			bl.Add(key, y.ValueStruct{Value: []byte("00072")})
+		}
+	})
+
+	b.Run("skiplist", func(b *testing.B) {
+		bl := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			buf := make([]byte, 8)
+			binary.BigEndian.PutUint64(buf, uint64(i))
+			key := y.KeyWithTs(buf, 0)
+			bl.Put(key, y.ValueStruct{Value: []byte("00072")})
+		}
+	})
+
+	b.Run("buffer", func(b *testing.B) {
+		var bl bytes.Buffer
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			buf := make([]byte, 8)
+			binary.BigEndian.PutUint64(buf, uint64(i))
+			key := y.KeyWithTs(buf, 0)
+			v := y.ValueStruct{Value: []byte("00072")}
+			vbuf := make([]byte, v.EncodedSize())
+			v.Encode(vbuf)
+
+			kv := append(key, vbuf...)
+			bl.Write(kv)
 		}
 	})
 }
