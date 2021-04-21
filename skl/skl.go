@@ -547,7 +547,8 @@ const debug = false
 func (b *Builder) Add(k []byte, v y.ValueStruct) {
 	if debug {
 		if len(b.prevKey) > 0 && y.CompareKeys(k, b.prevKey) <= 0 {
-			panic(fmt.Sprintf("new key: %s <= prev key: %s\n", y.ParseKey(k), y.ParseKey(b.prevKey)))
+			panic(fmt.Sprintf("new key: %s <= prev key: %s\n",
+				y.ParseKey(k), y.ParseKey(b.prevKey)))
 		}
 		b.prevKey = append(b.prevKey[:0], k...)
 	}
@@ -558,9 +559,10 @@ func (b *Builder) Add(k []byte, v y.ValueStruct) {
 	}
 
 	x := newNode(s.arena, k, v, height)
+	nodeOffset := s.arena.getNodeOffset(x)
 	for i := 0; i < height; i++ {
 		node := b.prev[i]
-		node.tower[i] = s.arena.getNodeOffset(x)
+		node.tower[i] = nodeOffset
 		b.prev[i] = x
 	}
 }
