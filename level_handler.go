@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -39,8 +38,7 @@ type levelHandler struct {
 	tables         []*table.Table
 	totalSize      int64
 	totalStaleSize int64
-	smallest       *z.Buffer // maybe use z.Buffer, keep smallest and pointer to table (64 bits), suing sliceiterate
-	biggest        *z.Buffer // maybe use z.Buffer, keep biggest and pointer to table (64 bits), suing sliceiterate
+	meta           *z.Buffer // maybe use z.Buffer, keep smallest and pointer to table (64 bits), suing sliceiterate
 	// update above when tables are added or removed, will have to rewrite
 
 	// The following are initialized once and const.
@@ -99,8 +97,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	s.Lock() // s.Unlock() below
 
-	s.smallest.Reset()
-	s.biggest.Reset()
+	s.meta.Reset()
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -132,8 +129,7 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	// the indices get shifted around.)
 	s.Lock() // We s.Unlock() below.
 
-	s.smallest.Reset()
-	s.biggest.Reset()
+	s.meta.Reset()
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -193,12 +189,7 @@ func (s *levelHandler) sortTables() {
 	})
 	// Given T1, T2 lie on same level,
 	// if smallest of T1 < smallest of T2, then biggest of T1 < biggest of T2.
-	s.smallest.SortSlice(func(ls, rs []byte) bool {
-		lhs := tableEntry(ls)
-		rhs := tableEntry(rs)
-		return less(lhs, rhs)
-	})
-	s.biggest.SortSlice(func(ls, rs []byte) bool {
+	s.meta.SortSlice(func(ls, rs []byte) bool {
 		lhs := tableEntry(ls)
 		rhs := tableEntry(rs)
 		return less(lhs, rhs)
@@ -219,8 +210,7 @@ func newLevelHandler(db *DB, level int) *levelHandler {
 		level:    level,
 		strLevel: fmt.Sprintf("l%d", level),
 		db:       db,
-		smallest: z.NewBuffer(1<<20, "Level Handler"),
-		biggest:  z.NewBuffer(1<<20, "Level Handler"),
+		meta:     z.NewBuffer(1<<20, "Level Handler"),
 	}
 }
 
@@ -228,19 +218,22 @@ type tableEntry []byte
 
 // type tableEntry struct {
 // 	ptr   uint64  // pointer to table
-// 	key   []byte  // smallest/biggest key of the table
+// 	small []byte  // smallest/biggest key of the table
+//  big   []byte
 // }
 
-func tableEntrySize(key []byte) int {
-	return 8 + 4 + len(key) // ptr + keySz + len(key)
+func tableEntrySize(small, big []byte) int {
+	return 8 + 4 + 4 + len(small) + len(big) // ptr + smallSz + bigSz + len(small) + len(big)
 }
 
-func marshalTableEntry(dst []byte, ptr *table.Table, key []byte) {
+func marshalTableEntry(dst []byte, ptr *table.Table, small, big []byte) {
 	binary.BigEndian.PutUint64(dst[0:8], uint64(uintptr(unsafe.Pointer(ptr))))
-	binary.BigEndian.PutUint32(dst[8:12], uint32(len(key)))
+	binary.BigEndian.PutUint32(dst[8:12], uint32(len(small)))
+	binary.BigEndian.PutUint32(dst[12:16], uint32(len(big)))
 
-	n := copy(dst[12:], key)
-	y.AssertTrue(len(dst) == 12+n)
+	n := copy(dst[16:], small)
+	m := copy(dst[16+n:], big)
+	y.AssertTrue(len(dst) == 16+n+m)
 }
 
 func (me tableEntry) Size() int {
@@ -251,13 +244,19 @@ func (me tableEntry) Ptr() uint64 {
 	return binary.BigEndian.Uint64(me[0:8])
 }
 
-func (me tableEntry) Key() []byte {
+func (me tableEntry) Smallest() []byte {
 	sz := binary.BigEndian.Uint32(me[8:12])
-	return me[12 : 12+sz]
+	return me[16 : 16+sz]
+}
+
+func (me tableEntry) Biggest() []byte {
+	sz1 := binary.BigEndian.Uint32(me[8:12])
+	sz2 := binary.BigEndian.Uint32(me[12:16])
+	return me[16+sz1 : 16+sz1+sz2]
 }
 
 func less(lhs, rhs tableEntry) bool {
-	return bytes.Compare(lhs.Key(), rhs.Key()) < 0
+	return y.CompareKeys(lhs.Smallest(), rhs.Smallest()) < 0
 }
 
 // tryAddLevel0Table returns true if ok and no stalling.
@@ -279,10 +278,8 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 
 // Note: Caller must take the lock.
 func (s *levelHandler) appendTable(t *table.Table) {
-	dst := s.smallest.SliceAllocate(tableEntrySize(t.Smallest()))
-	marshalTableEntry(dst, t, t.Smallest())
-	dst = s.biggest.SliceAllocate(tableEntrySize(t.Biggest()))
-	marshalTableEntry(dst, t, t.Biggest())
+	dst := s.meta.SliceAllocate(tableEntrySize(t.Smallest(), t.Biggest()))
+	marshalTableEntry(dst, t, t.Smallest(), t.Biggest())
 }
 
 // This should be called while holding the lock on the level.
@@ -311,8 +308,7 @@ func (s *levelHandler) close() error {
 			err = closeErr
 		}
 	}
-	s.smallest.Release()
-	s.biggest.Release()
+	s.meta.Release()
 	return y.Wrap(err, "levelHandler.close")
 }
 

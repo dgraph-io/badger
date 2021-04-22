@@ -365,11 +365,6 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	return true
 }
 
-// We want to optimize pickTables.
-// We can store the tables' biggest and smallest somewhere in levelHandler.
-// NewKey iterator takes time in picktable
-// in binary search or bloom filter lookup
-
 var ErrStop = errors.New("Stop Iteration")
 
 // pickTables picks the necessary table for the iterator. This function also assumes
@@ -390,27 +385,18 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 	}
 
 	// validate := func() {
-	// 	i := 0
-	// 	s.biggest.SliceIterate(func(slice []byte) error {
+	// 	idx := 0
+	// 	s.meta.SliceIterate(func(slice []byte) error {
 	// 		te := tableEntry(slice)
 	// 		t := (*table.Table)(unsafe.Pointer(uintptr(te.Ptr())))
-	// 		y.AssertTrue(t == s.tables[i])
-	// 		y.AssertTrue(bytes.Compare(te.Key(), s.tables[i].Biggest()) == 0)
-	// 		i++
+	// 		y.AssertTrue(t == s.tables[idx])
+	// 		y.AssertTrue(bytes.Compare(te.Biggest(), s.tables[idx].Biggest()) == 0)
+	// 		y.AssertTruef(bytes.Compare(te.Smallest(), s.tables[idx].Smallest()) == 0,
+	// 			"Te: %+v, table: %+v", te.Smallest(), s.tables[idx].Smallest())
+	// 		idx++
 	// 		return nil
 	// 	})
-	// 	y.AssertTrue(i == len(s.tables))
-
-	// 	i = 0
-	// 	s.smallest.SliceIterate(func(slice []byte) error {
-	// 		te := tableEntry(slice)
-	// 		t := (*table.Table)(unsafe.Pointer(uintptr(te.Ptr())))
-	// 		y.AssertTrue(t == s.tables[i])
-	// 		y.AssertTrue(bytes.Compare(te.Key(), s.tables[i].Smallest()) == 0)
-	// 		i++
-	// 		return nil
-	// 	})
-	// 	y.AssertTrue(i == len(s.tables))
+	// 	y.AssertTrue(idx == len(s.tables))
 	// }
 	// validate()
 
@@ -421,91 +407,32 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 		return filterTables(out)
 	}
 
-	sIdx := 0
-	s.biggest.SliceIterate(func(slice []byte) error {
+	var hash uint32
+	if opt.prefixIsKey {
+		hash = y.Hash(opt.Prefix)
+	}
+
+	filtered := make([]*table.Table, 0, len(all))
+	findStart := true
+	s.meta.SliceIterate(func(slice []byte) error {
 		te := tableEntry(slice)
-		if opt.compareToPrefix(te.Key()) >= 0 {
+		if findStart && opt.compareToPrefix(te.Biggest()) < 0 {
+			// We have found the starting index sIdx.
+			return nil
+		}
+		findStart = false
+		if opt.compareToPrefix(te.Smallest()) > 0 {
 			return ErrStop
 		}
-		sIdx++
-		return nil
-	})
-
-	// sIdx2 := sort.Search(len(all), func(i int) bool {
-	// 	// table.Biggest >= opt.prefix
-	// 	// if opt.Prefix > table.Biggest, then surely it is not in any of the preceding tables.
-	// 	return opt.compareToPrefix(all[i].Biggest()) >= 0
-	// })
-	// y.AssertTrue(sIdx == sIdx2)
-	if sIdx == len(all) {
-		// Not found.
-		return []*table.Table{}
-	}
-
-	// filtered := all[sIdx:]
-	if !opt.prefixIsKey {
-		eIdx := 0
-		out := make([]*table.Table, 0)
-		// TODO: Maybe add SliceIterateBetween function.
-		s.smallest.SliceIterate(func(slice []byte) error {
-			if eIdx >= sIdx {
-				te := tableEntry(slice)
-				if opt.compareToPrefix(te.Key()) > 0 {
-					return ErrStop
-				}
-				// TODO: Check if it is safe to do so.
-				t := (*table.Table)(unsafe.Pointer(uintptr(te.Ptr())))
-				out = append(out, t)
-			}
-			eIdx++
+		// TODO: Check if it is safe to do so.
+		t := (*table.Table)(unsafe.Pointer(uintptr(te.Ptr())))
+		if opt.prefixIsKey && t.DoesNotHave(hash) {
 			return nil
-		})
-		// eIdx2 := sort.Search(len(filtered), func(i int) bool {
-		// 	return opt.compareToPrefix(filtered[i].Smallest()) > 0
-		// })
-		// y.AssertTrue(eIdx == eIdx2)
-
-		// out := make([]*table.Table, len(filtered[:eIdx]))
-		// copy(out, filtered[:eIdx])
-		return filterTables(out)
-	}
-
-	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
-	var out []*table.Table
-	hash := y.Hash(opt.Prefix)
-	idx := 0
-	s.smallest.SliceIterate(func(slice []byte) error {
-		if idx >= sIdx {
-			te := tableEntry(slice)
-			if opt.compareToPrefix(te.Key()) > 0 {
-				// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
-				return ErrStop
-			}
-			t := (*table.Table)(unsafe.Pointer(uintptr(te.Ptr())))
-			if t.DoesNotHave(hash) {
-				return nil
-			}
-			out = append(out, t)
 		}
-		idx++
+		filtered = append(filtered, t)
 		return nil
 	})
-	// for _, t := range filtered {
-	// 	// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
-	// 	// stop. This is an IMPORTANT optimization, just considering how often we call
-	// 	// NewKeyIterator.
-	// 	if opt.compareToPrefix(t.Smallest()) > 0 {
-	// 		// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
-	// 		break
-	// 	}
-	// 	// opt.Prefix is actually the key. So, we can run bloom filter checks
-	// 	// as well.
-	// 	if t.DoesNotHave(hash) {
-	// 		continue
-	// 	}
-	// 	out = append(out, t)
-	// }
-	return filterTables(out)
+	return filterTables(filtered)
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
