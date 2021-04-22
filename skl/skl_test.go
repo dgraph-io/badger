@@ -460,7 +460,7 @@ func randomKey(rng *rand.Rand) []byte {
 
 func TestBuilder(t *testing.T) {
 	N := 1 << 16
-	b := NewBuilder(32 << 20)
+	b := NewBuilder(32 << 10)
 	buf := make([]byte, 8)
 	for i := 0; i < N; i++ {
 		binary.BigEndian.PutUint64(buf, uint64(i))

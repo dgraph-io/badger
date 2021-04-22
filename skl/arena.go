@@ -50,6 +50,25 @@ func newArena(n int64) *Arena {
 	return out
 }
 
+func (s *Arena) allocate(sz uint32) uint32 {
+	offset := atomic.AddUint32(&s.n, sz)
+	if offset > uint32(len(s.buf)) {
+		growBy := uint32(len(s.buf))
+		if growBy > 1<<30 {
+			growBy = 1 << 30
+		}
+		if growBy < sz {
+			growBy = sz
+		}
+		newBuf := make([]byte, len(s.buf)+int(growBy))
+		y.AssertTrue(len(s.buf) == copy(newBuf, s.buf))
+		s.buf = newBuf
+		// log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
+		// 	sz, offset+sz, len(s.buf))
+	}
+	return offset - sz
+}
+
 func (s *Arena) size() int64 {
 	return int64(atomic.LoadUint32(&s.n))
 }
@@ -63,11 +82,10 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTrue(int(n) <= len(s.buf))
+	n := s.allocate(l)
 
 	// Return the aligned offset.
-	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
+	m := (n + uint32(nodeAlign)) & ^uint32(nodeAlign)
 	return m
 }
 
@@ -77,23 +95,18 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTrue(int(n) <= len(s.buf))
-	m := n - l
-	v.Encode(s.buf[m:])
-	return m
+	offset := s.allocate(l)
+	buf := s.buf[offset : offset+l]
+	v.Encode(buf)
+	return offset
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
-	l := uint32(len(key))
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTrue(int(n) <= len(s.buf))
-	// m is the offset where you should write.
-	// n = new len - key len give you the offset at which you should write.
-	m := n - l
-	// Copy to buffer from m:n
-	y.AssertTrue(len(key) == copy(s.buf[m:n], key))
-	return m
+	keySz := uint32(len(key))
+	offset := s.allocate(keySz)
+	buf := s.buf[offset : offset+keySz]
+	y.AssertTrue(len(key) == copy(buf, key))
+	return offset
 }
 
 // getNode returns a pointer to the node located at offset. If the offset is
