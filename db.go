@@ -340,6 +340,7 @@ func Open(opt Options) (*DB, error) {
 	}
 
 	if !db.opt.ReadOnly {
+		// TODO: Fix this for in-memory mode.
 		if db.mt, err = db.newMemTable(); err != nil {
 			return nil, y.Wrapf(err, "cannot create memtable")
 		}

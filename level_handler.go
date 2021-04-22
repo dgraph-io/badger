@@ -17,12 +17,16 @@
 package badger
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"sync"
+	"unsafe"
 
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 type levelHandler struct {
@@ -35,6 +39,9 @@ type levelHandler struct {
 	tables         []*table.Table
 	totalSize      int64
 	totalStaleSize int64
+	smallest       *z.Buffer // maybe use z.Buffer, keep smallest and pointer to table (64 bits), suing sliceiterate
+	biggest        *z.Buffer // maybe use z.Buffer, keep biggest and pointer to table (64 bits), suing sliceiterate
+	// update above when tables are added or removed, will have to rewrite
 
 	// The following are initialized once and const.
 	level    int
@@ -82,12 +89,18 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 			return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 		})
 	}
+
+	for _, t := range s.tables {
+		s.appendTable(t)
+	}
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
 func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	s.Lock() // s.Unlock() below
 
+	s.smallest.Reset()
+	s.biggest.Reset()
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -99,6 +112,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 		_, found := toDelMap[t.ID()]
 		if !found {
 			newTables = append(newTables, t)
+			s.appendTable(t)
 			continue
 		}
 		s.subtractSize(t)
@@ -118,6 +132,8 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	// the indices get shifted around.)
 	s.Lock() // We s.Unlock() below.
 
+	s.smallest.Reset()
+	s.biggest.Reset()
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -144,6 +160,9 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 	})
+	for _, t := range s.tables {
+		s.appendTable(t)
+	}
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDel)
 }
@@ -160,6 +179,7 @@ func (s *levelHandler) addTable(t *table.Table) {
 	s.addSize(t) // Increase totalSize first.
 	t.IncrRef()
 	s.tables = append(s.tables, t)
+	s.appendTable(t)
 }
 
 // sortTables sorts tables of levelHandler based on table.Smallest.
@@ -170,6 +190,18 @@ func (s *levelHandler) sortTables() {
 
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+	// Given T1, T2 lie on same level,
+	// if smallest of T1 < smallest of T2, then biggest of T1 < biggest of T2.
+	s.smallest.SortSlice(func(ls, rs []byte) bool {
+		lhs := tableEntry(ls)
+		rhs := tableEntry(rs)
+		return less(lhs, rhs)
+	})
+	s.biggest.SortSlice(func(ls, rs []byte) bool {
+		lhs := tableEntry(ls)
+		rhs := tableEntry(rs)
+		return less(lhs, rhs)
 	})
 }
 
@@ -187,7 +219,45 @@ func newLevelHandler(db *DB, level int) *levelHandler {
 		level:    level,
 		strLevel: fmt.Sprintf("l%d", level),
 		db:       db,
+		smallest: z.NewBuffer(1<<20, "Level Handler"),
+		biggest:  z.NewBuffer(1<<20, "Level Handler"),
 	}
+}
+
+type tableEntry []byte
+
+// type tableEntry struct {
+// 	ptr   uint64  // pointer to table
+// 	key   []byte  // smallest/biggest key of the table
+// }
+
+func tableEntrySize(key []byte) int {
+	return 8 + 4 + len(key) // ptr + keySz + len(key)
+}
+
+func marshalTableEntry(dst []byte, ptr *table.Table, key []byte) {
+	binary.BigEndian.PutUint64(dst[0:8], uint64(uintptr(unsafe.Pointer(ptr))))
+	binary.BigEndian.PutUint32(dst[8:12], uint32(len(key)))
+
+	n := copy(dst[12:], key)
+	y.AssertTrue(len(dst) == 12+n)
+}
+
+func (me tableEntry) Size() int {
+	return len(me)
+}
+
+func (me tableEntry) Ptr() uint64 {
+	return binary.BigEndian.Uint64(me[0:8])
+}
+
+func (me tableEntry) Key() []byte {
+	sz := binary.BigEndian.Uint32(me[8:12])
+	return me[12 : 12+sz]
+}
+
+func less(lhs, rhs tableEntry) bool {
+	return bytes.Compare(lhs.Key(), rhs.Key()) < 0
 }
 
 // tryAddLevel0Table returns true if ok and no stalling.
@@ -200,12 +270,19 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	if len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
 		return false
 	}
-
 	s.tables = append(s.tables, t)
+	s.appendTable(t)
 	t.IncrRef()
 	s.addSize(t)
-
 	return true
+}
+
+// Note: Caller must take the lock.
+func (s *levelHandler) appendTable(t *table.Table) {
+	dst := s.smallest.SliceAllocate(tableEntrySize(t.Smallest()))
+	marshalTableEntry(dst, t, t.Smallest())
+	dst = s.biggest.SliceAllocate(tableEntrySize(t.Biggest()))
+	marshalTableEntry(dst, t, t.Biggest())
 }
 
 // This should be called while holding the lock on the level.
@@ -234,6 +311,8 @@ func (s *levelHandler) close() error {
 			err = closeErr
 		}
 	}
+	s.smallest.Release()
+	s.biggest.Release()
 	return y.Wrap(err, "levelHandler.close")
 }
 
@@ -327,7 +406,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 		return appendIteratorsReversed(iters, out, topt)
 	}
 
-	tables := opt.pickTables(s.tables)
+	tables := opt.pickTables(s)
 	if len(tables) == 0 {
 		return iters
 	}

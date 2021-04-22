@@ -245,6 +245,9 @@ func (s *levelsController) dropTree() (int, error) {
 		l.Lock()
 		l.totalSize = 0
 		l.tables = l.tables[:0]
+		// TODO: Maybe truncate z.Buffer as well.
+		l.smallest.Reset()
+		l.biggest.Reset()
 		l.Unlock()
 	}
 	for _, table := range all {

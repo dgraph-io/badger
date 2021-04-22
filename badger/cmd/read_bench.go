@@ -170,6 +170,7 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 	err := db.View(func(txn *badger.Txn) error {
 		iopt := badger.DefaultIteratorOptions
 		iopt.AllVersions = true
+		iopt.PrefetchValues = false
 		it := txn.NewKeyIterator(key, iopt)
 		defer it.Close()
 
