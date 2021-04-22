@@ -45,9 +45,16 @@ func newArena(n int64) *Arena {
 	// of nil pointer.
 	out := &Arena{
 		n:   1,
-		buf: make([]byte, n),
+		buf: makeAlignedBuf(n),
 	}
 	return out
+}
+
+func makeAlignedBuf(n int64) []byte {
+	buf := make([]byte, n+int64(nodeAlign))
+	buf0Alignment := uint32(uintptr(unsafe.Pointer(&buf[0]))) & uint32(nodeAlign)
+	buf = buf[buf0Alignment : int64(buf0Alignment)+n]
+	return buf
 }
 
 func (s *Arena) size() int64 {
