@@ -218,6 +218,7 @@ type tableEntry []byte
 
 // type tableEntry struct {
 // 	ptr   uint64  // pointer to table
+//  sz    uint64  // sz(small) | sz(big)
 // 	small []byte  // smallest/biggest key of the table
 //  big   []byte
 // }
@@ -228,8 +229,8 @@ func tableEntrySize(small, big []byte) int {
 
 func marshalTableEntry(dst []byte, ptr *table.Table, small, big []byte) {
 	binary.BigEndian.PutUint64(dst[0:8], uint64(uintptr(unsafe.Pointer(ptr))))
-	binary.BigEndian.PutUint32(dst[8:12], uint32(len(small)))
-	binary.BigEndian.PutUint32(dst[12:16], uint32(len(big)))
+	tsz := uint64(len(small)) << 32 | uint64(len(big))
+	binary.BigEndian.PutUint64(dst[8:16], tsz)
 
 	n := copy(dst[16:], small)
 	m := copy(dst[16+n:], big)
@@ -245,13 +246,14 @@ func (me tableEntry) Ptr() uint64 {
 }
 
 func (me tableEntry) Smallest() []byte {
-	sz := binary.BigEndian.Uint32(me[8:12])
+	sz := binary.BigEndian.Uint64(me[8:16]) >> 32
 	return me[16 : 16+sz]
 }
 
 func (me tableEntry) Biggest() []byte {
-	sz1 := binary.BigEndian.Uint32(me[8:12])
-	sz2 := binary.BigEndian.Uint32(me[12:16])
+	tsz := binary.BigEndian.Uint64(me[8:16])
+	sz1 := tsz >> 32
+	sz2 := tsz & uint64(0x00000000FFFFFFFF)
 	return me[16+sz1 : 16+sz1+sz2]
 }
 

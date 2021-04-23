@@ -412,7 +412,7 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 		hash = y.Hash(opt.Prefix)
 	}
 
-	filtered := make([]*table.Table, 0, len(all))
+	filtered := make([]*table.Table, 0)
 	findStart := true
 	s.meta.SliceIterate(func(slice []byte) error {
 		te := tableEntry(slice)
