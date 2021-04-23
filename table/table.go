@@ -683,13 +683,13 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 		return false
 	}
 
-	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_ALL", 1)
+	// y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_ALL", 1)
 	index := t.fetchIndex()
 	bf := index.BloomFilterBytes()
 	mayContain := y.Filter(bf).MayContain(hash)
-	if !mayContain {
-		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
-	}
+	// if !mayContain {
+	// 	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
+	// }
 	return !mayContain
 }
 
@@ -809,7 +809,7 @@ func (t *Table) decompress(b *block) error {
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {

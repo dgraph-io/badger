@@ -366,7 +366,7 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 
 // pickTables picks the necessary table for the iterator. This function also assumes
 // that the tables are sorted in the right order.
-func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
+func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 	filterTables := func(tables []*table.Table) []*table.Table {
 		if opt.SinceTs > 0 {
 			tmp := tables[:0]
@@ -381,16 +381,18 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return tables
 	}
 
+	all := s.tables
 	if len(opt.Prefix) == 0 {
 		out := make([]*table.Table, len(all))
 		copy(out, all)
 		return filterTables(out)
 	}
-	sIdx := sort.Search(len(all), func(i int) bool {
-		// table.Biggest >= opt.prefix
-		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
-		return opt.compareToPrefix(all[i].Biggest()) >= 0
-	})
+	sIdx := s.biggest.Get(opt.Prefix)
+	// sIdx := sort.Search(len(all), func(i int) bool {
+	// 	// table.Biggest >= opt.prefix
+	// 	// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
+	// 	return opt.compareToPrefix(all[i].Biggest()) >= 0
+	// })
 	if sIdx == len(all) {
 		// Not found.
 		return []*table.Table{}

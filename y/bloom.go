@@ -29,7 +29,7 @@ func (f Filter) MayContain(h uint32) bool {
 	delta := h>>17 | h<<15
 	for j := uint8(0); j < k; j++ {
 		bitPos := h % nBits
-		if f[bitPos/8]&(1<<(bitPos%8)) == 0 {
+		if f[bitPos>>3]&(1<<(bitPos&0x7)) == 0 {
 			return false
 		}
 		h += delta

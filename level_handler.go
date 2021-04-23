@@ -21,6 +21,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/dgraph-io/badger/v3/strie"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 )
@@ -35,6 +36,7 @@ type levelHandler struct {
 	tables         []*table.Table
 	totalSize      int64
 	totalStaleSize int64
+	biggest        *strie.Trie
 
 	// The following are initialized once and const.
 	level    int
@@ -82,6 +84,12 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 			return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 		})
 	}
+
+	// TODO: Be careful with L0. Don't use s.biggest for L0.
+	s.biggest = strie.NewTrie()
+	for i, t := range s.tables {
+		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+	}
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
@@ -92,6 +100,8 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
 	}
+
+	s.biggest = strie.NewTrie()
 
 	// Make a copy as iterators might be keeping a slice of tables.
 	var newTables []*table.Table
@@ -105,6 +115,10 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	}
 	s.tables = newTables
 
+	s.biggest = strie.NewTrie()
+	for i, t := range s.tables {
+		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+	}
 	s.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
 
 	return decrRefs(toDel)
@@ -144,6 +158,10 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 	})
+	s.biggest = strie.NewTrie()
+	for i, t := range s.tables {
+		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+	}
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDel)
 }
@@ -160,6 +178,7 @@ func (s *levelHandler) addTable(t *table.Table) {
 	s.addSize(t) // Increase totalSize first.
 	t.IncrRef()
 	s.tables = append(s.tables, t)
+	s.biggest.Add(y.ParseKey(t.Biggest()), len(s.tables)-1)
 }
 
 // sortTables sorts tables of levelHandler based on table.Smallest.
@@ -171,6 +190,11 @@ func (s *levelHandler) sortTables() {
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 	})
+	s.biggest = strie.NewTrie()
+	for i, t := range s.tables {
+		key := y.ParseKey(t.Biggest())
+		s.biggest.Add(key, i)
+	}
 }
 
 func decrRefs(tables []*table.Table) error {
@@ -202,6 +226,8 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	}
 
 	s.tables = append(s.tables, t)
+	biggest := y.ParseKey(t.Biggest())
+	s.biggest.Add(biggest, len(s.tables)-1)
 	t.IncrRef()
 	s.addSize(t)
 
@@ -327,7 +353,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 		return appendIteratorsReversed(iters, out, topt)
 	}
 
-	tables := opt.pickTables(s.tables)
+	tables := opt.pickTables(s)
 	if len(tables) == 0 {
 		return iters
 	}

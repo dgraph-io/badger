@@ -43,7 +43,7 @@ func newNode() *node {
 	}
 }
 
-// Trie datastructure.
+// Trie data structure.
 type Trie struct {
 	root *node
 }
@@ -182,11 +182,11 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 	return nil
 }
 
+// Get returns prefix matched ids for the given key.
 func (t *Trie) Get(key []byte) map[uint64]struct{} {
 	return t.get(t.root, key)
 }
 
-// Get returns prefix matched ids for the given key.
 func (t *Trie) get(curNode *node, key []byte) map[uint64]struct{} {
 	y.AssertTrue(curNode != nil)
 

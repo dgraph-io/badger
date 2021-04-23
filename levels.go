@@ -33,6 +33,7 @@ import (
 	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/strie"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -245,6 +246,7 @@ func (s *levelsController) dropTree() (int, error) {
 		l.Lock()
 		l.totalSize = 0
 		l.tables = l.tables[:0]
+		l.biggest = strie.NewTrie()
 		l.Unlock()
 	}
 	for _, table := range all {
