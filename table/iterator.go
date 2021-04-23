@@ -443,7 +443,7 @@ type ConcatIterator struct {
 }
 
 // NewConcatIterator creates a new concatenated iterator
-func NewConcatIterator(tbls []*Table, opt int) *ConcatIterator {
+func NewConcatIterator(tbls []*Table, opt int) ConcatIterator {
 	iters := make([]*Iterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
 		// Increment the reference count. Since, we're not creating the iterator right now.
@@ -453,7 +453,7 @@ func NewConcatIterator(tbls []*Table, opt int) *ConcatIterator {
 		// Save cycles by not initializing the iterators until needed.
 		// iters[i] = tbls[i].NewIterator(reversed)
 	}
-	return &ConcatIterator{
+	return ConcatIterator{
 		options: opt,
 		iters:   iters,
 		tables:  tbls,

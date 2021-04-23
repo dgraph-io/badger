@@ -246,6 +246,10 @@ func (s *levelsController) dropTree() (int, error) {
 		l.Lock()
 		l.totalSize = 0
 		l.tables = l.tables[:0]
+
+		if l.biggest != nil {
+			l.biggest.Release()
+		}
 		l.biggest = strie.NewTrie()
 		l.Unlock()
 	}
@@ -908,7 +912,8 @@ func (s *levelsController) compactBuildTables(
 			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
 		}
 		// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
+		t := table.NewConcatIterator(valid, table.NOCACHE)
+		return append(iters, &t)
 	}
 
 	res := make(chan *table.Table, 3)

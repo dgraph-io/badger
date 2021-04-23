@@ -387,9 +387,9 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 		copy(out, all)
 		return filterTables(out)
 	}
-	sIdx := s.biggest.Get(opt.Prefix)
+	sIdx := int(s.biggest.Get(opt.Prefix))
 	// sIdx := sort.Search(len(all), func(i int) bool {
-	// 	// table.Biggest >= opt.prefix
+	// 	// smallest index that satisfies this property. table.Biggest >= opt.prefix
 	// 	// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
 	// 	return opt.compareToPrefix(all[i].Biggest()) >= 0
 	// })

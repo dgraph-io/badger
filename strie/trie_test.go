@@ -30,8 +30,9 @@ func TestGet(t *testing.T) {
 	trie := NewTrie()
 	keys := []string{"a", "aa", "ad", "adb", "adf", "adg", "ae", "b", "c"}
 	for i, key := range keys {
-		trie.Add(b(key), i)
+		trie.Put(b(key), uint64(i))
 	}
+
 	require.Equal(t, 0, trie.Get(b("a")))
 	require.Equal(t, 1, trie.Get(b("aa")))
 	require.Equal(t, 2, trie.Get(b("ad")))

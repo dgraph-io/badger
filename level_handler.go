@@ -85,10 +85,13 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 		})
 	}
 
+	if s.biggest != nil {
+		s.biggest.Release()
+	}
 	// TODO: Be careful with L0. Don't use s.biggest for L0.
 	s.biggest = strie.NewTrie()
 	for i, t := range s.tables {
-		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+		s.biggest.Put(y.ParseKey(t.Biggest()), uint64(i))
 	}
 }
 
@@ -100,8 +103,6 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
 	}
-
-	s.biggest = strie.NewTrie()
 
 	// Make a copy as iterators might be keeping a slice of tables.
 	var newTables []*table.Table
@@ -115,9 +116,12 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	}
 	s.tables = newTables
 
+	if s.biggest != nil {
+		s.biggest.Release()
+	}
 	s.biggest = strie.NewTrie()
 	for i, t := range s.tables {
-		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+		s.biggest.Put(y.ParseKey(t.Biggest()), uint64(i))
 	}
 	s.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
 
@@ -158,9 +162,13 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 	})
+
+	if s.biggest != nil {
+		s.biggest.Release()
+	}
 	s.biggest = strie.NewTrie()
 	for i, t := range s.tables {
-		s.biggest.Add(y.ParseKey(t.Biggest()), i)
+		s.biggest.Put(y.ParseKey(t.Biggest()), uint64(i))
 	}
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDel)
@@ -178,7 +186,7 @@ func (s *levelHandler) addTable(t *table.Table) {
 	s.addSize(t) // Increase totalSize first.
 	t.IncrRef()
 	s.tables = append(s.tables, t)
-	s.biggest.Add(y.ParseKey(t.Biggest()), len(s.tables)-1)
+	s.biggest.Put(y.ParseKey(t.Biggest()), uint64(len(s.tables)-1))
 }
 
 // sortTables sorts tables of levelHandler based on table.Smallest.
@@ -190,10 +198,14 @@ func (s *levelHandler) sortTables() {
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 	})
+
+	if s.biggest != nil {
+		s.biggest.Release()
+	}
 	s.biggest = strie.NewTrie()
 	for i, t := range s.tables {
 		key := y.ParseKey(t.Biggest())
-		s.biggest.Add(key, i)
+		s.biggest.Put(key, uint64(i))
 	}
 }
 
@@ -227,7 +239,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 
 	s.tables = append(s.tables, t)
 	biggest := y.ParseKey(t.Biggest())
-	s.biggest.Add(biggest, len(s.tables)-1)
+	s.biggest.Put(biggest, uint64(len(s.tables)-1))
 	t.IncrRef()
 	s.addSize(t)
 
@@ -357,7 +369,8 @@ func (s *levelHandler) appendIterators(opt *IteratorOptions) []y.Iterator {
 	if len(tables) == 0 {
 		return nil
 	}
-	return []y.Iterator{table.NewConcatIterator(tables, topt)}
+	t := table.NewConcatIterator(tables, topt)
+	return []y.Iterator{&t}
 }
 
 type levelHandlerRLocked struct{}
