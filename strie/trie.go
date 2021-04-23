@@ -17,6 +17,8 @@
 package strie
 
 import (
+	"sort"
+
 	"github.com/dgraph-io/badger/v3/y"
 )
 
@@ -87,12 +89,15 @@ func (t *Trie) Get(key []byte) int {
 }
 
 func (n *node) search(val byte) int {
-	for i, child := range n.children {
-		if child.v >= val {
-			return i
-		}
-	}
-	return len(n.children)
+	return sort.Search(len(n.children), func(i int) bool {
+		return n.children[i].v >= val
+	})
+	// for i, child := range n.children {
+	// 	if child.v >= val {
+	// 		return i
+	// 	}
+	// }
+	// return len(n.children)
 }
 
 func max(a, b int) int {

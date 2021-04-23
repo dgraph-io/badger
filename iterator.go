@@ -410,7 +410,7 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
 	var out []*table.Table
-	hash := y.Hash(opt.Prefix)
+	// hash := y.Hash(opt.Prefix)
 	for _, t := range filtered {
 		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
 		// stop. This is an IMPORTANT optimization, just considering how often we call
@@ -421,9 +421,9 @@ func (opt *IteratorOptions) pickTables(s *levelHandler) []*table.Table {
 		}
 		// opt.Prefix is actually the key. So, we can run bloom filter checks
 		// as well.
-		if t.DoesNotHave(hash) {
-			continue
-		}
+		// if t.DoesNotHave(hash) {
+		// 	continue
+		// }
 		out = append(out, t)
 	}
 	return filterTables(out)
@@ -494,7 +494,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
-	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
+	iters = append(iters, txn.db.lc.appendIterators(&opt)...) // This will increment references.
 	res := &Iterator{
 		txn:    txn,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),

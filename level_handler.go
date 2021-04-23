@@ -332,7 +332,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
+func (s *levelHandler) appendIterators(opt *IteratorOptions) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -350,14 +350,14 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 				out = append(out, t)
 			}
 		}
-		return appendIteratorsReversed(iters, out, topt)
+		return appendIteratorsReversed(out, topt)
 	}
 
 	tables := opt.pickTables(s)
 	if len(tables) == 0 {
-		return iters
+		return nil
 	}
-	return append(iters, table.NewConcatIterator(tables, topt))
+	return []y.Iterator{table.NewConcatIterator(tables, topt)}
 }
 
 type levelHandlerRLocked struct{}

@@ -902,7 +902,7 @@ func (s *levelsController) compactBuildTables(
 		var iters []y.Iterator
 		switch {
 		case lev == 0:
-			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
+			iters = appendIteratorsReversed(topTables, table.NOCACHE)
 		case len(topTables) > 0:
 			y.AssertTrue(len(topTables) == 1)
 			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
@@ -1608,7 +1608,8 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 	return maxVs, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
+func appendIteratorsReversed(th []*table.Table, opt int) []y.Iterator {
+	out := make([]y.Iterator, 0, len(th))
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
 		out = append(out, th[i].NewIterator(opt))
@@ -1618,12 +1619,12 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.I
 
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelsController) appendIterators(
-	iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
+func (s *levelsController) appendIterators(opt *IteratorOptions) []y.Iterator {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
+	var iters []y.Iterator
 	for _, level := range s.levels {
-		iters = level.appendIterators(iters, opt)
+		iters = append(iters, level.appendIterators(opt)...)
 	}
 	return iters
 }
