@@ -25,6 +25,7 @@ import (
 type node struct {
 	v        byte
 	children []*node
+	childmap map[byte]*node
 	maxId    int
 	minId    int
 }
@@ -32,6 +33,7 @@ type node struct {
 func newNode(id int) *node {
 	return &node{
 		children: make([]*node, 0),
+		childmap: make(map[byte]*node),
 		maxId:    id,
 		minId:    id,
 	}
@@ -64,6 +66,7 @@ func (t *Trie) Add(prefix []byte, id int) {
 		child := newNode(id)
 		child.v = val
 		node.children = append(node.children, child)
+		node.childmap[val] = child
 		node = child
 	}
 }
@@ -72,15 +75,27 @@ func (t *Trie) Add(prefix []byte, id int) {
 func (t *Trie) Get(key []byte) int {
 	node := t.root
 	for i, val := range key {
-		idx := node.search(val)
-		if idx == len(node.children) {
-			return node.maxId + 1
+		nn, ok := node.childmap[val]
+		if !ok {
+			idx := node.search(val)
+			if idx == len(node.children) {
+				return node.maxId + 1
+			}
+			if node.children[idx].v != val {
+				y.AssertTrue(node.children[idx].v > val)
+				return node.children[idx].minId
+			}
 		}
-		if node.children[idx].v != val {
-			y.AssertTrue(node.children[idx].v > val)
-			return node.children[idx].minId
-		}
-		node = node.children[idx]
+		node = nn
+		// idx := node.search(val)
+		// if idx == len(node.children) {
+		// 	return node.maxId + 1
+		// }
+		// if node.children[idx].v != val {
+		// 	y.AssertTrue(node.children[idx].v > val)
+		// 	return node.children[idx].minId
+		// }
+		// node = node.children[idx]
 		if i == len(key)-1 {
 			return node.minId
 		}
