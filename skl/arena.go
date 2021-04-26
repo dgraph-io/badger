@@ -52,7 +52,13 @@ func newArena(n int64) *Arena {
 
 func (s *Arena) allocate(sz uint32) uint32 {
 	offset := atomic.AddUint32(&s.n, sz)
-	if offset > uint32(len(s.buf)) {
+
+	// We are keeping extra bytes in the end, so that the checkptr doesn't fail. We apply some
+	// intelligence to reduce the size of the node by only keeping towers upto valid height and not
+	// maxHeight. This reduces the node's size, but checkptr doesn't know about its size and it
+	// tries to check based on MaxNodeSize causing this error checkptr: converted pointer straddles
+	// multiple allocations
+	if offset > uint32(len(s.buf))-uint32(MaxNodeSize) {
 		growBy := uint32(len(s.buf))
 		if growBy > 1<<30 {
 			growBy = 1 << 30
