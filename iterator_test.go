@@ -18,18 +18,22 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/v3/options"
-	"github.com/dgraph-io/badger/v3/table"
+	"github.com/dgraph-io/badger/v3/strie"
+	"github.com/dgraph-io/badger/v3/threetrie"
 	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,56 +77,56 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "ab", "abc123")
 }
 
-func TestPickSortTables(t *testing.T) {
-	type MockKeys struct {
-		small string
-		large string
-	}
-	genTables := func(mks ...MockKeys) []*table.Table {
-		out := make([]*table.Table, 0)
-		for _, mk := range mks {
-			opts := table.Options{ChkMode: options.OnTableAndBlockRead}
-			tbl := buildTable(t, [][]string{{mk.small, "some value"},
-				{mk.large, "some value"}}, opts)
-			out = append(out, tbl)
-		}
-		return out
-	}
-	tables := genTables(MockKeys{small: "a", large: "abc"},
-		MockKeys{small: "abcd", large: "cde"},
-		MockKeys{small: "cge", large: "chf"},
-		MockKeys{small: "glr", large: "gyup"})
-	opt := DefaultIteratorOptions
-	opt.prefixIsKey = false
-	opt.Prefix = []byte("c")
-	filtered := opt.pickTables(tables)
-	require.Equal(t, 2, len(filtered))
-	// build table adds time stamp so removing tailing bytes.
-	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
-	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
-	tables = genTables(MockKeys{small: "a", large: "abc"},
-		MockKeys{small: "abcd", large: "ade"},
-		MockKeys{small: "cge", large: "chf"},
-		MockKeys{small: "glr", large: "gyup"})
-	filtered = opt.pickTables(tables)
-	require.Equal(t, 1, len(filtered))
-	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
-	tables = genTables(MockKeys{small: "a", large: "abc"},
-		MockKeys{small: "abcd", large: "ade"},
-		MockKeys{small: "cge", large: "chf"},
-		MockKeys{small: "ckr", large: "cyup"},
-		MockKeys{small: "csfr", large: "gyup"})
-	filtered = opt.pickTables(tables)
-	require.Equal(t, 3, len(filtered))
-	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
-	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
-	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
+// func TestPickSortTables(t *testing.T) {
+// 	type MockKeys struct {
+// 		small string
+// 		large string
+// 	}
+// 	genTables := func(mks ...MockKeys) []*table.Table {
+// 		out := make([]*table.Table, 0)
+// 		for _, mk := range mks {
+// 			opts := table.Options{ChkMode: options.OnTableAndBlockRead}
+// 			tbl := buildTable(t, [][]string{{mk.small, "some value"},
+// 				{mk.large, "some value"}}, opts)
+// 			out = append(out, tbl)
+// 		}
+// 		return out
+// 	}
+// 	tables := genTables(MockKeys{small: "a", large: "abc"},
+// 		MockKeys{small: "abcd", large: "cde"},
+// 		MockKeys{small: "cge", large: "chf"},
+// 		MockKeys{small: "glr", large: "gyup"})
+// 	opt := DefaultIteratorOptions
+// 	opt.prefixIsKey = false
+// 	opt.Prefix = []byte("c")
+// 	filtered := opt.pickTables(tables)
+// 	require.Equal(t, 2, len(filtered))
+// 	// build table adds time stamp so removing tailing bytes.
+// 	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
+// 	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
+// 	tables = genTables(MockKeys{small: "a", large: "abc"},
+// 		MockKeys{small: "abcd", large: "ade"},
+// 		MockKeys{small: "cge", large: "chf"},
+// 		MockKeys{small: "glr", large: "gyup"})
+// 	filtered = opt.pickTables(tables)
+// 	require.Equal(t, 1, len(filtered))
+// 	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+// 	tables = genTables(MockKeys{small: "a", large: "abc"},
+// 		MockKeys{small: "abcd", large: "ade"},
+// 		MockKeys{small: "cge", large: "chf"},
+// 		MockKeys{small: "ckr", large: "cyup"},
+// 		MockKeys{small: "csfr", large: "gyup"})
+// 	filtered = opt.pickTables(tables)
+// 	require.Equal(t, 3, len(filtered))
+// 	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+// 	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
+// 	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
 
-	opt.Prefix = []byte("aa")
-	filtered = opt.pickTables(tables)
-	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
-	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
-}
+// 	opt.Prefix = []byte("aa")
+// 	filtered = opt.pickTables(tables)
+// 	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
+// 	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
+// }
 
 func TestIterateSinceTs(t *testing.T) {
 	bkey := func(i int) []byte {
@@ -396,4 +400,149 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 			}
 		}
 	})
+}
+
+var Idx int
+
+type tableEntry []byte
+
+// type tableEntry struct {
+// 	key   []byte  // smallest/biggest key of the table
+// }
+
+func tableEntrySize(key []byte) int {
+	return 4 + len(key) // ptr + keySz + len(key)
+}
+
+func marshalTableEntry(dst []byte, key []byte) {
+	binary.BigEndian.PutUint32(dst[0:4], uint32(len(key)))
+
+	n := copy(dst[4:], key)
+	y.AssertTrue(len(dst) == 4+n)
+}
+
+func (me tableEntry) Size() int {
+	return len(me)
+}
+
+func (me tableEntry) Ptr() uint64 {
+	return binary.BigEndian.Uint64(me[0:8])
+}
+
+func (me tableEntry) Key() []byte {
+	sz := binary.BigEndian.Uint32(me[0:4])
+	return me[4 : 4+sz]
+}
+
+// go test -run=^$ -test.bench=BenchmarkGetBiggest -count=10 [N=100, M=100, keySz=40]
+// GetBiggest/master-16          994µs ± 1%
+// GetBiggest/slice-iterate-16  6.27ms ± 1%
+// GetBiggest/badger-trie-16    9.76ms ± 1%
+// GetBiggest/dgraph-trie-16    1.97ms ± 1%
+//
+// Runs benchmark for picktables by mocking the randomly generated keys as tables' biggest.
+// N keys of size keySz are generated randomly.
+// N*M keys are read. Each of the interval gets mul keys. Last 10-30 bytes of the keys are
+// randomly generated. While the first 10 are same as the table's biggest.
+func BenchmarkGetBiggest(b *testing.B) {
+	N := 100
+	M := 100
+
+	// Generate tables' biggest.
+	keySz := 40
+	keys := make([][]byte, 0, N)
+	for i := 0; i < N; i++ {
+		key := make([]byte, keySz)
+		_, err := rand.Read(key)
+		require.NoError(b, err)
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return bytes.Compare(keys[i], keys[j]) < 0
+	})
+
+	// Generate read keys.
+	readKeys := make([][]byte, 0, N*M)
+	for _, key := range keys {
+		for i := 0; i < M; i++ {
+			// Randomize last 10-30 bytes
+			cnt := rand.Intn(20) + 10
+			rkey := make([]byte, cnt)
+			_, err := rand.Read(rkey)
+			require.NoError(b, err)
+			readKeys = append(readKeys, append(key[:keySz-cnt], rkey...))
+		}
+	}
+	rand.Shuffle(len(readKeys), func(i, j int) {
+		readKeys[i], readKeys[j] = readKeys[j], readKeys[i]
+	})
+
+	b.Run("master", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			var idx int
+			for _, key := range readKeys {
+				idx = sort.Search(len(keys), func(i int) bool {
+					return bytes.Compare(keys[i], key) >= 0
+				})
+			}
+			Idx = idx
+		}
+	})
+
+	b.Run("slice-iterate", func(b *testing.B) {
+		buf := z.NewBuffer(1<<20, "pick table test")
+		defer buf.Release()
+		for _, key := range keys {
+			dst := buf.SliceAllocate(tableEntrySize(key))
+			marshalTableEntry(dst, key)
+		}
+		var ErrStop = errors.New("Stop Iteration")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var idx int
+			for _, key := range readKeys {
+				buf.SliceIterate(func(slice []byte) error {
+					te := tableEntry(slice)
+					if bytes.Compare(te.Key(), key) >= 0 {
+						return ErrStop
+					}
+					idx++
+					return nil
+				})
+			}
+			Idx = idx
+		}
+		b.StopTimer()
+	})
+
+	b.Run("badger-trie", func(b *testing.B) {
+		trie := strie.NewTrie()
+		for i, key := range keys {
+			trie.Add(key, i)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var idx int
+			for _, key := range readKeys {
+				idx = trie.Get(key)
+			}
+			Idx = idx
+		}
+	})
+
+	b.Run("dgraph-trie", func(b *testing.B) {
+		trie := threetrie.NewTrie()
+		for i, key := range keys {
+			trie.Put(key, uint64(i))
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var idx int
+			for _, key := range readKeys {
+				idx = trie.Get(key)
+			}
+			Idx = idx
+		}
+	})
+
 }
