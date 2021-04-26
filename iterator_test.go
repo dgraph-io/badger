@@ -435,11 +435,13 @@ func (me tableEntry) Key() []byte {
 }
 
 // go test -run=^$ -test.bench=BenchmarkGetBiggest -count=10 [N=100, M=100, keySz=40]
-// GetBiggest/master-16          994µs ± 1%
-// GetBiggest/slice-iterate-16  6.27ms ± 1%
-// GetBiggest/badger-trie-16    9.76ms ± 1%
-// GetBiggest/dgraph-trie-16    1.97ms ± 1%
-//
+// name                               time/op
+// GetBiggest/master-16               1.00ms ± 1%
+// GetBiggest/slice-iterate-16        6.21ms ± 0%
+// GetBiggest/badger-trie-16          9.65ms ± 1%
+// GetBiggest/dgraph-trie-16          1.99ms ± 0%
+// GetBiggest/dgraph-trie-shuffle-16  1.34ms ± 2%
+
 // Runs benchmark for picktables by mocking the randomly generated keys as tables' biggest.
 // N keys of size keySz are generated randomly.
 // N*M keys are read. Each of the interval gets mul keys. Last 10-30 bytes of the keys are
@@ -545,4 +547,30 @@ func BenchmarkGetBiggest(b *testing.B) {
 		}
 	})
 
+	b.Run("dgraph-trie-shuffle", func(b *testing.B) {
+		trie := threetrie.NewTrie()
+		type t struct {
+			idx int
+			key []byte
+		}
+		// Shuffle the keys before insertion
+		ts := make([]t, N)
+		for i := 0; i < N; i++ {
+			ts[i] = t{i, keys[i]}
+		}
+		rand.Shuffle(N, func(i, j int) {
+			ts[i], ts[j] = ts[j], ts[i]
+		})
+		for _, tss := range ts {
+			trie.Put(tss.key, uint64(tss.idx))
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var idx int
+			for _, key := range readKeys {
+				idx = trie.Get(key)
+			}
+			Idx = idx
+		}
+	})
 }
