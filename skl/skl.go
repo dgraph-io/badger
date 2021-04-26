@@ -272,8 +272,8 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 func (s *Skiplist) findSpliceForLevel(key []byte, before uint32, level int) (uint32, uint32) {
 	for {
 		// Assume before.key < key.
-		bn := s.arena.getNode(before)
-		next := bn.getNextOffset(level)
+		beforeNode := s.arena.getNode(before)
+		next := beforeNode.getNextOffset(level)
 		nextNode := s.arena.getNode(next)
 		if nextNode == nil {
 			return before, next
@@ -309,10 +309,10 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			valOffset := s.arena.putVal(v)
-			value := encodeValue(valOffset, v.EncodedSize())
+			vo := s.arena.putVal(v)
+			encValue := encodeValue(vo, v.EncodedSize())
 			prevNode := s.arena.getNode(prev[i])
-			prevNode.setValue(s.arena, value)
+			prevNode.setValue(s.arena, encValue)
 			return
 		}
 	}
@@ -320,6 +320,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// We do need to create a new node.
 	height := s.randomHeight()
 	x := newNode(s.arena, key, v, height)
+
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
