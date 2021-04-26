@@ -33,7 +33,6 @@ Key differences:
 package skl
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -313,7 +312,6 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// We do need to create a new node.
 	height := s.randomHeight()
 	x := newNode(s.arena, key, v, height)
-	xo := s.arena.getNodeOffset(x)
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
@@ -337,7 +335,6 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 				// the base level. But we know we are not on the base level.
 				y.AssertTrue(prev[i] != next[i])
 			}
-			x = s.arena.getNode(xo)
 			x.tower[i] = next[i]
 			pnode := s.arena.getNode(prev[i])
 			if pnode.casNextOffset(i, next[i], s.arena.getNodeOffset(x)) {
@@ -350,16 +347,14 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				valOffset := s.arena.putVal(v)
-				value := encodeValue(valOffset, v.EncodedSize())
+				vo := s.arena.putVal(v)
+				encValue := encodeValue(vo, v.EncodedSize())
 				prevNode := s.arena.getNode(prev[i])
-				prevNode.setValue(s.arena, value)
+				prevNode.setValue(s.arena, encValue)
 				return
 			}
 		}
 	}
-
-	y.AssertTrue(bytes.Equal(s.Get(key).Value, v.Value))
 }
 
 // Empty returns if the Skiplist is empty.

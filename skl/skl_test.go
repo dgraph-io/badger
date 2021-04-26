@@ -493,7 +493,7 @@ func TestBuilder(t *testing.T) {
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-func BenchmarkReadWrite(b *testing.B) {
+func BenchmarkReadWriteSkiplist(b *testing.B) {
 	value := newValue(123)
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
