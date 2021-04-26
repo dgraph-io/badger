@@ -1063,11 +1063,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scenario, when empty memtable is flushed.
-	// if ft.mt.sl.Empty() {
-	// 	return nil
-	// }
-
+	// ft.mt could be nil with ft.itr being the valid field.
 	bopts := buildTableOptions(db)
 	builder := buildL0Table(ft, bopts)
 	defer builder.Close()
@@ -1118,7 +1114,6 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 
 				sz += sl.MemSize()
 				if sz > db.opt.MemTableSize {
-					db.opt.Infof("sz: %d > memtable size: %d\n", sz, db.opt.MemTableSize)
 					return
 				}
 			default:
