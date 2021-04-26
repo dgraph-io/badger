@@ -1137,7 +1137,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 		// Pick more memtables, so we can really fill up the L0 table.
 		slurp()
 
-		db.opt.Infof("Picked %d memtables. Size: %d\n", len(itrs), sz)
+		// db.opt.Infof("Picked %d memtables. Size: %d\n", len(itrs), sz)
 		ft.mt = nil
 		ft.itr = table.NewMergeIterator(itrs, false)
 
