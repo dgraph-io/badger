@@ -1107,6 +1107,9 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 		for {
 			select {
 			case more := <-db.flushChan:
+				if more.mt == nil {
+					return
+				}
 				sl := more.mt.sl
 				itrs = append(itrs, sl.NewUniIterator(false))
 				mts = append(mts, more.mt)
