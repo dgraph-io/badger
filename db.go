@@ -1007,13 +1007,13 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
-func (db *DB) HandoverSkiplist(skl *skl.Skiplist) error {
+func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
 	mt := &memTable{sl: skl}
 	select {
-	case db.flushChan <- flushTask{mt: mt}:
+	case db.flushChan <- flushTask{mt: mt, cb: callback}:
 		db.imm = append(db.imm, mt)
 		return nil
 	default:
@@ -1056,6 +1056,7 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 
 type flushTask struct {
 	mt           *memTable
+	cb           func()
 	itr          y.Iterator
 	dropPrefixes [][]byte
 }
@@ -1105,6 +1106,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 	var sz int64
 	var itrs []y.Iterator
 	var mts []*memTable
+	var cbs []func()
 	slurp := func() {
 		for {
 			select {
@@ -1112,6 +1114,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 				sl := more.mt.sl
 				itrs = append(itrs, sl.NewUniIterator(false))
 				mts = append(mts, more.mt)
+				cbs = append(cbs, more.cb)
 
 				sz += sl.MemSize()
 				if sz > db.opt.MemTableSize {
@@ -1130,9 +1133,11 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 			continue
 		}
 		sz = ft.mt.sl.MemSize()
-		itrs = itrs[:0]
+		// Reset of itrs, mts etc. is being done below.
+		y.AssertTrue(len(itrs) == 0 && len(mts) == 0 && len(cbs) == 0)
 		itrs = append(itrs, ft.mt.sl.NewUniIterator(false))
 		mts = append(mts, ft.mt)
+		cbs = append(cbs, ft.cb)
 
 		// Pick more memtables, so we can really fill up the L0 table.
 		slurp()
@@ -1140,6 +1145,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 		// db.opt.Infof("Picked %d memtables. Size: %d\n", len(itrs), sz)
 		ft.mt = nil
 		ft.itr = table.NewMergeIterator(itrs, false)
+		ft.cb = nil
 
 		for {
 			err := db.handleFlushTask(ft)
@@ -1158,6 +1164,11 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 				}
 				db.lock.Unlock()
 
+				for _, cb := range cbs {
+					if cb != nil {
+						cb()
+					}
+				}
 				break
 			}
 			// Encountered error. Retry indefinitely.
@@ -1165,7 +1176,7 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 			time.Sleep(time.Second)
 		}
 		// Reset everything.
-		itrs, mts, sz = itrs[:0], mts[:0], 0
+		itrs, mts, cbs, sz = itrs[:0], mts[:0], cbs[:0], 0
 	}
 	return nil
 }
