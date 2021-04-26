@@ -35,8 +35,9 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	n   uint32
-	buf []byte
+	n          uint32
+	shouldGrow bool
+	buf        []byte
 }
 
 // newArena returns a new arena.
@@ -58,7 +59,7 @@ func (s *Arena) allocate(sz uint32) uint32 {
 	// maxHeight. This reduces the node's size, but checkptr doesn't know about its size and it
 	// tries to check based on MaxNodeSize causing this error checkptr: converted pointer straddles
 	// multiple allocations
-	if offset > uint32(len(s.buf))-uint32(MaxNodeSize) {
+	if s.shouldGrow && int(offset) > len(s.buf)-MaxNodeSize {
 		growBy := uint32(len(s.buf))
 		if growBy > 1<<30 {
 			growBy = 1 << 30

@@ -139,6 +139,14 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	}
 }
 
+// NewGrowingSkiplist returns a new skiplist which can grow. Note that this skiplist is not thread
+// safe and must be used for serial operations only.
+func NewGrowingSkiplist(arenaSize int64) *Skiplist {
+	s := NewSkiplist(arenaSize)
+	s.arena.shouldGrow = true
+	return s
+}
+
 func (s *node) getValueOffset() (uint32, uint32) {
 	value := atomic.LoadUint64(&s.value)
 	return decodeValue(value)
@@ -542,7 +550,7 @@ type Builder struct {
 }
 
 func NewBuilder(arenaSize int64) *Builder {
-	s := NewSkiplist(arenaSize)
+	s := NewGrowingSkiplist(arenaSize)
 	b := &Builder{s: s}
 	for i := 0; i < maxHeight+1; i++ {
 		b.prev[i] = s.headOffset
