@@ -26,7 +26,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
@@ -761,23 +760,6 @@ func (txn *Txn) CommitWith(cb func(error)) {
 // ReadTs returns the read timestamp of the transaction.
 func (txn *Txn) ReadTs() uint64 {
 	return txn.readTs
-}
-
-func (txn *Txn) ToSkipList(s *skl.Skiplist, commitTs uint64) {
-	for _, e := range txn.pendingWrites {
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		s.Put(e.Key,
-			y.ValueStruct{
-				Value: e.Value,
-				// Ensure value pointer flag is removed. Otherwise, the value will fail
-				// to be retrieved during iterator prefetch. `bitValuePointer` is only
-				// known to be set in write to LSM when the entry is loaded from a backup
-				// with lower ValueThreshold and its value was stored in the value log.
-				Meta:      e.meta &^ bitValuePointer,
-				UserMeta:  e.UserMeta,
-				ExpiresAt: e.ExpiresAt,
-			})
-	}
 }
 
 // NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
