@@ -63,8 +63,6 @@ func (s *Arena) allocate(sz uint32) uint32 {
 		newBuf := make([]byte, len(s.buf)+int(growBy))
 		y.AssertTrue(len(s.buf) == copy(newBuf, s.buf))
 		s.buf = newBuf
-		// log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
-		// 	sz, offset+sz, len(s.buf))
 	}
 	return offset - sz
 }
@@ -96,8 +94,7 @@ func (s *Arena) putNode(height int) uint32 {
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
 	offset := s.allocate(l)
-	buf := s.buf[offset : offset+l]
-	v.Encode(buf)
+	v.Encode(s.buf[offset:])
 	return offset
 }
 
@@ -115,7 +112,6 @@ func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
 	}
-
 	return (*node)(unsafe.Pointer(&s.buf[offset]))
 }
 

@@ -77,7 +77,6 @@ type node struct {
 
 type Skiplist struct {
 	height     int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head       *node
 	headOffset uint32
 	ref        int32
 	arena      *Arena
@@ -135,7 +134,6 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	ho := arena.getNodeOffset(head)
 	return &Skiplist{
 		height:     1,
-		head:       head,
 		headOffset: ho,
 		arena:      arena,
 		ref:        1,
