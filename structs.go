@@ -206,7 +206,7 @@ func (e *Entry) WithMeta(meta byte) *Entry {
 // have a higher setting for NumVersionsToKeep (in Dgraph, we set it to infinity), you can use this
 // method to indicate that all the older versions can be discarded and removed during compactions.
 func (e *Entry) WithDiscard() *Entry {
-	e.meta = bitDiscardEarlierVersions
+	e.meta = BitDiscardEarlierVersions
 	return e
 }
 

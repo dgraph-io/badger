@@ -763,16 +763,9 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	// We should check the length of b.Prts and b.Entries only when badger is not
-	// running in InMemory mode. In InMemory mode, we don't write anything to the
-	// value log and that's why the length of b.Ptrs will always be zero.
-	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
-		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
-	}
-
 	for i, entry := range b.Entries {
 		var err error
-		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
+		if db.opt.managedTxns || entry.skipVlogAndSetThreshold(db.valueThreshold()) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -818,10 +811,13 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.opt.Debugf("writeRequests called. Writing to value log")
-	err := db.vlog.write(reqs)
-	if err != nil {
-		done(err)
-		return err
+	if !db.opt.managedTxns {
+		// Don't do value log writes in managed mode.
+		err := db.vlog.write(reqs)
+		if err != nil {
+			done(err)
+			return err
+		}
 	}
 
 	db.opt.Debugf("Sending updates to subscribers")
@@ -834,6 +830,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 		count += len(b.Entries)
 		var i uint64
+		var err error
 		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
 			if i%100 == 0 {
@@ -1010,16 +1007,61 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
+func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
+	if !db.opt.managedTxns {
+		panic("Handover Skiplist is only available in managed mode.")
+	}
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	// If we have some data in db.mt, we should push that first, so the ordering of writes is
+	// maintained.
+	if !db.mt.sl.Empty() {
+		sz := db.mt.sl.MemSize()
+		db.opt.Infof("Handover found %d B data in current memtable. Pushing to flushChan.", sz)
+		var err error
+		select {
+		case db.flushChan <- flushTask{mt: db.mt}:
+			db.imm = append(db.imm, db.mt)
+			db.mt, err = db.newMemTable()
+			if err != nil {
+				return y.Wrapf(err, "cannot push current memtable")
+			}
+		default:
+			return errNoRoom
+		}
+	}
+
+	mt := &memTable{sl: skl}
+	select {
+	case db.flushChan <- flushTask{mt: mt, cb: callback}:
+		db.imm = append(db.imm, mt)
+		return nil
+	default:
+		return errNoRoom
+	}
+}
+
 func arenaSize(opt Options) int64 {
 	return opt.MemTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
+func (db *DB) NewSkiplist() *skl.Skiplist {
+	return skl.NewSkiplist(arenaSize(db.opt))
+}
+
 // buildL0Table builds a new table from the memtable.
 func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
-	iter := ft.mt.sl.NewIterator()
+	var iter y.Iterator
+	if ft.itr != nil {
+		iter = ft.itr
+	} else {
+		iter = ft.mt.sl.NewUniIterator(false)
+	}
 	defer iter.Close()
+
 	b := table.NewTableBuilder(bopts)
-	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+	for iter.Rewind(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
 		}
@@ -1035,16 +1077,14 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 
 type flushTask struct {
 	mt           *memTable
+	cb           func()
+	itr          y.Iterator
 	dropPrefixes [][]byte
 }
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scenario, when empty memtable is flushed.
-	if ft.mt.sl.Empty() {
-		return nil
-	}
-
+	// ft.mt could be nil with ft.itr being the valid field.
 	bopts := buildTableOptions(db)
 	builder := buildL0Table(ft, bopts)
 	defer builder.Close()
@@ -1080,11 +1120,52 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 func (db *DB) flushMemtable(lc *z.Closer) error {
 	defer lc.Done()
 
+	var sz int64
+	var itrs []y.Iterator
+	var mts []*memTable
+	var cbs []func()
+	slurp := func() {
+		for {
+			select {
+			case more := <-db.flushChan:
+				if more.mt == nil {
+					return
+				}
+				sl := more.mt.sl
+				itrs = append(itrs, sl.NewUniIterator(false))
+				mts = append(mts, more.mt)
+				cbs = append(cbs, more.cb)
+
+				sz += sl.MemSize()
+				if sz > db.opt.MemTableSize {
+					return
+				}
+			default:
+				return
+			}
+		}
+	}
+
 	for ft := range db.flushChan {
 		if ft.mt == nil {
 			// We close db.flushChan now, instead of sending a nil ft.mt.
 			continue
 		}
+		sz = ft.mt.sl.MemSize()
+		// Reset of itrs, mts etc. is being done below.
+		y.AssertTrue(len(itrs) == 0 && len(mts) == 0 && len(cbs) == 0)
+		itrs = append(itrs, ft.mt.sl.NewUniIterator(false))
+		mts = append(mts, ft.mt)
+		cbs = append(cbs, ft.cb)
+
+		// Pick more memtables, so we can really fill up the L0 table.
+		slurp()
+
+		// db.opt.Infof("Picked %d memtables. Size: %d\n", len(itrs), sz)
+		ft.mt = nil
+		ft.itr = table.NewMergeIterator(itrs, false)
+		ft.cb = nil
+
 		for {
 			err := db.handleFlushTask(ft)
 			if err == nil {
@@ -1095,17 +1176,26 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 				// which would arrive here would match db.imm[0], because we acquire a
 				// lock over DB when pushing to flushChan.
 				// TODO: This logic is dirty AF. Any change and this could easily break.
-				y.AssertTrue(ft.mt == db.imm[0])
-				db.imm = db.imm[1:]
-				ft.mt.DecrRef() // Return memory.
+				for _, mt := range mts {
+					y.AssertTrue(mt == db.imm[0])
+					db.imm = db.imm[1:]
+					mt.DecrRef() // Return memory.
+				}
 				db.lock.Unlock()
 
+				for _, cb := range cbs {
+					if cb != nil {
+						cb()
+					}
+				}
 				break
 			}
 			// Encountered error. Retry indefinitely.
 			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
+		// Reset everything.
+		itrs, mts, cbs, sz = itrs[:0], mts[:0], cbs[:0], 0
 	}
 	return nil
 }

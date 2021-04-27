@@ -358,9 +358,30 @@ func exceedsSize(prefix string, max int64, key []byte) error {
 		prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
 }
 
-func (txn *Txn) modify(e *Entry) error {
-	const maxKeySize = 65000
+const maxKeySize = 65000
+const maxValSize = 1 << 20
 
+func ValidEntry(db *DB, key, val []byte) error {
+	switch {
+	case len(key) == 0:
+		return ErrEmptyKey
+	case bytes.HasPrefix(key, badgerPrefix):
+		return ErrInvalidKey
+	case len(key) > maxKeySize:
+		// Key length can't be more than uint16, as determined by table::header.  To
+		// keep things safe and allow badger move prefix and a timestamp suffix, let's
+		// cut it down to 65000, instead of using 65536.
+		return exceedsSize("Key", maxKeySize, key)
+	case int64(len(val)) > maxValSize:
+		return exceedsSize("Value", maxValSize, val)
+	}
+	if err := db.isBanned(key); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (txn *Txn) modify(e *Entry) error {
 	switch {
 	case !txn.update:
 		return ErrReadOnlyTxn
@@ -384,7 +405,6 @@ func (txn *Txn) modify(e *Entry) error {
 	if err := txn.db.isBanned(e.Key); err != nil {
 		return err
 	}
-
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}

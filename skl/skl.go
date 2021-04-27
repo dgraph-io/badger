@@ -584,3 +584,7 @@ func (b *Builder) Add(k []byte, v y.ValueStruct) {
 		b.prev[i] = nodeOffset
 	}
 }
+
+func (b *Builder) Skiplist() *Skiplist {
+	return b.s
+}

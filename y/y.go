@@ -121,6 +121,11 @@ func Copy(a []byte) []byte {
 	return b
 }
 
+func SetKeyTs(key []byte, ts uint64) {
+	start := len(key) - 8
+	binary.BigEndian.PutUint64(key[start:], math.MaxUint64-ts)
+}
+
 // KeyWithTs generates a new key by appending ts to key.
 func KeyWithTs(key []byte, ts uint64) []byte {
 	out := make([]byte, len(key)+8)

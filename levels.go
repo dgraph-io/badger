@@ -716,7 +716,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				}
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
-				firstKeyHasDiscardSet = it.Value().Meta&bitDiscardEarlierVersions > 0
+				firstKeyHasDiscardSet = it.Value().Meta&BitDiscardEarlierVersions > 0
 
 				if len(tableKr.left) == 0 {
 					tableKr.left = y.SafeCopy(tableKr.left, it.Key())
@@ -753,7 +753,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				// - The `discardEarlierVersions` bit is set OR
 				// - We've already processed `NumVersionsToKeep` number of versions
 				// (including the current item being processed)
-				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0 ||
+				lastValidVersion := vs.Meta&BitDiscardEarlierVersions > 0 ||
 					numVersions == s.kv.opt.NumVersionsToKeep
 
 				if isExpired || lastValidVersion {

@@ -771,6 +771,54 @@ func TestWriteBatchDuplicate(t *testing.T) {
 	})
 }
 
+func TestWriteViaSkip(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		s := db.NewSkiplist()
+		for i := 0; i < 100; i++ {
+			s.Put(y.KeyWithTs(key(i), math.MaxUint64), y.ValueStruct{Value: val(i)})
+		}
+		{
+			// Update key timestamps by directly changing them in the skiplist.
+			itr := s.NewUniIterator(false)
+			defer itr.Close()
+			itr.Rewind()
+			for itr.Valid() {
+				y.SetKeyTs(itr.Key(), 101)
+				itr.Next()
+			}
+		}
+
+		// Hand over skiplist to Badger.
+		require.NoError(t, db.HandoverSkiplist(s, nil))
+
+		// Read the data back.
+		txn := db.NewTransactionAt(101, false)
+		defer txn.Discard()
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		defer itr.Close()
+
+		i := 0
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			require.Equal(t, string(key(i)), string(item.Key()))
+			require.Equal(t, item.Version(), uint64(101))
+			valcopy, err := item.ValueCopy(nil)
+			require.NoError(t, err)
+			require.Equal(t, val(i), valcopy)
+			i++
+		}
+		require.Equal(t, 100, i)
+	})
+}
+
 func TestZeroDiscardStats(t *testing.T) {
 	N := uint64(10000)
 	populate := func(t *testing.T, db *DB) {

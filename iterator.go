@@ -146,7 +146,7 @@ func (item *Item) IsDeletedOrExpired() bool {
 // DiscardEarlierVersions returns whether the item was created with the
 // option to discard earlier versions of a key when multiple are available.
 func (item *Item) DiscardEarlierVersions() bool {
-	return item.meta&bitDiscardEarlierVersions > 0
+	return item.meta&BitDiscardEarlierVersions > 0
 }
 
 func (item *Item) yieldItemValue() ([]byte, func(), error) {
