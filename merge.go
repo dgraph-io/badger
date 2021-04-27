@@ -116,7 +116,7 @@ func (op *MergeOperator) compact() error {
 		{
 			Key:   y.KeyWithTs(op.key, version),
 			Value: val,
-			meta:  bitDiscardEarlierVersions,
+			meta:  BitDiscardEarlierVersions,
 		},
 	}
 	// Write value back to the DB. It is important that we do not set the bitMergeEntry bit

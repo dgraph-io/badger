@@ -47,7 +47,7 @@ var maxVlogFileSize uint32 = math.MaxUint32
 const (
 	bitDelete                 byte = 1 << 0 // Set if the key has been deleted.
 	bitValuePointer           byte = 1 << 1 // Set if the value is NOT stored directly next to key.
-	bitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
+	BitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
 	// Set if item shouldn't be discarded via compactions (used by merge operator)
 	bitMergeEntry byte = 1 << 3
 	// The MSB 2 bits are for transactions.

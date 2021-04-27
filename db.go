@@ -1011,6 +1011,24 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
+	// If we have some data in db.mt, we should push that first, so the ordering of writes is
+	// maintained.
+	if !db.mt.sl.Empty() {
+		sz := db.mt.sl.MemSize()
+		db.opt.Infof("Handover found %d B data in current memtable. Pushing to flushChan.", sz)
+		var err error
+		select {
+		case db.flushChan <- flushTask{mt: db.mt}:
+			db.imm = append(db.imm, db.mt)
+			db.mt, err = db.newMemTable()
+			if err != nil {
+				return y.Wrapf(err, "cannot push current memtable")
+			}
+		default:
+			return errNoRoom
+		}
+	}
+
 	mt := &memTable{sl: skl}
 	select {
 	case db.flushChan <- flushTask{mt: mt, cb: callback}:
