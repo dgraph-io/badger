@@ -696,11 +696,11 @@ func TestDiscardFirstVersion(t *testing.T) {
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
-		l01 := []keyValVersion{{"foo", "bar", 2, bitDiscardEarlierVersions}}
+		l01 := []keyValVersion{{"foo", "bar", 2, BitDiscardEarlierVersions}}
 		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
 		l03 := []keyValVersion{{"foo", "bar", 4, 0}}
 		l04 := []keyValVersion{{"foo", "bar", 9, 0}}
-		l05 := []keyValVersion{{"foo", "bar", 10, bitDiscardEarlierVersions}}
+		l05 := []keyValVersion{{"foo", "bar", 10, BitDiscardEarlierVersions}}
 
 		// Level 0 has all the tables.
 		createAndOpen(db, l0, 0)
@@ -731,11 +731,11 @@ func TestDiscardFirstVersion(t *testing.T) {
 		// - Version 1 is below DiscardTS and below the first "bitDiscardEarlierVersions"
 		//   marker so IT WILL BE REMOVED.
 		ExpectedKeys := []keyValVersion{
-			{"foo", "bar", 10, bitDiscardEarlierVersions},
+			{"foo", "bar", 10, BitDiscardEarlierVersions},
 			{"foo", "bar", 9, 0},
 			{"foo", "bar", 4, 0},
 			{"foo", "bar", 3, 0},
-			{"foo", "bar", 2, bitDiscardEarlierVersions}}
+			{"foo", "bar", 2, BitDiscardEarlierVersions}}
 
 		getAllAndCheck(t, db, ExpectedKeys)
 	})
@@ -1049,15 +1049,15 @@ func TestSameLevel(t *testing.T) {
 	opt.LmaxCompaction = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		l6 := []keyValVersion{
-			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 4, BitDiscardEarlierVersions}, {"A", "bar", 3, 0},
 			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
 		}
 		l61 := []keyValVersion{
-			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 4, BitDiscardEarlierVersions}, {"B", "bar", 3, 0},
 			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
 		}
 		l62 := []keyValVersion{
-			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 4, BitDiscardEarlierVersions}, {"C", "bar", 3, 0},
 			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
 		}
 		createAndOpen(db, l6, 6)
@@ -1066,11 +1066,11 @@ func TestSameLevel(t *testing.T) {
 		require.NoError(t, db.lc.validate())
 
 		getAllAndCheck(t, db, []keyValVersion{
-			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 4, BitDiscardEarlierVersions}, {"A", "bar", 3, 0},
 			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
-			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 4, BitDiscardEarlierVersions}, {"B", "bar", 3, 0},
 			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
-			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 4, BitDiscardEarlierVersions}, {"C", "bar", 3, 0},
 			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
 		})
 
@@ -1086,11 +1086,11 @@ func TestSameLevel(t *testing.T) {
 		db.SetDiscardTs(3)
 		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
 		getAllAndCheck(t, db, []keyValVersion{
-			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 4, BitDiscardEarlierVersions}, {"A", "bar", 3, 0},
 			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
-			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 4, BitDiscardEarlierVersions}, {"B", "bar", 3, 0},
 			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
-			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 4, BitDiscardEarlierVersions}, {"C", "bar", 3, 0},
 			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
 		})
 
@@ -1107,9 +1107,9 @@ func TestSameLevel(t *testing.T) {
 		cdef.t.baseLevel = 1
 		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
 		getAllAndCheck(t, db, []keyValVersion{
-			{"A", "bar", 4, bitDiscardEarlierVersions}, {"Afoo", "baz", 2, 0},
-			{"B", "bar", 4, bitDiscardEarlierVersions}, {"Bfoo", "baz", 2, 0},
-			{"C", "bar", 4, bitDiscardEarlierVersions}, {"Cfoo", "baz", 2, 0}})
+			{"A", "bar", 4, BitDiscardEarlierVersions}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, BitDiscardEarlierVersions}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, BitDiscardEarlierVersions}, {"Cfoo", "baz", 2, 0}})
 		require.NoError(t, db.lc.validate())
 	})
 }
@@ -1255,7 +1255,7 @@ func TestStaleDataCleanup(t *testing.T) {
 			for i := count; i > 0; i-- {
 				var meta byte
 				if i == 0 {
-					meta = bitDiscardEarlierVersions
+					meta = BitDiscardEarlierVersions
 				}
 				b.AddStaleKey(y.KeyWithTs(key, i), y.ValueStruct{Meta: meta, Value: val}, 0)
 			}
