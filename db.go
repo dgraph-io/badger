@@ -1008,6 +1008,9 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
+	if !db.opt.managedTxns {
+		panic("Handover Skiplist is only available in managed mode.")
+	}
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
