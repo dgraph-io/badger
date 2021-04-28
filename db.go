@@ -1045,9 +1045,7 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 			Key:       it.Key(),
 			Value:     v.Value,
 			ExpiresAt: v.ExpiresAt,
-			version:   v.Version,
 			UserMeta:  v.UserMeta,
-			meta:      v.Meta,
 		}
 		entries = append(entries, e)
 		it.Next()
