@@ -1050,13 +1050,13 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 			meta:      v.Meta,
 		}
 		entries = append(entries, e)
-		req := &request{
-			Entries: entries,
-		}
-		reqs := []*request{req}
-		db.pub.sendUpdates(reqs)
 		it.Next()
 	}
+	req := &request{
+		Entries: entries,
+	}
+	reqs := []*request{req}
+	db.pub.sendUpdates(reqs)
 
 	select {
 	case db.flushChan <- flushTask{mt: mt, cb: callback}:
