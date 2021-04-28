@@ -1033,6 +1033,31 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 	}
 
 	mt := &memTable{sl: skl}
+
+	// Iterate over the skiplist and send the entries to the publisher.
+	it := skl.NewIterator()
+	it.SeekToFirst()
+
+	var entries []*Entry
+	for it.Valid() {
+		v := it.Value()
+		e := &Entry{
+			Key:       it.Key(),
+			Value:     v.Value,
+			ExpiresAt: v.ExpiresAt,
+			version:   v.Version,
+			UserMeta:  v.UserMeta,
+			meta:      v.Meta,
+		}
+		entries = append(entries, e)
+		req := &request{
+			Entries: entries,
+		}
+		reqs := []*request{req}
+		db.pub.sendUpdates(reqs)
+		it.Next()
+	}
+
 	select {
 	case db.flushChan <- flushTask{mt: mt, cb: callback}:
 		db.imm = append(db.imm, mt)
