@@ -2134,7 +2134,7 @@ func TestMain(m *testing.M) {
 
 func removeDir(dir string) {
 	if err := os.RemoveAll(dir); err != nil {
-		panic(err)
+		fmt.Printf("Error while removing dir: %v\n", err)
 	}
 }
 
