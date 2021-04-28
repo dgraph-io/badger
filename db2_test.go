@@ -995,7 +995,7 @@ func TestKeyCount(t *testing.T) {
 		}()
 
 		write := func(kvs *pb.KVList) error {
-			buf := z.NewBuffer(1 << 20, "test")
+			buf := z.NewBuffer(1<<20, "test")
 			defer buf.Release()
 
 			for _, kv := range kvs.Kv {
