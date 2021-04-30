@@ -763,6 +763,8 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	db.lock.RLock()
+	defer db.lock.RUnlock()
 	for i, entry := range b.Entries {
 		var err error
 		if db.opt.managedTxns || entry.skipVlogAndSetThreshold(db.valueThreshold()) {
@@ -1838,11 +1840,11 @@ func (db *DB) dropAll() (func(), error) {
 // not be cleared from LSM tree immediately. It would be deleted eventually through compactions.
 // This operation is useful when we don't want to block writes while we delete the prefixes.
 // It does this in the following way:
-// - Stream the given prefixes at a given timestamp.
-// - Write them to skiplist and handover that skiplist to DB.
-func (db *DB) DropPrefixNonBlocking(readTs uint64, prefixes ...[]byte) error {
+// - Stream the given prefixes at a given ts.
+// - Write them to skiplist at the specified ts and handover that skiplist to DB.
+func (db *DB) DropPrefixNonBlocking(ts uint64, prefixes ...[]byte) error {
 	if db.opt.ReadOnly {
-		panic("Attempting to drop data in read-only mode.")
+		return errors.New("Attempting to drop data in read-only mode.")
 	}
 
 	if len(prefixes) == 0 {
@@ -1851,7 +1853,7 @@ func (db *DB) DropPrefixNonBlocking(readTs uint64, prefixes ...[]byte) error {
 	db.opt.Infof("Non-blocking DropPrefix called for %s", prefixes)
 
 	dropPrefix := func(prefix []byte) error {
-		stream := db.NewStreamAt(readTs)
+		stream := db.NewStreamAt(ts)
 		stream.LogPrefix = fmt.Sprintf("Dropping prefix: %#x", prefix)
 		stream.Prefix = prefix
 		// Use the default implementation with some changes. We don't need anything except key.
@@ -1884,24 +1886,52 @@ func (db *DB) DropPrefixNonBlocking(readTs uint64, prefixes ...[]byte) error {
 			}
 			return list, nil
 		}
+
+		var wg sync.WaitGroup
+		builderMap := make(map[uint32]*skl.Builder)
+		initSize := int64(float64(db.opt.MemTableSize) * 1.1)
+
+		handover := func(force bool) error {
+			for id, b := range builderMap {
+				sl := b.Skiplist()
+				if force || sl.MemSize() > db.opt.MemTableSize {
+					wg.Add(1)
+					if err := db.HandoverSkiplist(sl, wg.Done); err != nil {
+						return err
+					}
+					// Create a fresh builder.
+					builderMap[id] = skl.NewBuilder(initSize)
+				}
+			}
+			return nil
+		}
+
 		stream.Send = func(buf *z.Buffer) error {
-			// Stream framework already batches the key values.
-			b := skl.NewBuilder(1 << 20) // TODO: Maybe figure out the optimal value.
 			err := buf.SliceIterate(func(s []byte) error {
 				var kv pb.KV
 				if err := kv.Unmarshal(s); err != nil {
 					return err
 				}
-				b.Add(y.KeyWithTs(kv.Key, readTs), y.ValueStruct{Meta: bitDelete})
+				if _, ok := builderMap[kv.StreamId]; !ok {
+					builderMap[kv.StreamId] = skl.NewBuilder(initSize)
+				}
+				builderMap[kv.StreamId].Add(y.KeyWithTs(kv.Key, ts), y.ValueStruct{Meta: bitDelete})
 				return nil
 			})
 			if err != nil {
 				return err
 			}
-			return db.HandoverSkiplist(b.Skiplist(), nil)
+			return handover(false)
 		}
-
-		return stream.Orchestrate(context.Background())
+		if err := stream.Orchestrate(context.Background()); err != nil {
+			return err
+		}
+		// Flush the remaining skiplists if any.
+		if err := handover(true); err != nil {
+			return err
+		}
+		wg.Wait()
+		return nil
 	}
 
 	// Iterate over all the prefixes and logically drop them.
