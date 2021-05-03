@@ -104,6 +104,9 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
+	// BlockWritesOnDrop determines whether the DropPrefix will be blocking/non-blocking.
+	BlockWritesOnDrop bool
+
 	// DetectConflicts determines whether the transactions would be checked for
 	// conflicts. The transactions can be processed at a higher rate when
 	// conflict detection is disabled.
@@ -140,6 +143,7 @@ func DefaultOptions(path string) Options {
 		MaxLevels:           7,
 		NumGoroutines:       8,
 		MetricsEnabled:      true,
+		BlockWritesOnDrop:   true,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -671,6 +675,20 @@ func (opt Options) WithVerifyValueChecksum(val bool) Options {
 // The default value of VerifyValueChecksum is options.NoVerification.
 func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
 	opt.ChecksumVerificationMode = cvMode
+	return opt
+}
+
+// WithDropMode returns a new Options value with DropMode set to the given value.
+//
+// BlockWritesOnDrop indicates whether the call to DropPrefix should block the writes or not.
+// When set to false, the DropPrefix will do a logical delete and will not block
+// the writes. Although, this will not immediately clear up the LSM tree.
+// When set to false, the DropPrefix will block the writes and will clear up the LSM
+// tree.
+//
+// The default value of BlockWritesOnDrop is true.
+func (opt Options) WithBlockWritesOnDrop(b bool) Options {
+	opt.BlockWritesOnDrop = b
 	return opt
 }
 

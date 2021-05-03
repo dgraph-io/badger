@@ -1842,7 +1842,7 @@ func (db *DB) dropAll() (func(), error) {
 // It does this in the following way:
 // - Stream the given prefixes at a given ts.
 // - Write them to skiplist at the specified ts and handover that skiplist to DB.
-func (db *DB) DropPrefixNonBlocking(ts uint64, prefixes ...[]byte) error {
+func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
 	if db.opt.ReadOnly {
 		return errors.New("Attempting to drop data in read-only mode.")
 	}
@@ -1852,86 +1852,84 @@ func (db *DB) DropPrefixNonBlocking(ts uint64, prefixes ...[]byte) error {
 	}
 	db.opt.Infof("Non-blocking DropPrefix called for %s", prefixes)
 
-	dropPrefix := func(prefix []byte) error {
-		stream := db.NewStreamAt(ts)
-		stream.LogPrefix = fmt.Sprintf("Dropping prefix: %#x", prefix)
-		stream.Prefix = prefix
-		// Use the default implementation with some changes. We don't need anything except key.
-		stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
-			a := itr.Alloc
-			ka := a.Copy(key)
+	cbuf := z.NewBuffer(int(db.opt.MemTableSize), "DropPrefixNonBlocking")
+	defer cbuf.Release()
 
-			list := &pb.KVList{}
-			for ; itr.Valid(); itr.Next() {
-				item := itr.Item()
-				if item.IsDeletedOrExpired() {
-					break
-				}
-				if !bytes.Equal(key, item.Key()) {
-					// Break out on the first encounter with another key.
-					break
-				}
-
-				kv := y.NewKV(a)
-				kv.Key = ka
-				list.Kv = append(list.Kv, kv)
-
-				if db.opt.NumVersionsToKeep == 1 {
-					break
-				}
-
-				if item.DiscardEarlierVersions() {
-					break
-				}
-			}
-			return list, nil
-		}
-
-		var wg sync.WaitGroup
-		builderMap := make(map[uint32]*skl.Builder)
-		initSize := int64(float64(db.opt.MemTableSize) * 1.1)
-
-		handover := func(force bool) error {
-			for id, b := range builderMap {
-				sl := b.Skiplist()
-				if force || sl.MemSize() > db.opt.MemTableSize {
-					wg.Add(1)
-					if err := db.HandoverSkiplist(sl, wg.Done); err != nil {
-						return err
-					}
-					// Create a fresh builder.
-					builderMap[id] = skl.NewBuilder(initSize)
-				}
-			}
+	var wg sync.WaitGroup
+	handover := func(force bool) error {
+		if !force && int64(cbuf.LenNoPadding()) < db.opt.MemTableSize {
 			return nil
 		}
 
-		stream.Send = func(buf *z.Buffer) error {
-			err := buf.SliceIterate(func(s []byte) error {
-				var kv pb.KV
-				if err := kv.Unmarshal(s); err != nil {
-					return err
-				}
-				if _, ok := builderMap[kv.StreamId]; !ok {
-					builderMap[kv.StreamId] = skl.NewBuilder(initSize)
-				}
-				builderMap[kv.StreamId].Add(y.KeyWithTs(kv.Key, ts), y.ValueStruct{Meta: bitDelete})
-				return nil
-			})
-			if err != nil {
+		var kvs []*pb.KV
+		err := cbuf.SliceIterate(func(slice []byte) error {
+			var kv pb.KV
+			if err := kv.Unmarshal(slice); err != nil {
 				return err
 			}
+			kvs = append(kvs, &kv)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		cbuf.Reset()
+
+		// TODO: Maybe move the rest of it to a separate go routine, if it is slow.
+		// Sort the kvs, add them to the builder, and hand it over to DB.
+		b := skl.NewBuilder(db.opt.MemTableSize)
+		sort.Slice(kvs, func(i, j int) bool {
+			return bytes.Compare(kvs[i].Key, kvs[j].Key) < 0
+		})
+		for _, kv := range kvs {
+			b.Add(y.KeyWithTs(kv.Key, kv.Version+1), y.ValueStruct{Meta: bitDelete})
+		}
+		wg.Add(1)
+		return db.HandoverSkiplist(b.Skiplist(), wg.Done)
+	}
+
+	dropPrefix := func(prefix []byte) error {
+		stream := db.NewStreamAt(math.MaxUint64)
+		stream.LogPrefix = fmt.Sprintf("Dropping prefix: %#x", prefix)
+		stream.Prefix = prefix
+		// We don't need anything except key and version.
+		stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+			if !itr.Valid() {
+				return nil, nil
+			}
+			item := itr.Item()
+			if item.IsDeletedOrExpired() {
+				return nil, nil
+			}
+			if !bytes.Equal(key, item.Key()) {
+				// Return on the encounter with another key.
+				return nil, nil
+			}
+
+			a := itr.Alloc
+			ka := a.Copy(key)
+			list := &pb.KVList{}
+			// We need to generate only a single delete marker per key. All the versions for this
+			// key will be considered deleted, if we delete the one at highest version.
+			kv := y.NewKV(a)
+			kv.Key = ka
+			kv.Version = item.Version()
+			list.Kv = append(list.Kv, kv)
+			itr.Next()
+			return list, nil
+		}
+
+		stream.Send = func(buf *z.Buffer) error {
+			sz := buf.LenNoPadding()
+			dst := cbuf.Allocate(sz)
+			y.AssertTrue(sz == copy(dst, buf.Bytes()))
 			return handover(false)
 		}
 		if err := stream.Orchestrate(context.Background()); err != nil {
 			return err
 		}
 		// Flush the remaining skiplists if any.
-		if err := handover(true); err != nil {
-			return err
-		}
-		wg.Wait()
-		return nil
+		return handover(true)
 	}
 
 	// Iterate over all the prefixes and logically drop them.
@@ -1940,7 +1938,19 @@ func (db *DB) DropPrefixNonBlocking(ts uint64, prefixes ...[]byte) error {
 			return errors.Wrapf(err, "While dropping prefix: %#x", prefix)
 		}
 	}
+
+	wg.Wait()
 	return nil
+}
+
+// DropPrefix would drop all the keys with the provided prefix. Based on DB options, it either drops
+// the prefixes by blocking the writes or doing a logical drop.
+// See DropPrefixBlocking and DropPrefixNonBlocking for more information.
+func (db *DB) DropPrefix(prefixes ...[]byte) error {
+	if db.opt.BlockWritesOnDrop {
+		return db.DropPrefixBlocking(prefixes...)
+	}
+	return db.DropPrefixNonBlocking(prefixes...)
 }
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
@@ -1954,7 +1964,7 @@ func (db *DB) DropPrefixNonBlocking(ts uint64, prefixes ...[]byte) error {
 // - Compact L0->L1, skipping over Kp.
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
-func (db *DB) DropPrefix(prefixes ...[]byte) error {
+func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	if len(prefixes) == 0 {
 		return nil
 	}

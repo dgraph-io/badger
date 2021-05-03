@@ -1062,7 +1062,7 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := OpenManaged(DefaultOptions(dir))
+	db, err := OpenManaged(DefaultOptions(dir).WithBlockWritesOnDrop(false))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -1081,6 +1081,7 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 
 	read := func() {
 		txn := db.NewTransactionAt(6, false)
+		defer txn.Discard()
 		iterOpts := DefaultIteratorOptions
 		iterOpts.Prefix = []byte("aa")
 		it := txn.NewIterator(iterOpts)
@@ -1088,6 +1089,7 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 
 		cnt := 0
 		for it.Rewind(); it.Valid(); it.Next() {
+			fmt.Printf("%+v", it.Item())
 			cnt++
 		}
 
@@ -1096,7 +1098,7 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 
 	write()
 	prefixes := [][]byte{[]byte("aa")}
-	require.NoError(t, db.DropPrefixNonBlocking(5, prefixes...))
+	require.NoError(t, db.DropPrefix(prefixes...))
 	read()
 
 	// Writing again at same timestamp and verifying that vlog rewrites don't allow us to read
@@ -1135,6 +1137,7 @@ func TestDropPrefixNonBlockingNoError(t *testing.T) {
 				} else if !shouldFail {
 					require.NoError(t, err)
 				}
+				txn.Discard()
 			}
 		}
 	}
@@ -1142,13 +1145,13 @@ func TestDropPrefixNonBlockingNoError(t *testing.T) {
 	closer := z.NewCloser(1)
 	go writer(db, true, closer)
 	time.Sleep(time.Millisecond * 100)
-	require.NoError(t, db.DropPrefix([]byte("aa")))
+	require.NoError(t, db.DropPrefixBlocking([]byte("aa")))
 	closer.SignalAndWait()
 
 	closer2 := z.NewCloser(1)
 	go writer(db, false, closer2)
 	time.Sleep(time.Millisecond * 50)
 	prefixes := [][]byte{[]byte("aa")}
-	require.NoError(t, db.DropPrefixNonBlocking(atomic.AddUint64(&clock, 1), prefixes...))
+	require.NoError(t, db.DropPrefixNonBlocking(prefixes...))
 	closer2.SignalAndWait()
 }
