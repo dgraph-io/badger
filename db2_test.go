@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1054,4 +1055,98 @@ func TestKeyCount(t *testing.T) {
 	}
 	require.NoError(t, stream.Orchestrate(context.Background()))
 	require.Equal(t, N, uint64(count))
+}
+
+func TestDropPrefixNonBlocking(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir).WithAllowStopTheWorld(false))
+	require.NoError(t, err)
+	defer db.Close()
+
+	val := []byte("value")
+
+	// Insert key-values
+	write := func() {
+		txn := db.NewTransactionAt(1, true)
+		defer txn.Discard()
+		require.NoError(t, txn.Set([]byte("aaa"), val))
+		require.NoError(t, txn.Set([]byte("aab"), val))
+		require.NoError(t, txn.Set([]byte("aba"), val))
+		require.NoError(t, txn.Set([]byte("aca"), val))
+		require.NoError(t, txn.CommitAt(2, nil))
+	}
+
+	read := func() {
+		txn := db.NewTransactionAt(6, false)
+		defer txn.Discard()
+		iterOpts := DefaultIteratorOptions
+		iterOpts.Prefix = []byte("aa")
+		it := txn.NewIterator(iterOpts)
+		defer it.Close()
+
+		cnt := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			fmt.Printf("%+v", it.Item())
+			cnt++
+		}
+
+		require.Equal(t, 0, cnt)
+	}
+
+	write()
+	prefixes := [][]byte{[]byte("aa")}
+	require.NoError(t, db.DropPrefix(prefixes...))
+	read()
+}
+
+func TestDropPrefixNonBlockingNoError(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := OpenManaged(opt)
+	require.NoError(t, err)
+	defer db.Close()
+
+	clock := uint64(1)
+
+	writer := func(db *DB, shouldFail bool, closer *z.Closer) {
+		val := []byte("value")
+		defer closer.Done()
+		// Insert key-values
+		for {
+			select {
+			case <-closer.HasBeenClosed():
+				return
+			default:
+				txn := db.NewTransactionAt(atomic.AddUint64(&clock, 1), true)
+				require.NoError(t, txn.SetEntry(NewEntry([]byte("aaa"), val)))
+
+				err := txn.CommitAt(atomic.AddUint64(&clock, 1), nil)
+				if shouldFail && err != nil {
+					require.Error(t, err, ErrBlockedWrites)
+				} else if !shouldFail {
+					require.NoError(t, err)
+				}
+				txn.Discard()
+			}
+		}
+	}
+
+	closer := z.NewCloser(1)
+	go writer(db, true, closer)
+	time.Sleep(time.Millisecond * 100)
+	require.NoError(t, db.DropPrefixBlocking([]byte("aa")))
+	closer.SignalAndWait()
+
+	closer2 := z.NewCloser(1)
+	go writer(db, false, closer2)
+	time.Sleep(time.Millisecond * 50)
+	prefixes := [][]byte{[]byte("aa")}
+	require.NoError(t, db.DropPrefixNonBlocking(prefixes...))
+	closer2.SignalAndWait()
 }

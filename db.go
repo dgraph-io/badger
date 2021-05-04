@@ -763,6 +763,8 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	db.lock.RLock()
+	defer db.lock.RUnlock()
 	for i, entry := range b.Entries {
 		var err error
 		if db.opt.managedTxns || entry.skipVlogAndSetThreshold(db.valueThreshold()) {
@@ -1036,10 +1038,9 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 
 	// Iterate over the skiplist and send the entries to the publisher.
 	it := skl.NewIterator()
-	it.SeekToFirst()
 
 	var entries []*Entry
-	for it.Valid() {
+	for it.SeekToFirst(); it.Valid(); it.Next() {
 		v := it.Value()
 		e := &Entry{
 			Key:       it.Key(),
@@ -1048,7 +1049,6 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 			UserMeta:  v.UserMeta,
 		}
 		entries = append(entries, e)
-		it.Next()
 	}
 	req := &request{
 		Entries: entries,
@@ -1836,6 +1836,122 @@ func (db *DB) dropAll() (func(), error) {
 	return resume, nil
 }
 
+// DropPrefixNonBlocking would logically drop all the keys with the provided prefix. The data would
+// not be cleared from LSM tree immediately. It would be deleted eventually through compactions.
+// This operation is useful when we don't want to block writes while we delete the prefixes.
+// It does this in the following way:
+// - Stream the given prefixes at a given ts.
+// - Write them to skiplist at the specified ts and handover that skiplist to DB.
+func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
+	if db.opt.ReadOnly {
+		return errors.New("Attempting to drop data in read-only mode.")
+	}
+
+	if len(prefixes) == 0 {
+		return nil
+	}
+	db.opt.Infof("Non-blocking DropPrefix called for %s", prefixes)
+
+	cbuf := z.NewBuffer(int(db.opt.MemTableSize), "DropPrefixNonBlocking")
+	defer cbuf.Release()
+
+	var wg sync.WaitGroup
+	handover := func(force bool) error {
+		if !force && int64(cbuf.LenNoPadding()) < db.opt.MemTableSize {
+			return nil
+		}
+
+		// Sort the kvs, add them to the builder, and hand it over to DB.
+		cbuf.SortSlice(func(left, right []byte) bool {
+			return y.CompareKeys(left, right) < 0
+		})
+
+		b := skl.NewBuilder(db.opt.MemTableSize)
+		err := cbuf.SliceIterate(func(s []byte) error {
+			b.Add(s, y.ValueStruct{Meta: bitDelete})
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		cbuf.Reset()
+		wg.Add(1)
+		return db.HandoverSkiplist(b.Skiplist(), wg.Done)
+	}
+
+	dropPrefix := func(prefix []byte) error {
+		stream := db.NewStreamAt(math.MaxUint64)
+		stream.LogPrefix = fmt.Sprintf("Dropping prefix: %#x", prefix)
+		stream.Prefix = prefix
+		// We don't need anything except key and version.
+		stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+			if !itr.Valid() {
+				return nil, nil
+			}
+			item := itr.Item()
+			if item.IsDeletedOrExpired() {
+				return nil, nil
+			}
+			if !bytes.Equal(key, item.Key()) {
+				// Return on the encounter with another key.
+				return nil, nil
+			}
+
+			a := itr.Alloc
+			ka := a.Copy(key)
+			list := &pb.KVList{}
+			// We need to generate only a single delete marker per key. All the versions for this
+			// key will be considered deleted, if we delete the one at highest version.
+			kv := y.NewKV(a)
+			kv.Key = y.KeyWithTs(ka, item.Version())
+			list.Kv = append(list.Kv, kv)
+			itr.Next()
+			return list, nil
+		}
+
+		stream.Send = func(buf *z.Buffer) error {
+			kv := pb.KV{}
+			err := buf.SliceIterate(func(s []byte) error {
+				kv.Reset()
+				if err := kv.Unmarshal(s); err != nil {
+					return err
+				}
+				cbuf.WriteSlice(kv.Key)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			return handover(false)
+		}
+		if err := stream.Orchestrate(context.Background()); err != nil {
+			return err
+		}
+		// Flush the remaining skiplists if any.
+		return handover(true)
+	}
+
+	// Iterate over all the prefixes and logically drop them.
+	for _, prefix := range prefixes {
+		if err := dropPrefix(prefix); err != nil {
+			return errors.Wrapf(err, "While dropping prefix: %#x", prefix)
+		}
+	}
+
+	wg.Wait()
+	return nil
+}
+
+// DropPrefix would drop all the keys with the provided prefix. Based on DB options, it either drops
+// the prefixes by blocking the writes or doing a logical drop.
+// See DropPrefixBlocking and DropPrefixNonBlocking for more information.
+func (db *DB) DropPrefix(prefixes ...[]byte) error {
+	if db.opt.AllowStopTheWorld {
+		return db.DropPrefixBlocking(prefixes...)
+	}
+	return db.DropPrefixNonBlocking(prefixes...)
+}
+
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
 // - Stop accepting new writes.
 // - Stop memtable flushes before acquiring lock. Because we're acquring lock here
@@ -1847,7 +1963,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact L0->L1, skipping over Kp.
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
-func (db *DB) DropPrefix(prefixes ...[]byte) error {
+func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	if len(prefixes) == 0 {
 		return nil
 	}

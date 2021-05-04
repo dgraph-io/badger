@@ -153,6 +153,16 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
+func maxEncodedLen(ctype options.CompressionType, sz int) int {
+	switch ctype {
+	case options.Snappy:
+		return snappy.MaxEncodedLen(sz)
+	case options.ZSTD:
+		return y.ZSTDCompressBound(sz)
+	}
+	return sz
+}
+
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 
@@ -175,7 +185,7 @@ func (b *Builder) handleBlock() {
 		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
 		// than allocated space that means the data from this block cannot be stored in its
 		// existing location.
-		allocatedSpace := (item.end) + padding + 1
+		allocatedSpace := maxEncodedLen(b.opts.Compression, (item.end)) + padding + 1
 		y.AssertTrue(len(blockBuf) <= allocatedSpace)
 
 		// blockBuf was allocated on allocator. So, we don't need to copy it over.
