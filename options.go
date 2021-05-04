@@ -104,8 +104,8 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
-	// BlockWritesOnDrop determines whether the DropPrefix will be blocking/non-blocking.
-	BlockWritesOnDrop bool
+	// AllowStopTheWorld determines whether the DropPrefix will be blocking/non-blocking.
+	AllowStopTheWorld bool
 
 	// DetectConflicts determines whether the transactions would be checked for
 	// conflicts. The transactions can be processed at a higher rate when
@@ -143,7 +143,7 @@ func DefaultOptions(path string) Options {
 		MaxLevels:           7,
 		NumGoroutines:       8,
 		MetricsEnabled:      true,
-		BlockWritesOnDrop:   true,
+		AllowStopTheWorld:   true,
 
 		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
@@ -678,17 +678,17 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 	return opt
 }
 
-// WithDropMode returns a new Options value with DropMode set to the given value.
+// WithAllowStopTheWorld returns a new Options value with AllowStopTheWorld set to the given value.
 //
-// BlockWritesOnDrop indicates whether the call to DropPrefix should block the writes or not.
+// AllowStopTheWorld indicates whether the call to DropPrefix should block the writes or not.
 // When set to false, the DropPrefix will do a logical delete and will not block
 // the writes. Although, this will not immediately clear up the LSM tree.
 // When set to false, the DropPrefix will block the writes and will clear up the LSM
 // tree.
 //
-// The default value of BlockWritesOnDrop is true.
-func (opt Options) WithBlockWritesOnDrop(b bool) Options {
-	opt.BlockWritesOnDrop = b
+// The default value of AllowStopTheWorld is true.
+func (opt Options) WithAllowStopTheWorld(b bool) Options {
+	opt.AllowStopTheWorld = b
 	return opt
 }
 

@@ -1861,29 +1861,20 @@ func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
 			return nil
 		}
 
-		var kvs []*pb.KV
-		err := cbuf.SliceIterate(func(slice []byte) error {
-			var kv pb.KV
-			if err := kv.Unmarshal(slice); err != nil {
-				return err
-			}
-			kvs = append(kvs, &kv)
+		// Sort the kvs, add them to the builder, and hand it over to DB.
+		cbuf.SortSlice(func(left, right []byte) bool {
+			return y.CompareKeys(left, right) < 0
+		})
+
+		b := skl.NewBuilder(db.opt.MemTableSize)
+		err := cbuf.SliceIterate(func(s []byte) error {
+			b.Add(s, y.ValueStruct{Meta: bitDelete})
 			return nil
 		})
 		if err != nil {
 			return err
 		}
 		cbuf.Reset()
-
-		// TODO: Maybe move the rest of it to a separate go routine, if it is slow.
-		// Sort the kvs, add them to the builder, and hand it over to DB.
-		b := skl.NewBuilder(db.opt.MemTableSize)
-		sort.Slice(kvs, func(i, j int) bool {
-			return bytes.Compare(kvs[i].Key, kvs[j].Key) < 0
-		})
-		for _, kv := range kvs {
-			b.Add(y.KeyWithTs(kv.Key, kv.Version+1), y.ValueStruct{Meta: bitDelete})
-		}
 		wg.Add(1)
 		return db.HandoverSkiplist(b.Skiplist(), wg.Done)
 	}
@@ -1912,17 +1903,25 @@ func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
 			// We need to generate only a single delete marker per key. All the versions for this
 			// key will be considered deleted, if we delete the one at highest version.
 			kv := y.NewKV(a)
-			kv.Key = ka
-			kv.Version = item.Version()
+			kv.Key = y.KeyWithTs(ka, item.Version())
 			list.Kv = append(list.Kv, kv)
 			itr.Next()
 			return list, nil
 		}
 
 		stream.Send = func(buf *z.Buffer) error {
-			sz := buf.LenNoPadding()
-			dst := cbuf.Allocate(sz)
-			y.AssertTrue(sz == copy(dst, buf.Bytes()))
+			kv := pb.KV{}
+			err := buf.SliceIterate(func(s []byte) error {
+				kv.Reset()
+				if err := kv.Unmarshal(s); err != nil {
+					return err
+				}
+				cbuf.WriteSlice(kv.Key)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
 			return handover(false)
 		}
 		if err := stream.Orchestrate(context.Background()); err != nil {
@@ -1947,7 +1946,7 @@ func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
 // the prefixes by blocking the writes or doing a logical drop.
 // See DropPrefixBlocking and DropPrefixNonBlocking for more information.
 func (db *DB) DropPrefix(prefixes ...[]byte) error {
-	if db.opt.BlockWritesOnDrop {
+	if db.opt.AllowStopTheWorld {
 		return db.DropPrefixBlocking(prefixes...)
 	}
 	return db.DropPrefixNonBlocking(prefixes...)

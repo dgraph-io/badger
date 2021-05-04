@@ -1062,7 +1062,7 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := OpenManaged(DefaultOptions(dir).WithBlockWritesOnDrop(false))
+	db, err := OpenManaged(DefaultOptions(dir).WithAllowStopTheWorld(false))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -1099,11 +1099,6 @@ func TestDropPrefixNonBlocking(t *testing.T) {
 	write()
 	prefixes := [][]byte{[]byte("aa")}
 	require.NoError(t, db.DropPrefix(prefixes...))
-	read()
-
-	// Writing again at same timestamp and verifying that vlog rewrites don't allow us to read
-	// these entries anyway.
-	write()
 	read()
 }
 
