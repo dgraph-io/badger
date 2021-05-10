@@ -170,6 +170,7 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 	err := db.View(func(txn *badger.Txn) error {
 		iopt := badger.DefaultIteratorOptions
 		iopt.AllVersions = true
+		iopt.PrefetchValues = false
 		it := txn.NewKeyIterator(key, iopt)
 		defer it.Close()
 
@@ -189,7 +190,7 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 }
 
 // getSampleKeys uses stream framework internally, to get keys in random order.
-func getSampleKeys(db *badger.DB) ([][]byte, error) {
+func getSampleKeys(db *badger.DB, sampleSize int) ([][]byte, error) {
 	var keys [][]byte
 	count := 0
 	stream := db.NewStreamAt(math.MaxUint64)
@@ -218,7 +219,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 			}
 			keys = append(keys, kv.Key)
 			count++
-			if count >= ro.sampleSize {
+			if count >= sampleSize {
 				cancel()
 				return errStop
 			}
