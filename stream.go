@@ -388,6 +388,7 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 					infof("Sending data key with ID: %d\n", dk.KeyId)
 					val, err := dk.Marshal()
 					y.Check(err)
+					// This would go to key registry in destination.
 					kv := &pb.KV{
 						Value: val,
 						Kind:  pb.KV_DATA_KEY,
@@ -399,10 +400,15 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 
 			infof("Sending table ID: %d at level: %d. Size: %s\n",
 				t.ID(), level, humanize.IBytes(uint64(t.Size())))
+			// TODO: Send compression information as well.
+			// We send the table along with level to the destination, so they'd know where to
+			// place the tables. We'd send all the tables first, before we start streaming. So, the
+			// destination DB would write streamed keys one level above.
 			kv := &pb.KV{
+				// Key can be used for MANIFEST.
 				Value:   t.Data,
 				Kind:    pb.KV_FILE,
-				Version: uint64(level),
+				Version: uint64(level), // might not need to send this separately from MANIFEST.
 			}
 			KVToBuffer(kv, out)
 
