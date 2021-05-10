@@ -74,10 +74,6 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	fmt.Println("*********************************************************")
-	fmt.Println("Starting to benchmark pick tables.")
-	fmt.Println("*********************************************************")
-
 	if po.keystats {
 		printKeyStats(db)
 	}
@@ -87,8 +83,9 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	keys, err = getSampleKeys(db, po.sampleSize)
 	y.Check(err)
 	fmt.Println("Running benchmark...")
-	res := testing.Benchmark(BenchmarkPickTables)
-	fmt.Printf("BenchmarkPickTables --- res:%s\n", res)
+	fmt.Println("***** BenchmarkPickTables *****")
+	fmt.Println(testing.Benchmark(BenchmarkPickTables))
+	fmt.Println("*******************************")
 	return nil
 }
 
