@@ -19,7 +19,6 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"os"
 	"runtime/pprof"
 	"sort"
@@ -29,7 +28,6 @@ import (
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/spf13/cobra"
 )
 
@@ -41,8 +39,7 @@ var pickBenchCmd = &cobra.Command{
 }
 
 var (
-	po = struct {
-		keystats   bool
+	pickOpts = struct {
 		readOnly   bool
 		sampleSize int
 		cpuprofile string
@@ -54,19 +51,17 @@ var (
 func init() {
 	benchCmd.AddCommand(pickBenchCmd)
 	pickBenchCmd.Flags().BoolVar(
-		&po.keystats, "keystats", false, "If true, show the stats related to keys.")
-	pickBenchCmd.Flags().BoolVar(
-		&po.readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
+		&pickOpts.readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
 	pickBenchCmd.Flags().IntVar(
-		&po.sampleSize, "sample-size", 1000000, "Keys sample size to be used for random lookup.")
+		&pickOpts.sampleSize, "sample-size", 1000000, "Sample size of keys to be used for lookup.")
 	pickBenchCmd.Flags().StringVar(
-		&po.cpuprofile, "cpuprofile", "", "Write CPU profile to file.")
+		&pickOpts.cpuprofile, "cpuprofile", "", "Write CPU profile to file.")
 }
 
 func pickTableBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithReadOnly(po.readOnly)
+		WithReadOnly(pickOpts.readOnly)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.OpenManaged(opt)
 	if err != nil {
@@ -74,13 +69,10 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	if po.keystats {
-		printKeyStats(db)
-	}
 	boundaries := getBoundaries(db)
 	tables := genTables(boundaries)
 	handler.init(tables)
-	keys, err = getSampleKeys(db, po.sampleSize)
+	keys, err = getSampleKeys(db, pickOpts.sampleSize)
 	y.Check(err)
 	fmt.Println("Running benchmark...")
 	fmt.Println("***** BenchmarkPickTables *****")
@@ -89,26 +81,9 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printKeyStats prints out the key size histogram.
-func printKeyStats(db *badger.DB) {
-	hist := z.NewHistogramData(z.HistogramBounds(10, 50))
-	txn := db.NewTransactionAt(math.MaxUint64, false)
-	defer txn.Discard()
-	iopts := badger.DefaultIteratorOptions
-	iopts.PrefetchValues = false
-	iopts.AllVersions = true
-	itr := txn.NewIterator(iopts)
-	defer itr.Close()
-	for itr.Rewind(); itr.Valid(); itr.Next() {
-		item := itr.Item()
-		hist.Update(int64(len(item.Key())))
-	}
-	fmt.Printf("Key size stats: %s\n", hist)
-}
-
 func BenchmarkPickTables(b *testing.B) {
-	if len(po.cpuprofile) > 0 {
-		f, err := os.Create(po.cpuprofile)
+	if len(pickOpts.cpuprofile) > 0 {
+		f, err := os.Create(pickOpts.cpuprofile)
 		y.Check(err)
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
