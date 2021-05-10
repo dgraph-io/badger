@@ -19,12 +19,14 @@ package badger
 import (
 	"bytes"
 	"context"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
@@ -83,6 +85,7 @@ type Stream struct {
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs      uint64
+	CopyTables   bool
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
@@ -396,8 +399,69 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		st.KeyToList = st.ToList
 	}
 
+	opts := DefaultIteratorOptions
+	opts.AllVersions = true
+	opts.Prefix = st.Prefix
+	opts.PrefetchValues = false
+	opts.SinceTs = st.SinceTs
+
 	// Picks up ranges from Badger, and sends them to rangeCh.
 	go st.produceRanges(ctx)
+
+	// Pick up key-values from kvChan and send to stream.
+	kvErr := make(chan error, 1)
+	go func() {
+		// Picks up KV lists from kvChan, and sends them to Output.
+		err := st.streamKVs(ctx)
+		if err != nil {
+			cancel() // Stop all the go routines.
+		}
+		kvErr <- err
+	}()
+
+	// Pick all relevant tables from levels. We'd use this to copy them over,
+	// or generate iterators from them.
+	tableMatrix := st.db.lc.getTables(&opts)
+	defer func() {
+		for _, tables := range tableMatrix {
+			for _, t := range tables {
+				t.DecrRef()
+			}
+		}
+	}()
+	y.AssertTrue(len(tableMatrix) == st.db.opt.MaxLevels)
+	lastLevel := len(tableMatrix) - 1
+
+	// Let's pick the tables which can be fully copied over from last level.
+	if st.SinceTs != 0 {
+		panic("Fix me")
+	}
+
+	db := st.db
+	db.opt.Infof(db.LevelsToString())
+
+	var lastTables []*table.Table
+	var original, final int64
+	lt := tableMatrix[lastLevel]
+	for _, t := range lt {
+		original += t.Size()
+		if t.MaxVersion() <= st.readTs {
+			// This table can be picked for copying directly.
+			st.db.opt.Infof("Picking table ID: %d for copying. Size: %s\n",
+				t.ID(), humanize.IBytes(uint64(t.Size())))
+			kv := &pb.KV{
+				Key:   []byte("table"),
+				Value: t.Data(),
+			}
+			data := t.Data()
+		} else {
+			lastTables = append(lastTables, t)
+			final += t.Size()
+		}
+	}
+	st.db.opt.Infof("Last Level. Tables %s -> %s for iteration\n",
+		humanize.IBytes(uint64(original)), humanize.IBytes(uint64(final)))
+	os.Exit(1)
 
 	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
 	var wg sync.WaitGroup
@@ -416,16 +480,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		}(i)
 	}
 
-	// Pick up key-values from kvChan and send to stream.
-	kvErr := make(chan error, 1)
-	go func() {
-		// Picks up KV lists from kvChan, and sends them to Output.
-		err := st.streamKVs(ctx)
-		if err != nil {
-			cancel() // Stop all the go routines.
-		}
-		kvErr <- err
-	}()
 	wg.Wait()        // Wait for produceKVs to be over.
 	close(st.kvChan) // Now we can close kvChan.
 	defer func() {
