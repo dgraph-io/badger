@@ -30,6 +30,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
 )
 
 const batchSize = 16 << 20 // 16 MB
@@ -166,17 +167,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
+func (st *Stream) produceKVs(ctx context.Context, itr *Iterator) error {
 	atomic.AddInt32(&st.numProducers, 1)
 	defer atomic.AddInt32(&st.numProducers, -1)
-
-	var txn *Txn
-	if st.readTs > 0 {
-		txn = st.db.NewTransactionAt(st.readTs, false)
-	} else {
-		txn = st.db.NewTransaction(false)
-	}
-	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
 	outList := z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
@@ -187,15 +180,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}()
 
 	iterate := func(kr keyRange) error {
-		iterOpts := DefaultIteratorOptions
-		iterOpts.AllVersions = true
-		iterOpts.Prefix = st.Prefix
-		iterOpts.PrefetchValues = false
-		iterOpts.SinceTs = st.SinceTs
-		itr := txn.NewIterator(iterOpts)
-		itr.ThreadId = threadId
-		defer itr.Close()
-
 		itr.Alloc = z.NewAllocator(1<<20, "Stream.Iterate")
 		defer itr.Alloc.Release()
 
@@ -379,6 +363,62 @@ outer:
 	return nil
 }
 
+func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Table) error {
+	// Pick all relevant tables from levels. We'd use this to copy them over,
+	// or generate iterators from them.
+
+	// Let's pick the tables which can be fully copied over from last level.
+	if st.SinceTs != 0 {
+		panic("Fix me")
+	}
+
+	infof := st.db.opt.Infof
+
+	dataKeys := make(map[uint64]struct{})
+	for level, tables := range tableMatrix {
+		for _, t := range tables {
+			// original += t.Size()
+			// This table can be picked for copying directly.
+			out := z.NewBuffer(int(t.Size())+1024, "Stream.Table")
+			if dk := t.DataKey(); dk != nil {
+				// If we have a legit data key, send it over so the table can be decrypted. The same
+				// data key could have been used to encrypt many tables. Avoid sending it
+				// repeatedly.
+				if _, sent := dataKeys[dk.KeyId]; !sent {
+					infof("Sending data key with ID: %d\n", dk.KeyId)
+					val, err := dk.Marshal()
+					y.Check(err)
+					kv := &pb.KV{
+						Value: val,
+						Kind:  pb.KV_DATA_KEY,
+					}
+					KVToBuffer(kv, out)
+					dataKeys[dk.KeyId] = struct{}{}
+				}
+			}
+
+			infof("Sending table ID: %d at level: %d. Size: %s\n",
+				t.ID(), level, humanize.IBytes(uint64(t.Size())))
+			kv := &pb.KV{
+				Value:   t.Data,
+				Kind:    pb.KV_FILE,
+				Version: uint64(level),
+			}
+			KVToBuffer(kv, out)
+
+			select {
+			case st.kvChan <- out:
+			case <-ctx.Done():
+				out.Release()
+				return ctx.Err()
+			}
+		}
+	}
+	// infof("Last Level. Tables %s -> %s for iteration\n",
+	// 	humanize.IBytes(uint64(original)), humanize.IBytes(uint64(final)))
+	return nil
+}
+
 // Orchestrate runs Stream. It picks up ranges from the SSTables, then runs NumGo number of
 // goroutines to iterate over these ranges and batch up KVs in lists. It concurrently runs a single
 // goroutine to pick these lists, batch them up further and send to Output.Send. Orchestrate also
@@ -399,12 +439,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		st.KeyToList = st.ToList
 	}
 
-	opts := DefaultIteratorOptions
-	opts.AllVersions = true
-	opts.Prefix = st.Prefix
-	opts.PrefetchValues = false
-	opts.SinceTs = st.SinceTs
-
 	// Picks up ranges from Badger, and sends them to rangeCh.
 	go st.produceRanges(ctx)
 
@@ -421,6 +455,12 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// Pick all relevant tables from levels. We'd use this to copy them over,
 	// or generate iterators from them.
+	memTables, decr := st.db.getMemTables()
+	defer decr()
+
+	opts := DefaultIteratorOptions
+	opts.Prefix = st.Prefix
+	opts.SinceTs = st.SinceTs
 	tableMatrix := st.db.lc.getTables(&opts)
 	defer func() {
 		for _, tables := range tableMatrix {
@@ -430,37 +470,87 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		}
 	}()
 	y.AssertTrue(len(tableMatrix) == st.db.opt.MaxLevels)
-	lastLevel := len(tableMatrix) - 1
 
-	// Let's pick the tables which can be fully copied over from last level.
-	if st.SinceTs != 0 {
-		panic("Fix me")
-	}
+	// Figure out which tables we can copy. Only choose from the last 2 levels.
+	// Say last level has data of size 100. Given a 10x level multiplier and
+	// assuming the tree is balanced, second last level would have 10, and the
+	// third last level would have 1. The third last level would only have 1%
+	// of the data of the last level. It's OK for us to stop there and just
+	// stream it, instead of trying to copy over those tables too.  When we
+	// copy over tables to Level i, we can't stream any data to level i, i+1,
+	// and so on. The stream has to create tables at level i-1, so there can be
+	// overlap between the tables at i-1 and i.
 
-	db := st.db
-	db.opt.Infof(db.LevelsToString())
-
-	var lastTables []*table.Table
-	var original, final int64
-	lt := tableMatrix[lastLevel]
-	for _, t := range lt {
-		original += t.Size()
-		if t.MaxVersion() <= st.readTs {
-			// This table can be picked for copying directly.
-			st.db.opt.Infof("Picking table ID: %d for copying. Size: %s\n",
-				t.ID(), humanize.IBytes(uint64(t.Size())))
-			kv := &pb.KV{
-				Key:   []byte("table"),
-				Value: t.Data(),
-			}
-			data := t.Data()
-		} else {
-			lastTables = append(lastTables, t)
-			final += t.Size()
+	threshold := len(tableMatrix) - 2
+	toCopy := make([][]*table.Table, len(tableMatrix))
+	var numCopy, numStream int
+	for l, tables := range tableMatrix {
+		if l < threshold {
+			numStream += len(tables)
+			continue
 		}
+		var rem []*table.Table
+		cp := tables[:0]
+		for _, t := range tables {
+			// TODO: Also check if this table's range is fully covered by
+			// st.Prefix. Only if the range is fully covered, can we copy the
+			// table wholesale. Otherwise, we should be streaming it.
+			if t.MaxVersion() > st.readTs {
+				rem = append(rem, t)
+				continue
+			}
+			cp = append(cp, t)
+		}
+		toCopy[l] = cp       // Pick tables to copy.
+		tableMatrix[l] = rem // Keep remaining for streaming.
+		numCopy += len(cp)
+		numStream += len(rem)
 	}
-	st.db.opt.Infof("Last Level. Tables %s -> %s for iteration\n",
-		humanize.IBytes(uint64(original)), humanize.IBytes(uint64(final)))
+	infof := st.db.opt.Infof
+	infof("Num tables to copy: %d. Num to stream: %d\n", numCopy, numStream)
+
+	if err := st.copyTablesOver(ctx, toCopy); err != nil {
+		return errors.Wrapf(err, "while copying tables")
+	}
+
+	var txn *Txn
+	if st.readTs > 0 {
+		txn = st.db.NewTransactionAt(st.readTs, false)
+	} else {
+		txn = st.db.NewTransaction(false)
+	}
+	defer txn.Discard()
+
+	newIterator := func(threadId int) *Iterator {
+		var itrs []y.Iterator
+		for _, mt := range memTables {
+			itrs = append(itrs, mt.sl.NewUniIterator(false))
+		}
+		if tables := tableMatrix[0]; len(tables) > 0 {
+			itrs = append(itrs, iteratorsReversed(tables, 0)...)
+		}
+		for _, tables := range tableMatrix[1:] {
+			if len(tables) == 0 {
+				continue
+			}
+			itrs = append(itrs, table.NewConcatIterator(tables, 0))
+		}
+
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		opt.Prefix = st.Prefix
+		opt.PrefetchValues = false
+		opt.SinceTs = st.SinceTs
+
+		res := &Iterator{
+			txn:    txn,
+			iitr:   table.NewMergeIterator(itrs, false),
+			opt:    opt,
+			readTs: txn.readTs,
+		}
+		return res
+	}
+
 	os.Exit(1)
 
 	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
@@ -471,7 +561,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		go func(threadId int) {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx, threadId); err != nil {
+			itr := newIterator(threadId)
+			if err := st.produceKVs(ctx, itr); err != nil {
 				select {
 				case errCh <- err:
 				default:

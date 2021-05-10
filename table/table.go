@@ -146,7 +146,8 @@ func (t *Table) KeyCount() uint32 { return t.cheapIndex().KeyCount }
 
 // OnDiskSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) OnDiskSize() uint32 { return t.cheapIndex().OnDiskSize }
+func (t *Table) OnDiskSize() uint32   { return t.cheapIndex().OnDiskSize }
+func (t *Table) DataKey() *pb.DataKey { return t.opt.DataKey }
 
 // CompressionType returns the compression algorithm used for block compression.
 func (t *Table) CompressionType() options.CompressionType {
@@ -809,7 +810,7 @@ func (t *Table) decompress(b *block) error {
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
