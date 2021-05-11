@@ -71,7 +71,7 @@ func init() {
 		"Path of the encryption key file.")
 	streamCmd.Flags().BoolVar(&so.encrypted, "encrypted", false,
 		"Set to true if the source dir is encrypted")
-	streamCmd.Flags().BoolVar(&so.encryptedOut, "encryption-out", false,
+	streamCmd.Flags().BoolVar(&so.encryptedOut, "encrypted-out", false,
 		"Set to true to encrypt the output dir.")
 }
 
