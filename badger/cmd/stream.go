@@ -45,6 +45,11 @@ var so = struct {
 	numVersions     int
 	readOnly        bool
 	keyPath         string
+
+	// encrypted is true when the source dir is encrypted
+	encrypted bool
+	// encryptedOut is true when the output dir will be encrypted
+	encryptedOut bool
 }{}
 
 func init() {
@@ -64,6 +69,10 @@ func init() {
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
 	streamCmd.Flags().StringVarP(&so.keyPath, "encryption-key-file", "e", "",
 		"Path of the encryption key file.")
+	streamCmd.Flags().BoolVar(&so.encrypted, "encrypted", false,
+		"Set to true if the source dir is encrypted")
+	streamCmd.Flags().BoolVar(&so.encryptedOut, "encryption-out", false,
+		"Set to true to encrypt the output dir.")
 }
 
 func stream(cmd *cobra.Command, args []string) error {
@@ -75,13 +84,20 @@ func stream(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	inOpt := badger.DefaultOptions(sstDir).
+
+	// shared options between in and out directories
+	sharedOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(so.readOnly).
 		WithValueThreshold(1 << 10 /* 1KB */).
 		WithNumVersionsToKeep(so.numVersions).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey(encKey)
+
+	var inOpt badger.Options
+	if so.encrypted {
+		inOpt = sharedOpt.WithEncryptionKey(encKey)
+	}
 
 	// Options for output DB.
 	if so.compressionType < 0 || so.compressionType > 2 {
@@ -112,12 +128,15 @@ func stream(cmd *cobra.Command, args []string) error {
 		}
 
 		stream.LogPrefix = "DB.Stream"
-		outOpt := inOpt.
+		outOpt := sharedOpt.
 			WithDir(so.outDir).
 			WithValueDir(so.outDir).
 			WithNumVersionsToKeep(so.numVersions).
 			WithCompression(options.CompressionType(so.compressionType)).
 			WithReadOnly(false)
+		if so.encryptedOut {
+			outOpt = outOpt.WithEncryptionKey(encKey)
+		}
 		err = inDB.StreamDB(outOpt)
 
 	} else if len(so.outFile) > 0 {
