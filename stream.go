@@ -373,9 +373,13 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 	}
 
 	infof := st.db.opt.Infof
-
+	// Make a copy of the manifest so that we don't have race condition.
+	manifest := st.db.manifest.manifest.clone()
 	dataKeys := make(map[uint64]struct{})
-	for level, tables := range tableMatrix {
+	// Iterate in reverse order so that the receiver gets the bottommost level first.
+	for i := len(tableMatrix) - 1; i >= 0; i-- {
+		level := i
+		tables := tableMatrix[i]
 		for _, t := range tables {
 			// original += t.Size()
 			// This table can be picked for copying directly.
@@ -388,6 +392,7 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 					infof("Sending data key with ID: %d\n", dk.KeyId)
 					val, err := dk.Marshal()
 					y.Check(err)
+
 					// This would go to key registry in destination.
 					kv := &pb.KV{
 						Value: val,
@@ -400,15 +405,29 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 
 			infof("Sending table ID: %d at level: %d. Size: %s\n",
 				t.ID(), level, humanize.IBytes(uint64(t.Size())))
-			// TODO: Send compression information as well.
+			tableManifest := manifest.Tables[t.ID()]
+			change := pb.ManifestChange{
+				Id:    t.ID(),
+				Op:    pb.ManifestChange_CREATE,
+				Level: uint32(level),
+				KeyId: tableManifest.KeyID,
+				// Hard coding it, since we're supporting only AES for now.
+				EncryptionAlgo: pb.EncryptionAlgo_aes,
+				Compression:    uint32(tableManifest.Compression),
+			}
+
+			buf, err := change.Marshal()
+			y.Check(err)
+
 			// We send the table along with level to the destination, so they'd know where to
 			// place the tables. We'd send all the tables first, before we start streaming. So, the
 			// destination DB would write streamed keys one level above.
 			kv := &pb.KV{
 				// Key can be used for MANIFEST.
-				Value:   t.Data,
-				Kind:    pb.KV_FILE,
-				Version: uint64(level), // might not need to send this separately from MANIFEST.
+				Value:    t.Data,
+				Kind:     pb.KV_FILE,
+				Version:  uint64(level),
+				UserMeta: buf,
 			}
 			KVToBuffer(kv, out)
 
@@ -490,8 +509,9 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	threshold := len(tableMatrix) - 2
 	toCopy := make([][]*table.Table, len(tableMatrix))
 	var numCopy, numStream int
-	for l, tables := range tableMatrix {
-		if l < threshold {
+	for lev, tables := range tableMatrix {
+		// We stream only the data in the two bottommost levels.
+		if lev < threshold {
 			numStream += len(tables)
 			continue
 		}
@@ -507,8 +527,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 			}
 			cp = append(cp, t)
 		}
-		toCopy[l] = cp       // Pick tables to copy.
-		tableMatrix[l] = rem // Keep remaining for streaming.
+		toCopy[lev] = cp       // Pick tables to copy.
+		tableMatrix[lev] = rem // Keep remaining for streaming.
 		numCopy += len(cp)
 		numStream += len(rem)
 	}

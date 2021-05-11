@@ -32,10 +32,12 @@ import (
 
 	otrace "go.opencensus.io/trace"
 
+	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -1759,4 +1761,37 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 	}
 	sort.Strings(splits)
 	return splits
+}
+
+func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
+	y.AssertTrue(kv.Kind == pb.KV_FILE)
+
+	var change pb.ManifestChange
+	if err := proto.Unmarshal(kv.UserMeta, &change); err != nil {
+		return err
+	}
+	var (
+		dk  *pb.DataKey
+		err error
+	)
+	// The keyId is zero if there is no encryption.
+	// TODO(ibrahim): Verify this.
+	if change.KeyId != 0 {
+		dk, err = lc.kv.registry.DataKey(change.KeyId)
+		if err != nil {
+			return err
+		}
+	}
+
+	opts := buildTableOptions(lc.kv)
+	opts.Compression = options.CompressionType(change.Compression)
+	opts.DataKey = dk
+
+	// Create a copy of the kv.Value because it is owned by the z.buffer.
+	tbl, err := table.CreateTableFromBuffer(change.Id, y.Copy(kv.Value), opts)
+
+	// TODO(ibrahim): Check all the increment refs are done correctly.
+	lc.levels[lev].addTable(tbl)
+
+	return lc.kv.manifest.addChanges([]*pb.ManifestChange{&change})
 }

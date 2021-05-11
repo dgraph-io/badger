@@ -257,13 +257,9 @@ func (b block) verifyCheckSum() error {
 
 func CreateTable(fname string, builder *Builder) (*Table, error) {
 	bd := builder.Done()
-	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
-	if err == z.NewFile {
-		// Expected.
-	} else if err != nil {
-		return nil, y.Wrapf(err, "while creating table: %s", fname)
-	} else {
-		return nil, errors.Errorf("file already exists: %s", fname)
+	mf, err := newFile(fname, bd.Size)
+	if err != nil {
+		return nil, err
 	}
 
 	written := bd.Copy(mf.Data)
@@ -272,6 +268,34 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 		return nil, y.Wrapf(err, "while calling msync on %s", fname)
 	}
 	return OpenTable(mf, *builder.opts)
+}
+
+func newFile(fname string, sz int) (*z.MmapFile, error) {
+	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, sz)
+	if err == z.NewFile {
+		// Expected.
+	} else if err != nil {
+		return nil, y.Wrapf(err, "while creating table: %s", fname)
+	} else {
+		return nil, errors.Errorf("file already exists: %s", fname)
+	}
+	return mf, nil
+}
+
+func CreateTableFromBuffer(id uint64, buf []byte, opts Options) (*Table, error) {
+	fname := IDToFilename(id)
+	mf, err := newFile(fname, len(buf))
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(ibrahim): We cannot use the buf directly here because it is not mmapped.
+	written := copy(mf.Data, buf)
+	y.AssertTrue(written == len(mf.Data))
+	if err := z.Msync(mf.Data); err != nil {
+		return nil, y.Wrapf(err, "while calling msync on %s", fname)
+	}
+	return OpenTable(mf, opts)
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function

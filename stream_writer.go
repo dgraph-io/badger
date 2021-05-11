@@ -41,12 +41,14 @@ import (
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock  sync.Mutex
-	db         *DB
-	done       func()
-	throttle   *y.Throttle
-	maxVersion uint64
-	writers    map[uint32]*sortedWriter
+	writeLock      sync.Mutex
+	db             *DB
+	done           func()
+	throttle       *y.Throttle
+	maxVersion     uint64
+	writers        map[uint32]*sortedWriter
+	prevLevel      uint64
+	processingKeys bool // True if we have started processing keys.
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -108,7 +110,39 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		if _, ok := closedStreams[kv.StreamId]; ok {
 			panic(fmt.Sprintf("write performed on closed stream: %d", kv.StreamId))
 		}
+		switch kv.Kind {
+		case pb.KV_DATA_KEY:
+			return errors.Wrap(sw.db.registry.AddKey(kv), "failed to write")
+		case pb.KV_FILE:
+			// All tables should be recieved before any of the keys.
+			if sw.processingKeys {
+				return errors.New("Received pb.KV_FILE after pb.KV_KEY")
+			}
+			level := kv.Version
+			if sw.prevLevel == 0 {
+				sw.prevLevel = level
+			}
 
+			// This is based on the assumption that the tables from the last
+			// level will be sent first and then the second last level tables.
+			// As long as the kv.Version (which stores the level) is same as
+			// the prevLevel, we know we're processing a last level table.
+			// The last level for this DB can be 8 while the DB that's sending
+			// this could have the last level at 7.
+			lev := len(sw.db.lc.levels) - 1
+			if sw.prevLevel != level {
+				// If the previous level and the current level is different, we
+				// must be processing a table from the second last level.
+				// Add table to the second last level of this DB.
+				lev = len(sw.db.lc.levels) - 2
+			}
+			return sw.db.lc.AddTable(&kv, lev)
+		case pb.KV_KEY:
+			// Pass. The following code will handle the keys.
+		}
+
+		// TODO(Naman): Ensure the newly created tables are added to the correct level.
+		sw.processingKeys = true
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
