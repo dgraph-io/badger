@@ -69,52 +69,107 @@ type pickTable struct {
 	all       []badger.TableInfo
 }
 
-func (pt *pickTable) find(opt iteratorOptions) []badger.TableInfo {
+var numpicks, numfinds uint32
+
+func (pt *pickTable) findX(opt iteratorOptions) []badger.TableInfo {
+	// fmt.Printf("picktable findX called with key: %x\n", opt.Prefix)
 	var all []badger.TableInfo
 	if len(opt.Prefix) < pt.prefixLen {
 		all = pt.all
-	} else {
-		keyPrefix := opt.Prefix[:pt.prefixLen]
-		idx := sort.Search(len(pt.groups), func(i int) bool {
-			// return bytes.Compare(pt.groups[i].prefix
-			return bytes.Compare(keyPrefix, pt.groups[i].prefix) >= 0
-		})
-		if idx == len(pt.groups) {
-			return nil
-		}
-		if idx == -1 {
-			panic("handle this")
-		}
-		// pt.groups[idx] now points to all the tables with a prefix >= keyPrefix.
-		// So, we can safely just compare the tables.
-		all = pt.groups[idx].tables
+		return pickTables(pt.all, opt)
 	}
-	sIdx := sort.Search(len(all), func(i int) bool {
-		// table.Biggest >= opt.prefix
-		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
-		return opt.compareToPrefix(all[i].Right) >= 0
+	keyPrefix := opt.Prefix[:pt.prefixLen]
+	// fmt.Printf("key prefix: %x. len(groups): %d\n", keyPrefix, len(pt.groups))
+	// var idx int
+	// for i, g := range pt.groups {
+	// 	// fmt.Printf("[%d] key prefix: %x g.prefix: %x\n", i, keyPrefix, g.prefix)
+	// 	if bytes.Compare(keyPrefix, g.prefix) <= 0 {
+	// 		idx = i
+	// 		break
+	// 	}
+	// }
+	idx := sort.Search(len(pt.groups), func(i int) bool {
+		// return bytes.Compare(pt.groups[i].prefix
+		return bytes.Compare(keyPrefix, pt.groups[i].prefix) <= 0
 	})
-	if sIdx == len(all) {
-		// Not found.
+	// fmt.Printf("idx=%d\n", idx)
+	if idx == len(pt.groups) {
 		return nil
 	}
-	filtered := all[sIdx:]
-	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
-	var out []badger.TableInfo
-	// hash := y.Hash(opt.Prefix)
-	for _, t := range filtered {
-		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
-		// stop. This is an IMPORTANT optimization, just considering how often we call
-		// NewKeyIterator.
-		if opt.compareToPrefix(t.Left) > 0 {
-			// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
-		}
-		out = append(out, t)
+	if idx == -1 {
+		panic("handle this")
 	}
-	return nil
-}
+	// pt.groups[idx] now points to all the tables with a prefix >= keyPrefix.
+	// So, we can safely just compare the tables.
+	all = pt.groups[idx].tables
+	keySuffix := opt.Prefix[pt.prefixLen:]
 
-func benchmarkPickTableStruct(b *testing.B) {
+	if bytes.Equal(keyPrefix, pt.groups[idx].prefix) {
+		// Further reduce the all.
+		idx := sort.Search(len(all), func(i int) bool {
+			t := all[i]
+			right := t.Right[pt.prefixLen:]
+			key := y.ParseKey(right)
+			if len(key) > len(keySuffix) {
+				key = key[:len(keySuffix)]
+			}
+			return bytes.Compare(key, keySuffix) >= 0
+		})
+		if idx != -1 && idx < len(all) {
+			numfinds++
+			all = all[idx:]
+		}
+		// for i, t := range all {
+		// 	// fmt.Printf("key: %x table right key: %x bytes.Compare: %d opt.compare: %d\n",
+		// 	// 	keySuffix, key, bytes.Compare(key, keySuffix),
+		// 	// 	opt.compareToPrefix(all[i].Right))
+		// 	if bytes.Compare(key, keySuffix) >= 0 {
+		// 		all = all[i:]
+		// 		// fmt.Printf("sidx should be: %d\n", i)
+		// 		break
+		// 	}
+		// }
+	}
+	return pickTables(all, opt)
+
+	// fmt.Printf("all tables: %d\n", len(all))
+	// for i := 0; i < 10 && i < len(all); i++ {
+	// 	fmt.Printf("table [%d] [%x -> %x]\n", i, all[i].Left, all[i].Right)
+	// }
+	// sIdx := sort.Search(len(all), func(i int) bool {
+	// 	// table.Biggest >= opt.prefix
+	// 	// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
+	// 	right := all[i].Right[pt.prefixLen:]
+	// 	key := y.ParseKey(right)
+	// 	if len(key) > len(keySuffix) {
+	// 		key = key[:len(keySuffix)]
+	// 	}
+	// 	return bytes.Compare(key, keySuffix) >= 0
+	// })
+	// if sIdx == len(all) {
+	// 	// Not found.
+	// 	fmt.Printf("sidx == len(all)\n")
+	// 	return nil
+	// }
+	// filtered := all[sIdx:]
+	// // opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
+	// var out []badger.TableInfo
+	// // hash := y.Hash(opt.Prefix)
+	// // fmt.Printf("PT num filtered tables: %d\n", len(filtered))
+	// for _, t := range filtered {
+	// 	// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
+	// 	// stop. This is an IMPORTANT optimization, just considering how often we call
+	// 	// NewKeyIterator.
+	// 	if opt.compareToPrefix(t.Left) > 0 {
+	// 		// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
+	// 		break
+	// 	}
+	// 	// fmt.Printf("table [%x -> %x] %x\n", t.Left, t.Right, opt.Prefix)
+	// 	// fmt.Printf("left: %v right: %v\n", opt.compareToPrefix(t.Left),
+	// 	// 	opt.compareToPrefix(t.Right))
+	// 	out = append(out, t)
+	// }
+	// return out
 }
 
 func generateGroups(prefixLen int, tables []badger.TableInfo) []group {
@@ -146,6 +201,8 @@ func generateGroups(prefixLen int, tables []badger.TableInfo) []group {
 	return groups
 }
 
+var pt pickTable
+
 func pickTableBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
@@ -166,7 +223,7 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	maxLen := 0
 	for i, t := range tables {
 		fmt.Printf("Table [%4d] %X\n", i, t.Right)
-		sz := len(t.Right)
+		sz := len(t.Right) - 8
 		if sz < minLen {
 			minLen = sz
 		}
@@ -176,11 +233,10 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Tables min len: %d max: %d\n", minLen, maxLen)
 	prefixLen := minLen
-	var pt pickTable
 	for i := 0; i < 20; i++ {
 		groups := generateGroups(prefixLen, tables)
 		fmt.Printf("Found %d groups with prefixLen: %d\n", len(groups), prefixLen)
-		if len(groups) < 200 {
+		if len(groups) < 100 {
 			pt.prefixLen = prefixLen
 			pt.groups = groups
 			pt.all = tables
@@ -199,22 +255,25 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Matching...\n")
 	iopts := iteratorOptions{prefixIsKey: true}
+	var count int
 	for _, key := range keys {
 		iopts.Prefix = key
-		exp := handler.pickTables(iopts)
-		got := pt.find(iopts)
-		fmt.Printf("key: %x exp: %d got: %d\n", key, len(exp), len(got))
+		exp := pickTables(tables, iopts)
+		got := pt.findX(iopts)
+		// fmt.Printf("key: %x exp: %d got: %d\n", key, len(exp), len(got))
 		if len(exp) != len(got) {
 			panic("don't match")
 		}
-		// for i := range exp {
-		// 	if exp[i] != got[i] {
-		// 		panic("don't match at table level")
-		// 	}
-		// }
+		for i := range exp {
+			if exp[i].ID != got[i].ID {
+				panic("don't match at table level")
+			}
+		}
+		count++
 	}
-	fmt.Println("DONE")
-	os.Exit(1)
+	fmt.Printf("Matched: %d OK\n", count)
+	fmt.Printf("numpicks: %d numfinds: %d\n", numpicks, numfinds)
+	// os.Exit(1)
 
 	if len(pickOpts.cpuprofile) > 0 {
 		f, err := os.Create(pickOpts.cpuprofile)
@@ -223,12 +282,28 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 		defer pprof.StopCPUProfile()
 	}
 
+	// for i := 0; i < 10; i++ {
+	// 	res := testing.Benchmark(benchmarkPickTables)
+	// 	fmt.Printf("Iteration [%d]: %v\n", i, res)
+	// }
+
 	for i := 0; i < 10; i++ {
-		res := testing.Benchmark(benchmarkPickTables)
-		fmt.Printf("Iteration [%d]: %v\n", i, res)
+		res := testing.Benchmark(benchmarkPickTableStruct)
+		fmt.Printf("PT Iteration [%d]: %v\n", i, res)
 	}
 	fmt.Println()
 	return nil
+}
+
+func benchmarkPickTableStruct(b *testing.B) {
+	iopts := iteratorOptions{prefixIsKey: true}
+	// We should run this benchmark serially because we care about the latency
+	// numbers, not throughput numbers.
+	for i := 0; i < b.N; i++ {
+		key := keys[i%len(keys)]
+		iopts.Prefix = key
+		_ = pt.findX(iopts)
+	}
 }
 
 func benchmarkPickTables(b *testing.B) {
@@ -238,7 +313,7 @@ func benchmarkPickTables(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := keys[i%len(keys)]
 		iopts.Prefix = key
-		_ = handler.pickTables(iopts)
+		_ = pickTables(handler.tables, iopts)
 	}
 }
 
@@ -281,8 +356,9 @@ func (s *levelHandler) init(tables []badger.TableInfo) []badger.TableInfo {
 }
 
 // This implementation is based on the implementation in master branch.
-func (s *levelHandler) pickTables(opt iteratorOptions) []badger.TableInfo {
-	all := s.tables
+func pickTables(all []badger.TableInfo, opt iteratorOptions) []badger.TableInfo {
+	// fmt.Printf("levelHandler picktables called with key: %x\n", opt.Prefix)
+	numpicks++
 	if len(opt.Prefix) == 0 {
 		out := make([]badger.TableInfo, len(all))
 		copy(out, all)
@@ -299,14 +375,9 @@ func (s *levelHandler) pickTables(opt iteratorOptions) []badger.TableInfo {
 	}
 
 	filtered := all[sIdx:]
-	fmt.Printf("num filtered tables: %d\n", len(filtered))
+	// fmt.Printf("num filtered tables: %d\n", len(filtered))
 	if !opt.prefixIsKey {
-		eIdx := sort.Search(len(filtered), func(i int) bool {
-			return opt.compareToPrefix(filtered[i].Right) > 0
-		})
-		out := make([]badger.TableInfo, len(filtered[:eIdx]))
-		copy(out, filtered[:eIdx])
-		return out
+		panic("prefix should be key")
 	}
 
 	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
@@ -318,11 +389,11 @@ func (s *levelHandler) pickTables(opt iteratorOptions) []badger.TableInfo {
 		// NewKeyIterator.
 		if opt.compareToPrefix(t.Left) > 0 {
 			// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
-			fmt.Printf("table [%x -> %x] %x\n", t.Left, t.Right, opt.Prefix)
-			fmt.Printf("left: %v right: %v\n", opt.compareToPrefix(t.Left),
-				opt.compareToPrefix(t.Right))
 			break
 		}
+		// fmt.Printf("table [%x -> %x] %x\n", t.Left, t.Right, opt.Prefix)
+		// fmt.Printf("left: %v right: %v\n", opt.compareToPrefix(t.Left),
+		// 	opt.compareToPrefix(t.Right))
 		out = append(out, t)
 	}
 	return out
