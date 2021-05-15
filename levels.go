@@ -1639,10 +1639,11 @@ type TableInfo struct {
 	MaxVersion       uint64
 	IndexSz          int
 	BloomFilterSize  int
+	Tags             []uint64
 }
 
 func (s *levelsController) getTableInfo() (result []TableInfo) {
-	for _, l := range s.levels {
+	for _, l := range s.levels[5:] {
 		l.RLock()
 		for _, t := range l.tables {
 			info := TableInfo{
@@ -1657,6 +1658,7 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 				BloomFilterSize:  t.BloomFilterSize(),
 				UncompressedSize: t.UncompressedSize(),
 				MaxVersion:       t.MaxVersion(),
+				Tags:             t.Tags(),
 			}
 			result = append(result, info)
 		}

@@ -667,6 +667,14 @@ func (t *Table) StaleDataSize() uint32 { return t.fetchIndex().StaleDataSize() }
 // Smallest is its smallest key, or nil if there are none
 func (t *Table) Smallest() []byte { return t.smallest }
 
+func (t *Table) Tags() (res []uint64) {
+	idx := t.fetchIndex()
+	for i := 0; i < idx.TagsLength(); i++ {
+		res = append(res, idx.Tags(i))
+	}
+	return res
+}
+
 // Biggest is its biggest key, or nil if there are none
 func (t *Table) Biggest() []byte { return t.biggest }
 
@@ -809,7 +817,7 @@ func (t *Table) decompress(b *block) error {
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {

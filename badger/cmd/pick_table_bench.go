@@ -19,7 +19,6 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -206,6 +205,58 @@ func generateGroups(prefixLen int, tables []badger.TableInfo) []group {
 
 var pt pickTable
 
+type tableMap struct {
+	m map[uint64]struct{}
+}
+
+var tagm = make(map[uint64]*tableMap)
+
+func intersect(dst, src map[uint64]struct{}) {
+	for id := range dst {
+		if _, has := src[id]; !has {
+			delete(dst, id)
+		}
+	}
+	return
+}
+
+func findTables(opts iteratorOptions) int {
+	pk, err := y.Parse(opts.Prefix)
+	y.Check(err)
+
+	tags := pk.Tags()
+	// fmt.Printf("key: %x tags: %v\n", opts.Prefix, tags)
+	outm := make(map[uint64]struct{})
+	for _, tag := range tags {
+		m, ok := tagm[tag]
+		if !ok {
+			// This key doesn't exist.
+			fmt.Printf("Tag %d not found\n", tag)
+			return 0
+		}
+		if len(outm) == 0 {
+			for id := range m.m {
+				outm[id] = struct{}{}
+			}
+		} else {
+			intersect(outm, m.m)
+		}
+	}
+	// fmt.Printf("key: %80x Found tables: %d\n", opts.Prefix, len(outm))
+	return len(outm)
+}
+
+func benchmarkTagm(b *testing.B) {
+	iopts := iteratorOptions{prefixIsKey: true}
+
+	for i := 0; i < b.N; i++ {
+		key := keys[i%len(keys)]
+		iopts.Prefix = key
+		findTables(iopts)
+		// _ = pickTables(handler.tables, iopts)
+	}
+}
+
 func pickTableBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
@@ -220,39 +271,81 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	tables := db.Tables()
 	// boundaries := getBoundaries(db)
 	// tables := genTables(boundaries)
+
 	tables = handler.init(tables)
 
-	minLen := math.MaxInt32
-	maxLen := 0
+	// minLen := math.MaxInt32
+	// maxLen := 0
+
 	for i, t := range tables {
+		if t.Level != 6 {
+			continue
+		}
+
 		fmt.Printf("Table [%4d] %X\n", i, t.Right)
-		sz := len(t.Right) - 8
-		if sz < minLen {
-			minLen = sz
-		}
-		if sz > maxLen {
-			maxLen = sz
-		}
-	}
-	fmt.Printf("Tables min len: %d max: %d\n", minLen, maxLen)
-	// prefixLen := minLen
-	prefixLen := 16
-	for i := 0; i < 20; i++ {
-		groups := generateGroups(prefixLen, tables)
-		fmt.Printf("Found %d groups with prefixLen: %d\n", len(groups), prefixLen)
-		if len(groups) < 100 {
-			pt.prefixLen = prefixLen
-			pt.groups = groups
-			pt.all = tables
-			pt.groupsMap = make(map[uint64]group)
-			for i, g := range groups {
-				pt.groupsMap[z.MemHash(g.prefix)] = g
-				fmt.Printf("[%02d] Prefix: %x. Num Tables: %d\n", i, g.prefix, len(g.tables))
+		fmt.Printf("Tags: %+v\n", t.Tags)
+
+		// lp, err := y.Parse(t.Left)
+		// if err != nil {
+		// 	fmt.Printf("error while parsing left: %v\n", err)
+		// 	continue
+		// }
+		// rp, err := y.Parse(t.Right)
+		// if err != nil {
+		// 	fmt.Printf("error while parsing right: %v\n", err)
+		// 	continue
+		// }
+
+		// ltags := lp.Tags()
+		// rtags := rp.Tags()
+
+		// all := append(ltags, rtags...)
+		for _, tag := range t.Tags {
+			m, ok := tagm[tag]
+			if !ok {
+				m = &tableMap{
+					m: make(map[uint64]struct{}),
+				}
+				tagm[tag] = m
 			}
-			break
+			m.m[t.ID] = struct{}{}
 		}
-		prefixLen--
+
+		// fmt.Printf("left parsed: %+v tags: %+v\n", lp, ltags)
+		// fmt.Printf("right parsed: %+v tags: %+v\n", rp, rtags)
+
+		// sz := len(t.Right) - 8
+		// if sz < minLen {
+		// 	minLen = sz
+		// }
+		// if sz > maxLen {
+		// 	maxLen = sz
+		// }
 	}
+	for tag, m := range tagm {
+		fmt.Printf("tag: %d len(m): %d\n", tag, len(m.m))
+	}
+	fmt.Printf("Num tags: %d\n", len(tagm))
+	// fmt.Printf("Tables min len: %d max: %d\n", minLen, maxLen)
+
+	// prefixLen := minLen
+	// prefixLen := 16
+	// for i := 0; i < 20; i++ {
+	// 	groups := generateGroups(prefixLen, tables)
+	// 	fmt.Printf("Found %d groups with prefixLen: %d\n", len(groups), prefixLen)
+	// 	if len(groups) < 100 {
+	// 		pt.prefixLen = prefixLen
+	// 		pt.groups = groups
+	// 		pt.all = tables
+	// 		pt.groupsMap = make(map[uint64]group)
+	// 		for i, g := range groups {
+	// 			pt.groupsMap[z.MemHash(g.prefix)] = g
+	// 			fmt.Printf("[%02d] Prefix: %x. Num Tables: %d\n", i, g.prefix, len(g.tables))
+	// 		}
+	// 		break
+	// 	}
+	// 	prefixLen--
+	// }
 
 	keys, err = getSampleKeys(db, pickOpts.sampleSize)
 	y.Check(err)
@@ -265,16 +358,20 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	for _, key := range keys {
 		iopts.Prefix = key
 		exp := pickTables(tables, iopts)
-		got := pt.findX(iopts)
+		num := findTables(iopts)
+		if num < len(exp) {
+			panic(fmt.Sprintf("num: %d exp: %d. don't match", num, len(exp)))
+		}
+		// got := pt.findX(iopts)
 		// fmt.Printf("key: %x exp: %d got: %d\n", key, len(exp), len(got))
-		if len(exp) != len(got) {
-			panic("don't match")
-		}
-		for i := range exp {
-			if exp[i].ID != got[i].ID {
-				panic("don't match at table level")
-			}
-		}
+		// if len(exp) != len(got) {
+		// 	panic("don't match")
+		// }
+		// for i := range exp {
+		// 	if exp[i].ID != got[i].ID {
+		// 		panic("don't match at table level")
+		// 	}
+		// }
 		count++
 	}
 	fmt.Printf("Matched: %d OK\n", count)
@@ -288,14 +385,14 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 		defer pprof.StopCPUProfile()
 	}
 
-	for i := 0; i < 10; i++ {
-		res := testing.Benchmark(benchmarkPickTables)
-		fmt.Printf("Iteration [%d]: %v\n", i, res)
-	}
+	// for i := 0; i < 10; i++ {
+	// 	res := testing.Benchmark(benchmarkPickTables)
+	// 	fmt.Printf("Iteration [%d]: %v\n", i, res)
+	// }
 
 	for i := 0; i < 10; i++ {
-		res := testing.Benchmark(benchmarkPickTableStruct)
-		fmt.Printf("PT Iteration [%d]: %v\n", i, res)
+		res := testing.Benchmark(benchmarkTagm)
+		fmt.Printf("Tag Iteration [%d]: %v\n", i, res)
 	}
 	fmt.Println()
 	return nil

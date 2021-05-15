@@ -85,7 +85,8 @@ type Builder struct {
 
 	lenOffsets    uint32
 	estimatedSize uint32
-	keyHashes     []uint32 // Used for building the bloomfilter.
+	keyHashes     []uint32            // Used for building the bloomfilter.
+	keyTags       map[uint64]struct{} // Used for storing tags.
 	opts          *Options
 	maxVersion    uint64
 	onDiskSize    uint32
@@ -128,8 +129,9 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc: opts.AllocPool.Get(sz, "TableBuilder"),
-		opts:  &opts,
+		alloc:   opts.AllocPool.Get(sz, "TableBuilder"),
+		opts:    &opts,
+		keyTags: make(map[uint64]struct{}),
 	}
 	b.alloc.Tag = "Builder"
 	b.curBlock = &bblock{
@@ -216,6 +218,12 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
+
+	pk, err := y.Parse(key)
+	y.Check(err)
+	for _, tag := range pk.Tags() {
+		b.keyTags[tag] = struct{}{}
+	}
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
@@ -545,6 +553,7 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	}
 	boEnd := builder.EndVector(len(boList))
 
+	tagsEnd := b.writeTags(builder)
 	var bfoff fbs.UOffsetT
 	// Write the bloom filter.
 	if len(bloom) > 0 {
@@ -559,6 +568,7 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	fb.TableIndexAddStaleDataSize(builder, uint32(b.staleDataSize))
+	fb.TableIndexAddTags(builder, tagsEnd)
 	builder.Finish(fb.TableIndexEnd(builder))
 
 	buf := builder.FinishedBytes()
@@ -579,6 +589,14 @@ func (b *Builder) writeBlockOffsets(builder *fbs.Builder) ([]fbs.UOffsetT, uint3
 		startOffset += uint32(bl.end)
 	}
 	return uoffs, startOffset
+}
+
+func (b *Builder) writeTags(builder *fbs.Builder) fbs.UOffsetT {
+	fb.TableIndexStartTagsVector(builder, len(b.keyTags))
+	for tag := range b.keyTags {
+		builder.PrependUint64(tag)
+	}
+	return builder.EndVector(len(b.keyTags))
 }
 
 // writeBlockOffset writes the given key,offset,len triple to the indexBuilder.
