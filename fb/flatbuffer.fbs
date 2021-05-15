@@ -24,6 +24,7 @@ table TableIndex {
   uncompressed_size:uint32;
   on_disk_size:uint32;
   stale_data_size:uint32;
+  tags:[uint64];
 }
 
 table BlockOffset {

@@ -140,8 +140,34 @@ func (rcv *TableIndex) MutateStaleDataSize(n uint32) bool {
 	return rcv._tab.MutateUint32Slot(16, n)
 }
 
+func (rcv *TableIndex) Tags(j int) uint64 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		a := rcv._tab.Vector(o)
+		return rcv._tab.GetUint64(a + flatbuffers.UOffsetT(j*8))
+	}
+	return 0
+}
+
+func (rcv *TableIndex) TagsLength() int {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		return rcv._tab.VectorLen(o)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) MutateTags(j int, n uint64) bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		a := rcv._tab.Vector(o)
+		return rcv._tab.MutateUint64(a+flatbuffers.UOffsetT(j*8), n)
+	}
+	return false
+}
+
 func TableIndexStart(builder *flatbuffers.Builder) {
-	builder.StartObject(7)
+	builder.StartObject(8)
 }
 func TableIndexAddOffsets(builder *flatbuffers.Builder, offsets flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(offsets), 0)
@@ -169,6 +195,12 @@ func TableIndexAddOnDiskSize(builder *flatbuffers.Builder, onDiskSize uint32) {
 }
 func TableIndexAddStaleDataSize(builder *flatbuffers.Builder, staleDataSize uint32) {
 	builder.PrependUint32Slot(6, staleDataSize, 0)
+}
+func TableIndexAddTags(builder *flatbuffers.Builder, tags flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(7, flatbuffers.UOffsetT(tags), 0)
+}
+func TableIndexStartTagsVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
+	return builder.StartVector(8, numElems, 8)
 }
 func TableIndexEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()
