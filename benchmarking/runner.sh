@@ -19,3 +19,4 @@ done
 
 echo " ----- Generating Data -----"
 ./benchTool generateJS data/
+python3 mixpanelClient.py

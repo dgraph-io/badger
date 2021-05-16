@@ -1,0 +1,40 @@
+wiping /tmp/a
+dir /tmp/a
+concurrency 1024
+inserted keys [1-10001)
+____optype__elapsed__ops/sec(inst)___ops/sec(cum)__p50(ms)__p95(ms)__p99(ms)_pMax(ms)
+  read_100       1s       476972.9       517645.1      0.0     13.1     46.1    209.7
+  read_100       2s       519144.3       518810.3      0.0     13.1     46.1    234.9
+  read_100       3s       519704.2       518823.0      0.0     13.1     46.1    192.9
+  read_100       4s       518908.7       518808.1      0.0     13.1     46.1    192.9
+  read_100       5s       519829.3       518900.8      0.0     12.6     46.1    201.3
+  read_100       6s       520258.6       519141.5      0.0     13.1     46.1    167.8
+  read_100       7s       519183.0       519143.0      0.0     13.1     46.1    176.2
+  read_100       8s       521383.2       519297.8      0.0     13.1     46.1    192.9
+  read_100       9s       520783.4       519373.2      0.0     13.1     46.1    201.3
+  read_100      10s       515614.2       519201.9      0.0     13.1     46.1    201.3
+
+____optype__elapsed_____ops(total)___ops/sec(cum)__avg(ms)__p50(ms)__p95(ms)__p99(ms)_pMax(ms)
+  read_100    10.0s        5194690       518993.0      2.0      0.0     13.1     46.1    234.9
+
+Benchmarkycsb/C/values=1024 5194690  518993.0 ops/sec  0 read  0 write  0.00 r-amp  0.00 w-amp
+
+__level_____count____size___score______in__ingest(sz_cnt)____move(sz_cnt)___write(sz_cnt)____read___r-amp___w-amp
+    WAL         0     0 B       -     0 B       -       -       -       -     0 B       -       -       -     0.0
+      0         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      1         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      2         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      3         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      4         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      5         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      6         0     0 B       -     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+  total         0     0 B       -     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+  flush         0
+compact         0     0 B             0 B  (size == estimated-debt, in = in-progress-bytes)
+ memtbl         0     0 B
+zmemtbl         0     0 B
+   ztbl         0     0 B
+ bcache         0     0 B    0.0%  (score == hit-rate)
+ tcache         0     0 B    0.0%  (score == hit-rate)
+ titers         0
+ filter         -       -    0.0%  (score == utility)

@@ -1,0 +1,51 @@
+wiping /tmp/a
+dir /tmp/a
+concurrency 1024
+inserted keys [1-10001)
+____optype__elapsed__ops/sec(inst)___ops/sec(cum)__p50(ms)__p95(ms)__p99(ms)_pMax(ms)
+ insert__5       1s        19482.0        20719.2     37.7     48.2     52.4     96.5
+   read_95       1s       378291.9       402315.1      0.0      4.1     10.5     37.7
+ insert__5       2s        20649.3        20674.1     35.7     48.2     52.4     92.3
+   read_95       2s       395584.4       398755.5      0.0      5.0     12.1     39.8
+ insert__5       3s        18816.2        20042.4     37.7     54.5     65.0    104.9
+   read_95       3s       357317.3       384706.2      0.0      6.6     16.3     52.4
+ insert__5       4s        19362.4        19873.6     33.6     50.3     54.5     92.3
+   read_95       4s       368985.7       380799.8      0.0      6.8     17.8     44.0
+ insert__5       5s        19502.6        19804.8     33.6     52.4     58.7     96.5
+   read_95       5s       366389.0       378018.6      0.0      6.6     16.8     46.1
+ insert__5       6s        17774.7        19466.1     37.7     54.5     62.9    100.7
+   read_95       6s       345834.6       372648.9      0.0      7.3     17.8     46.1
+ insert__5       7s        18092.6        19273.1     33.6     54.5     58.7    104.9
+   read_95       7s       341784.0       368300.4      0.0      8.4     21.0     52.4
+ insert__5       8s        17580.5        19056.9     35.7     54.5     60.8    104.9
+   read_95       8s       339051.2       364554.0      0.0      8.4     21.0     50.3
+ insert__5       9s        17359.5        18865.9     35.7     54.5     60.8    109.1
+   read_95       9s       327318.7       360371.4      0.0      9.4     22.0     52.4
+ insert__5      10s        16257.1        18608.4     39.8     58.7     62.9    109.1
+   read_95      10s       306464.2       355044.0      0.0     10.0     24.1     58.7
+
+____optype__elapsed_____ops(total)___ops/sec(cum)__avg(ms)__p50(ms)__p95(ms)__p99(ms)_pMax(ms)
+ insert__5    10.0s         186086        18583.5     34.4     35.7     54.5     60.8    109.1
+   read_95    10.0s        3553029       354824.6      1.1      0.0      6.8     17.8     58.7
+
+Benchmarkycsb/D/values=1024 3739115  373408.2 ops/sec  0 read  0 write  0.00 r-amp  0.00 w-amp
+
+__level_____count____size___score______in__ingest(sz_cnt)____move(sz_cnt)___write(sz_cnt)____read___r-amp___w-amp
+    WAL         0     0 B       -     0 B       -       -       -       -     0 B       -       -       -     0.0
+      0         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      1         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      2         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      3         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      4         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      5         0     0 B    0.00     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+      6         0     0 B       -     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+  total         0     0 B       -     0 B     0 B       0     0 B       0     0 B       0     0 B       0     0.0
+  flush         0
+compact         0     0 B             0 B  (size == estimated-debt, in = in-progress-bytes)
+ memtbl         0     0 B
+zmemtbl         0     0 B
+   ztbl         0     0 B
+ bcache         0     0 B    0.0%  (score == hit-rate)
+ tcache         0     0 B    0.0%  (score == hit-rate)
+ titers         0
+ filter         -       -    0.0%  (score == utility)
