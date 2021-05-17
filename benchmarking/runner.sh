@@ -3,7 +3,7 @@
 mkdir -p data
 now=`date '+%Y%m%d'`
 echo "${now}"
-git log --name-status HEAD^..HEAD
+#git log --name-status HEAD^..HEAD
 declare -a arr=("64" "1024")
 for size in "${arr[@]}"
 do
