@@ -26,6 +26,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -49,7 +50,8 @@ type StreamWriter struct {
 	writers         map[uint32]*sortedWriter
 	prevLevel       int
 	senderPrevLevel int
-	processingKeys  bool // true if we have started processing keys.
+	keyId           map[uint64]uint64 // stores reader's key ID to writer's key ID.
+	processingKeys  bool              // true if we have started processing keys.
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -113,7 +115,19 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		}
 		switch kv.Kind {
 		case pb.KV_DATA_KEY:
-			return errors.Wrap(sw.db.registry.AddKey(kv), "failed to write")
+			var dk pb.DataKey
+			if err := proto.Unmarshal(kv.Value, &dk); err != nil {
+				return errors.Wrapf(err, "unmarshal failed %s", kv.Value)
+			}
+			readerId := dk.KeyId
+			if id, ok := sw.keyId[readerId]; ok {
+				dk.KeyId = id
+			}
+			keyId, err := sw.db.registry.AddKey(dk)
+			if err != nil {
+				return errors.Wrap(err, "failed to write data key")
+			}
+			sw.keyId[readerId] = keyId
 		case pb.KV_FILE:
 			// All tables should be recieved before any of the keys.
 			if sw.processingKeys {

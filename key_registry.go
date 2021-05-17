@@ -30,7 +30,6 @@ import (
 
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -374,33 +373,24 @@ func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
 	return &dk, nil
 }
 
-func (kr *KeyRegistry) AddKey(key pb.KV) error {
-	y.AssertTrue(key.Kind == pb.KV_DATA_KEY)
-
+func (kr *KeyRegistry) AddKey(dk pb.DataKey) (uint64, error) {
 	// If we don't have a encryption key, we cannot store the datakey.
 	if len(kr.opt.EncryptionKey) == 0 {
-		return errors.New("No encryption key found. Cannot add data key")
-	}
-	var dk pb.DataKey
-	if err := proto.Unmarshal(key.Value, &dk); err != nil {
-		return errors.Wrapf(err, "unmarshal failed %s", key.Value)
+		return 0, errors.New("No encryption key found. Cannot add data key")
 	}
 
-	if kr.lastCreated < dk.CreatedAt {
-		kr.lastCreated = dk.CreatedAt
+	if _, ok := kr.dataKeys[dk.KeyId]; !ok {
+		// If KeyId does not exists already, then use the next available KeyId to store data key.
+		kr.nextKeyID++
+		dk.KeyId = kr.nextKeyID
 	}
-
 	kr.dataKeys[dk.KeyId] = &dk
-	if kr.nextKeyID <= dk.KeyId {
-		// This is the next key ID. It should be one above the current key.
-		kr.nextKeyID = dk.KeyId + 1
-	}
 
 	if kr.opt.InMemory {
-		return nil
+		return 0, nil
 	}
-	// Store the datekey.
-	return storeDataKey(kr.fp, kr.opt.EncryptionKey, dk)
+	// Store the datakey.
+	return dk.KeyId, storeDataKey(kr.fp, kr.opt.EncryptionKey, dk)
 }
 
 // Close closes the key registry.

@@ -1769,12 +1769,12 @@ func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
 
 	var change pb.ManifestChange
 	if err := proto.Unmarshal(kv.Key, &change); err != nil {
-		return err
+		return errors.Wrap(err, "unable to unmarshal manifest change")
 	}
 	// The keyId is zero if there is no encryption.
 	dk, err := lc.kv.registry.DataKey(change.KeyId)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "while getting key from registry")
 	}
 
 	opts := buildTableOptions(lc.kv)
@@ -1786,8 +1786,13 @@ func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
 
 	// Create a copy of the kv.Value because it is owned by the z.buffer.
 	tbl, err := table.CreateTableFromBuffer(fname, y.Copy(kv.Value), opts)
+	if err != nil {
+		return errors.Wrap(err, "while creating table from buffer")
+	}
 
 	// TODO(ibrahim): Check all the increment refs are done correctly.
+	// TODO: Encryption / Decryption might be required for the table, if the sender and receiver
+	// don't have same encryption mode. Just do inplace encrypt/decrypt.
 	// Tables are sent in the sorted order, so no need to sort them here.
 	lc.levels[lev].addTable(tbl)
 

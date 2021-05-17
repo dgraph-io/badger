@@ -2191,7 +2191,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	// Stream contents of DB to the output DB.
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
-	stream.CopyTables = true
+	stream.FullCopy = true
 
 	stream.Send = func(buf *z.Buffer) error {
 		return writer.Write(buf)

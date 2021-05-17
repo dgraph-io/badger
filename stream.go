@@ -85,9 +85,9 @@ type Stream struct {
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs uint64
-	// CopyTables should be set to true only when the and encryption is enabled/disabled in both
+	// FullCopy should be set to true only when the and encryption is enabled/disabled in both
 	// the sender and receiver.
-	CopyTables   bool
+	FullCopy     bool
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
@@ -112,9 +112,6 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
-		if item.IsDeletedOrExpired() {
-			break
-		}
 		if !bytes.Equal(key, item.Key()) {
 			// Break out on the first encounter with another key.
 			break
@@ -140,6 +137,12 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 
 		if item.DiscardEarlierVersions() {
+			break
+		}
+		if item.IsDeletedOrExpired() {
+			// We do a FullCopy in stream. It might happen that tables from L6 contain K(version=1),
+			// while the table at L4 that was not copied contains K(version=2) with delete mark.
+			// Hence, we need to send the deleted or expired item too.
 			break
 		}
 	}
@@ -366,6 +369,8 @@ outer:
 
 func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Table) error {
 	y.AssertTrue(st.SinceTs == 0)
+	// TODO: See if making this concurrent would be helpful. Most likely it won't.
+	// But, if it does work, then most like <3 goroutines might be sufficient.
 	infof := st.db.opt.Infof
 	// Make a copy of the manifest so that we don't have race condition.
 	manifest := st.db.manifest.manifest.clone()
@@ -442,6 +447,11 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	if st.FullCopy {
+		if st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
+			panic("Got invalid stream options when doing full copy")
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
@@ -454,9 +464,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	if st.KeyToList == nil {
 		st.KeyToList = st.ToList
 	}
-
-	// Picks up ranges from Badger, and sends them to rangeCh.
-	go st.produceRanges(ctx)
 
 	// Pick up key-values from kvChan and send to stream.
 	kvErr := make(chan error, 1)
@@ -512,9 +519,9 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 			var rem []*table.Table
 			cp := tables[:0]
 			for _, t := range tables {
-				// Check if this table's range is fully covered by st.Prefix.
-				// Only if the range is fully covered, can we copy the
-				// table wholesale. Otherwise, we must stream it.
+				// We can only copy over those tables that satisfy following conditions:
+				// - All the keys have version less than st.readTs
+				// - st.Prefix fully covers the table
 				if t.MaxVersion() > st.readTs || !t.CoveredByPrefix(st.Prefix) {
 					rem = append(rem, t)
 					continue
@@ -531,7 +538,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		return st.copyTablesOver(ctx, toCopy)
 	}
 
-	if st.CopyTables && st.SinceTs == 0 {
+	if st.FullCopy {
 		// As of now, we don't handle the non-zero SinceTs.
 		if err := copyTables(); err != nil {
 			return errors.Wrap(err, "while copying tables")
@@ -576,6 +583,10 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		}
 		return res
 	}
+
+	// Picks up ranges from Badger, and sends them to rangeCh.
+	// Just for simplicity, we'd consider all the tables for range production.
+	go st.produceRanges(ctx)
 
 	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
 	var wg sync.WaitGroup
