@@ -813,13 +813,10 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.opt.Debugf("writeRequests called. Writing to value log")
-	if !db.opt.managedTxns {
-		// Don't do value log writes in managed mode.
-		err := db.vlog.write(reqs)
-		if err != nil {
-			done(err)
-			return err
-		}
+	err := db.vlog.write(reqs)
+	if err != nil {
+		done(err)
+		return err
 	}
 
 	db.opt.Debugf("Sending updates to subscribers")
@@ -2194,10 +2191,10 @@ func (db *DB) StreamDB(outOptions Options) error {
 	// Stream contents of DB to the output DB.
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
+	stream.CopyTables = true
 
 	stream.Send = func(buf *z.Buffer) error {
-		return nil
-		// return writer.Write(buf)
+		return writer.Write(buf)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
 		return y.Wrapf(err, "cannot stream DB to out DB at %s", outDir)

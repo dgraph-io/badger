@@ -282,14 +282,13 @@ func newFile(fname string, sz int) (*z.MmapFile, error) {
 	return mf, nil
 }
 
-func CreateTableFromBuffer(id uint64, buf []byte, opts Options) (*Table, error) {
-	fname := IDToFilename(id)
+func CreateTableFromBuffer(fname string, buf []byte, opts Options) (*Table, error) {
 	mf, err := newFile(fname, len(buf))
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO(ibrahim): We cannot use the buf directly here because it is not mmapped.
+	// We cannot use the buf directly here because it is not mmapped.
 	written := copy(mf.Data, buf)
 	y.AssertTrue(written == len(mf.Data))
 	if err := z.Msync(mf.Data); err != nil {
@@ -716,6 +715,12 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
 	}
 	return !mayContain
+}
+
+// CoveredByPrefix returns true if all the keys in the table are prefixed by the given prefix.
+func (t *Table) CoveredByPrefix(prefix []byte) bool {
+	return bytes.HasPrefix(y.ParseKey(t.Biggest()), prefix) &&
+		bytes.HasPrefix(y.ParseKey(t.Smallest()), prefix)
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.

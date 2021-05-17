@@ -1609,7 +1609,7 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 }
 
 func iteratorsReversed(th []*table.Table, opt int) []y.Iterator {
-	var out []y.Iterator
+	out := make([]y.Iterator, 0, len(th))
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
 		out = append(out, th[i].NewIterator(opt))
@@ -1619,7 +1619,7 @@ func iteratorsReversed(th []*table.Table, opt int) []y.Iterator {
 
 // getTables return tables from all levels. It would call IncrRef on all returned tables.
 func (s *levelsController) getTables(opt *IteratorOptions) [][]*table.Table {
-	var res [][]*table.Table
+	res := make([][]*table.Table, 0, len(s.levels))
 	for _, level := range s.levels {
 		res = append(res, level.getTables(opt))
 	}
@@ -1631,7 +1631,7 @@ func (s *levelsController) getTables(opt *IteratorOptions) [][]*table.Table {
 func (s *levelsController) iterators(opt *IteratorOptions) []y.Iterator {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
-	var itrs []y.Iterator
+	itrs := make([]y.Iterator, 0, len(s.levels))
 	for _, level := range s.levels {
 		itrs = append(itrs, level.iterators(opt)...)
 	}
@@ -1763,35 +1763,37 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 	return splits
 }
 
+// AddTable builds the table from the KV.value options passed through the KV.Key.
 func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
 	y.AssertTrue(kv.Kind == pb.KV_FILE)
 
 	var change pb.ManifestChange
-	if err := proto.Unmarshal(kv.UserMeta, &change); err != nil {
+	if err := proto.Unmarshal(kv.Key, &change); err != nil {
 		return err
 	}
-	var (
-		dk  *pb.DataKey
-		err error
-	)
 	// The keyId is zero if there is no encryption.
-	// TODO(ibrahim): Verify this.
-	if change.KeyId != 0 {
-		dk, err = lc.kv.registry.DataKey(change.KeyId)
-		if err != nil {
-			return err
-		}
+	dk, err := lc.kv.registry.DataKey(change.KeyId)
+	if err != nil {
+		return err
 	}
 
 	opts := buildTableOptions(lc.kv)
 	opts.Compression = options.CompressionType(change.Compression)
 	opts.DataKey = dk
 
+	fileID := lc.reserveFileID()
+	fname := table.NewFilename(fileID, lc.kv.opt.Dir)
+
 	// Create a copy of the kv.Value because it is owned by the z.buffer.
-	tbl, err := table.CreateTableFromBuffer(change.Id, y.Copy(kv.Value), opts)
+	tbl, err := table.CreateTableFromBuffer(fname, y.Copy(kv.Value), opts)
 
 	// TODO(ibrahim): Check all the increment refs are done correctly.
+	// Tables are sent in the sorted order, so no need to sort them here.
 	lc.levels[lev].addTable(tbl)
 
+	change.Id = fileID
+	change.Level = uint32(lev)
+	// We use the same data KeyId. So, change.KeyId remains the same.
+	y.AssertTrue(change.Op == pb.ManifestChange_CREATE)
 	return lc.kv.manifest.addChanges([]*pb.ManifestChange{&change})
 }

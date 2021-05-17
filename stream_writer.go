@@ -41,14 +41,15 @@ import (
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock      sync.Mutex
-	db             *DB
-	done           func()
-	throttle       *y.Throttle
-	maxVersion     uint64
-	writers        map[uint32]*sortedWriter
-	prevLevel      uint64
-	processingKeys bool // True if we have started processing keys.
+	writeLock       sync.Mutex
+	db              *DB
+	done            func()
+	throttle        *y.Throttle
+	maxVersion      uint64
+	writers         map[uint32]*sortedWriter
+	prevLevel       int
+	senderPrevLevel int
+	processingKeys  bool // true if we have started processing keys.
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -118,9 +119,11 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			if sw.processingKeys {
 				return errors.New("Received pb.KV_FILE after pb.KV_KEY")
 			}
-			level := kv.Version
-			if sw.prevLevel == 0 {
-				sw.prevLevel = level
+			level := int(kv.Version)
+			if sw.senderPrevLevel == 0 {
+				// We received the first file, set the sender's and receiver's max levels.
+				sw.senderPrevLevel = level
+				sw.prevLevel = len(sw.db.lc.levels) - 1
 			}
 
 			// This is based on the assumption that the tables from the last
@@ -129,20 +132,23 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			// the prevLevel, we know we're processing a last level table.
 			// The last level for this DB can be 8 while the DB that's sending
 			// this could have the last level at 7.
-			lev := len(sw.db.lc.levels) - 1
-			if sw.prevLevel != level {
+			if sw.senderPrevLevel != level {
 				// If the previous level and the current level is different, we
-				// must be processing a table from the second last level.
-				// Add table to the second last level of this DB.
-				lev = len(sw.db.lc.levels) - 2
+				// must be processing a table from the next last level.
+				sw.senderPrevLevel = level
+				sw.prevLevel--
 			}
-			return sw.db.lc.AddTable(&kv, lev)
+			return sw.db.lc.AddTable(&kv, sw.prevLevel)
 		case pb.KV_KEY:
 			// Pass. The following code will handle the keys.
 		}
 
-		// TODO(Naman): Ensure the newly created tables are added to the correct level.
 		sw.processingKeys = true
+		if sw.prevLevel == 0 {
+			// If prevLevel is 0, that means that we have not written anything yet. Equivalently,
+			// we were virtually writing to the maxLevel+1.
+			sw.prevLevel = len(sw.db.lc.levels)
+		}
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -318,6 +324,7 @@ type sortedWriter struct {
 
 	builder  *table.Builder
 	lastKey  []byte
+	level    int
 	streamID uint32
 	reqCh    chan *request
 	// Have separate closer for each writer, as it can be closed at any time.
@@ -337,6 +344,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
 		closer:   z.NewCloser(1),
+		level:    sw.prevLevel - 1, // Write at the level just above the one we were writing to.
 	}
 
 	go w.handleRequests()
@@ -468,7 +476,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	lc := w.db.lc
 
-	lhandler := lc.levels[len(lc.levels)-1]
+	lhandler := lc.levels[w.level]
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
 		Id:          tbl.ID(),

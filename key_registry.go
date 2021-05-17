@@ -389,15 +389,16 @@ func (kr *KeyRegistry) AddKey(key pb.KV) error {
 	if kr.lastCreated < dk.CreatedAt {
 		kr.lastCreated = dk.CreatedAt
 	}
+
+	kr.dataKeys[dk.KeyId] = &dk
 	if kr.nextKeyID <= dk.KeyId {
 		// This is the next key ID. It should be one above the current key.
 		kr.nextKeyID = dk.KeyId + 1
 	}
-	kr.dataKeys[kr.nextKeyID] = &dk
+
 	if kr.opt.InMemory {
 		return nil
 	}
-
 	// Store the datekey.
 	return storeDataKey(kr.fp, kr.opt.EncryptionKey, dk)
 }
@@ -424,26 +425,17 @@ func storeDataKey(w io.Writer, storageKey []byte, key pb.DataKey) error {
 		return err
 	}
 	// In memory datakey will be plain text so encrypting before storing to the disk.
-	var err error
-	if err = xor(); err != nil {
+	if err := xor(); err != nil {
 		return y.Wrapf(err, "Error while encrypting datakey in storeDataKey")
 	}
-	var data []byte
-	if data, err = key.Marshal(); err != nil {
-		err = y.Wrapf(err, "Error while marshaling datakey in storeDataKey")
-		var err2 error
-		// decrypting the datakey back.
-		if err2 = xor(); err2 != nil {
-			return y.Wrapf(err,
-				y.Wrapf(err2, "Error while decrypting datakey in storeDataKey").Error())
-		}
-		return err
+	data, err := key.Marshal()
+	if err != nil {
+		return y.Wrapf(err, "Error while marshaling datakey in storeDataKey")
 	}
 	var lenCrcBuf [8]byte
 	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(data)))
 	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(data, y.CastagnoliCrcTable))
 	y.Check2(w.Write(lenCrcBuf[:]))
 	y.Check2(w.Write(data))
-	// Decrypting the datakey back since we're using the pointer.
-	return xor()
+	return nil
 }

@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"context"
-	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -85,7 +84,9 @@ type Stream struct {
 	Send func(buf *z.Buffer) error
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
-	SinceTs      uint64
+	SinceTs uint64
+	// CopyTables should be set to true only when the and encryption is enabled/disabled in both
+	// the sender and receiver.
 	CopyTables   bool
 	readTs       uint64
 	db           *DB
@@ -364,14 +365,7 @@ outer:
 }
 
 func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Table) error {
-	// Pick all relevant tables from levels. We'd use this to copy them over,
-	// or generate iterators from them.
-
-	// Let's pick the tables which can be fully copied over from last level.
-	if st.SinceTs != 0 {
-		panic("Fix me")
-	}
-
+	y.AssertTrue(st.SinceTs == 0)
 	infof := st.db.opt.Infof
 	// Make a copy of the manifest so that we don't have race condition.
 	manifest := st.db.manifest.manifest.clone()
@@ -381,10 +375,10 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 		level := i
 		tables := tableMatrix[i]
 		for _, t := range tables {
-			// original += t.Size()
 			// This table can be picked for copying directly.
 			out := z.NewBuffer(int(t.Size())+1024, "Stream.Table")
 			if dk := t.DataKey(); dk != nil {
+				y.AssertTrue(dk.KeyId != 0)
 				// If we have a legit data key, send it over so the table can be decrypted. The same
 				// data key could have been used to encrypt many tables. Avoid sending it
 				// repeatedly.
@@ -407,7 +401,6 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 				t.ID(), level, humanize.IBytes(uint64(t.Size())))
 			tableManifest := manifest.Tables[t.ID()]
 			change := pb.ManifestChange{
-				Id:    t.ID(),
 				Op:    pb.ManifestChange_CREATE,
 				Level: uint32(level),
 				KeyId: tableManifest.KeyID,
@@ -424,10 +417,10 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 			// destination DB would write streamed keys one level above.
 			kv := &pb.KV{
 				// Key can be used for MANIFEST.
-				Value:    t.Data,
-				Kind:     pb.KV_FILE,
-				Version:  uint64(level),
-				UserMeta: buf,
+				Key:     buf,
+				Value:   t.Data,
+				Kind:    pb.KV_FILE,
+				Version: uint64(level),
 			}
 			KVToBuffer(kv, out)
 
@@ -439,8 +432,6 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 			}
 		}
 	}
-	// infof("Last Level. Tables %s -> %s for iteration\n",
-	// 	humanize.IBytes(uint64(original)), humanize.IBytes(uint64(final)))
 	return nil
 }
 
@@ -496,47 +487,55 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	}()
 	y.AssertTrue(len(tableMatrix) == st.db.opt.MaxLevels)
 
-	// Figure out which tables we can copy. Only choose from the last 2 levels.
-	// Say last level has data of size 100. Given a 10x level multiplier and
-	// assuming the tree is balanced, second last level would have 10, and the
-	// third last level would have 1. The third last level would only have 1%
-	// of the data of the last level. It's OK for us to stop there and just
-	// stream it, instead of trying to copy over those tables too.  When we
-	// copy over tables to Level i, we can't stream any data to level i, i+1,
-	// and so on. The stream has to create tables at level i-1, so there can be
-	// overlap between the tables at i-1 and i.
+	infof := st.db.opt.Infof
+	copyTables := func() error {
+		// Figure out which tables we can copy. Only choose from the last 2 levels.
+		// Say last level has data of size 100. Given a 10x level multiplier and
+		// assuming the tree is balanced, second last level would have 10, and the
+		// third last level would have 1. The third last level would only have 1%
+		// of the data of the last level. It's OK for us to stop there and just
+		// stream it, instead of trying to copy over those tables too.  When we
+		// copy over tables to Level i, we can't stream any data to level i, i+1,
+		// and so on. The stream has to create tables at level i-1, so there can be
+		// overlap between the tables at i-1 and i.
 
-	threshold := len(tableMatrix) - 2
-	toCopy := make([][]*table.Table, len(tableMatrix))
-	var numCopy, numStream int
-	for lev, tables := range tableMatrix {
-		// We stream only the data in the two bottommost levels.
-		if lev < threshold {
-			numStream += len(tables)
-			continue
-		}
-		var rem []*table.Table
-		cp := tables[:0]
-		for _, t := range tables {
-			// TODO: Also check if this table's range is fully covered by
-			// st.Prefix. Only if the range is fully covered, can we copy the
-			// table wholesale. Otherwise, we should be streaming it.
-			if t.MaxVersion() > st.readTs {
-				rem = append(rem, t)
+		// Let's pick the tables which can be fully copied over from last level.
+		threshold := len(tableMatrix) - 2
+		toCopy := make([][]*table.Table, len(tableMatrix))
+		var numCopy, numStream int
+		for lev, tables := range tableMatrix {
+			// We stream only the data in the two bottommost levels.
+			if lev < threshold {
+				numStream += len(tables)
 				continue
 			}
-			cp = append(cp, t)
+			var rem []*table.Table
+			cp := tables[:0]
+			for _, t := range tables {
+				// Check if this table's range is fully covered by st.Prefix.
+				// Only if the range is fully covered, can we copy the
+				// table wholesale. Otherwise, we must stream it.
+				if t.MaxVersion() > st.readTs || !t.CoveredByPrefix(st.Prefix) {
+					rem = append(rem, t)
+					continue
+				}
+				cp = append(cp, t)
+			}
+			toCopy[lev] = cp       // Pick tables to copy.
+			tableMatrix[lev] = rem // Keep remaining for streaming.
+			numCopy += len(cp)
+			numStream += len(rem)
 		}
-		toCopy[lev] = cp       // Pick tables to copy.
-		tableMatrix[lev] = rem // Keep remaining for streaming.
-		numCopy += len(cp)
-		numStream += len(rem)
-	}
-	infof := st.db.opt.Infof
-	infof("Num tables to copy: %d. Num to stream: %d\n", numCopy, numStream)
+		infof("Num tables to copy: %d. Num to stream: %d\n", numCopy, numStream)
 
-	if err := st.copyTablesOver(ctx, toCopy); err != nil {
-		return errors.Wrapf(err, "while copying tables")
+		return st.copyTablesOver(ctx, toCopy)
+	}
+
+	if st.CopyTables && st.SinceTs == 0 {
+		// As of now, we don't handle the non-zero SinceTs.
+		if err := copyTables(); err != nil {
+			return errors.Wrap(err, "while copying tables")
+		}
 	}
 
 	var txn *Txn
@@ -569,15 +568,14 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		opt.SinceTs = st.SinceTs
 
 		res := &Iterator{
-			txn:    txn,
-			iitr:   table.NewMergeIterator(itrs, false),
-			opt:    opt,
-			readTs: txn.readTs,
+			txn:      txn,
+			iitr:     table.NewMergeIterator(itrs, false),
+			opt:      opt,
+			readTs:   txn.readTs,
+			ThreadId: threadId,
 		}
 		return res
 	}
-
-	os.Exit(1)
 
 	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
 	var wg sync.WaitGroup
@@ -588,6 +586,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
 			itr := newIterator(threadId)
+			defer itr.Close()
 			if err := st.produceKVs(ctx, itr); err != nil {
 				select {
 				case errCh <- err:
