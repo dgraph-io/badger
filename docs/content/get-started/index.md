@@ -54,7 +54,7 @@ To open your database, use the `badger.Open()` function, with the appropriate
 options. The `Dir` and `ValueDir` options are mandatory and must be
 specified by the client. They can be set to the same value to simplify things.
 
-```
+```go
 package main
 
 import (
@@ -84,8 +84,22 @@ in-memory mode. When Badger is running in in-memory mode, all the data is stored
 Reads and writes are much faster in in-memory mode, but all the data stored in Badger will be lost
 in case of a crash or close. To open badger in in-memory mode, set the `InMemory` option.
 
-```
+```go
 opt := badger.DefaultOptions("").WithInMemory(true)
+```
+
+### Encryption Mode
+
+If you enable encryption on Badger, you also need to set the index cache size.
+
+{{% notice "tip" %}}
+Having a cache improves the performance. Otherwise, your reads would be very slow while encryption is enabled.
+{{% /notice %}}
+
+For example, to set a `100 Mb` cache:
+
+```go
+opts.IndexCache = 100 << 20 // 100 mb or some other size based on the amount of data
 ```
 
 ## Transactions
@@ -93,7 +107,7 @@ opt := badger.DefaultOptions("").WithInMemory(true)
 ### Read-only transactions
 To start a read-only transaction, you can use the `DB.View()` method:
 
-```
+```go
 err := db.View(func(txn *badger.Txn) error {
   // Your code here…
   return nil
@@ -108,7 +122,7 @@ seen by calls made within the closure.
 ### Read-write transactions
 To start a read-write transaction, you can use the `DB.Update()` method:
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   // Your code here…
   return nil
@@ -129,7 +143,7 @@ the transaction exceeds a certain limit. In that case, it is best to commit the
 transaction and start a new transaction immediately. Here is an example (we are
 not checking for errors in some places for simplicity):
 
-```
+```go
 updates := make(map[string]string)
 txn := db.NewTransaction(true)
 for k,v := range updates {
@@ -161,7 +175,7 @@ sufficient for read-write transaction. However, if your code doesn’t call
 then please make sure you call `Txn.Discard()` in a `defer` block. Refer to the
 code below.
 
-```
+```go
 // Start a writable transaction.
 txn := db.NewTransaction(true)
 defer txn.Discard()
@@ -193,7 +207,7 @@ durable until the callback has been invoked with a `nil` error value.
 ## Using key/value pairs
 To save a key/value pair, use the `Txn.Set()` method:
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   err := txn.Set([]byte("answer"), []byte("42"))
   return err
@@ -204,7 +218,7 @@ Key/Value pair can also be saved by first creating `Entry`, then setting this
 `Entry` using `Txn.SetEntry()`. `Entry` also exposes methods to set properties
 on it.
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   e := badger.NewEntry([]byte("answer"), []byte("42"))
   err := txn.SetEntry(e)
@@ -215,7 +229,7 @@ err := db.Update(func(txn *badger.Txn) error {
 This will set the value of the `"answer"` key to `"42"`. To retrieve this
 value, we can use the `Txn.Get()` method:
 
-```
+```go
 err := db.View(func(txn *badger.Txn) error {
   item, err := txn.Get([]byte("answer"))
   handle(err)
@@ -272,7 +286,7 @@ invocations. Setting a bandwidth too low would do more disk writes, setting it
 too high would result in wasted integers if Badger is closed or crashes.
 To avoid wasted integers, call `Release` before closing Badger.
 
-```
+```go
 seq, err := db.GetSequence(key, 1000)
 defer seq.Release()
 for {
@@ -287,7 +301,7 @@ _merged_ with it. It returns a new value which is the result of the _merge_
 operation. All values are specified in byte arrays. For e.g., here is a merge
 function (`add`) which appends a  `[]byte` value to an existing `[]byte` value.
 
-```
+```go
 // Merge function to append one byte slice to another
 func add(originalValue, newValue []byte) []byte {
   return append(originalValue, newValue...)
@@ -302,7 +316,7 @@ method.
 `MergeOperator.Get()` method can be used to retrieve the cumulative value of the key
 associated with the merge operation.
 
-```
+```go
 key := []byte("merge")
 
 m := db.GetMergeOperator(key, add, 200*time.Millisecond)
@@ -317,7 +331,7 @@ res, _ := m.Get() // res should have value ABC encoded
 
 Example: Merge operator which increments a counter
 
-```
+```go
 func uint64ToBytes(i uint64) []byte {
   var buf [8]byte
   binary.BigEndian.PutUint64(buf[:], i)
@@ -353,7 +367,7 @@ elapsed, the key will no longer be retrievable and will be eligible for garbage
 collection. A TTL can be set as a `time.Duration` value using the `Entry.WithTTL()`
 and `Txn.SetEntry()` API methods.
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   e := badger.NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
   err := txn.SetEntry(e)
@@ -366,7 +380,7 @@ is represented by a single byte. It can be used to set certain bits along
 with the key to aid in interpreting or decoding the key-value pair. User
 metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
@@ -377,7 +391,7 @@ err := db.Update(func(txn *badger.Txn) error {
 `Entry` APIs can be used to add the user metadata and TTL for same key. This `Entry`
 then can be set using `Txn.SetEntry()`.
 
-```
+```go
 err := db.Update(func(txn *badger.Txn) error {
   e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
   err := txn.SetEntry(e)
@@ -391,7 +405,7 @@ To iterate over keys, we can use an `Iterator`, which can be obtained using the
 order.
 
 
-```
+```go
 err := db.View(func(txn *badger.Txn) error {
   opts := badger.DefaultIteratorOptions
   opts.PrefetchSize = 10
@@ -424,7 +438,7 @@ values altogether. See section below on key-only iteration.
 ### Prefix scans
 To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 
-```
+```go
 db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(badger.DefaultIteratorOptions)
   defer it.Close()
@@ -452,7 +466,7 @@ enable key-only iteration, you need to set the `IteratorOptions.PrefetchValues`
 field to `false`. This can also be used to do sparse reads for selected keys
 during an iteration, by calling `item.Value()` only when required.
 
-```
+```go
 err := db.View(func(txn *badger.Txn) error {
   opts := badger.DefaultIteratorOptions
   opts.PrefetchValues = false
@@ -491,7 +505,7 @@ provide full and incremental backups quickly.  Dgraph is a heavy user of this
 framework.  In fact, this framework was developed and used within Dgraph, before
 getting ported over to Badger.
 
-```
+```go
 stream := db.NewStream()
 // db.NewStreamAt(readTs) for managed mode.
 
@@ -546,7 +560,7 @@ the following method, which can be invoked at an appropriate time:
   one log file. As an optimization, you could also immediately re-run it whenever
   it returns nil error (indicating a successful value log GC), as shown below.
 
-	```
+	```go
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -571,13 +585,13 @@ in your PATH to use this tool.
 The command below will create a version-agnostic backup of the database, to a
 file `badger.bak` in the current working directory
 
-```
+```sh
 badger backup --dir <path/to/badgerdb>
 ```
 
 To restore `badger.bak` in the current working directory to a new database:
 
-```
+```sh
 badger restore --dir <path/to/badgerdb>
 ```
 
@@ -587,7 +601,7 @@ If you have a Badger database that was created using v0.8 (or below), you can
 use the `badger_backup` tool provided in v0.8.1, and then restore it using the
 command above to upgrade your database to work with the latest version.
 
-```
+```sh
 badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
 ```
 
@@ -597,7 +611,7 @@ latest value log which is append-only. So, rsync can be used as rudimentary way
 to perform a backup. In the following script, we repeat rsync to ensure that the
 LSM tree remains consistent with the MANIFEST file while doing a full backup.
 
-```
+```sh
 #!/bin/bash
 set -o history
 set -o histexpand
