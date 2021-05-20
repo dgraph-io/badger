@@ -475,7 +475,7 @@ func (opt Options) WithBaseTableSize(val int64) Options {
 //
 // LevelSizeMultiplier sets the ratio between the maximum sizes of contiguous levels in the LSM.
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
-//  triggered.
+// triggered.
 //
 // The default value of LevelSizeMultiplier is 10.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
