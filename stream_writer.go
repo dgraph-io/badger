@@ -50,8 +50,8 @@ type StreamWriter struct {
 	writers         map[uint32]*sortedWriter
 	prevLevel       int
 	senderPrevLevel int
-	keyId           map[uint64]uint64 // stores reader's key ID to writer's key ID.
-	processingKeys  bool              // true if we have started processing keys.
+	keyId           map[uint64]*pb.DataKey // stores reader's keyId to data key map.
+	processingKeys  bool                   // true if we have started processing keys.
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -65,6 +65,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
+		keyId:    make(map[uint64]*pb.DataKey),
 	}
 }
 
@@ -115,25 +116,32 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		}
 		switch kv.Kind {
 		case pb.KV_DATA_KEY:
+			y.AssertTrue(len(sw.db.opt.EncryptionKey) > 0)
 			var dk pb.DataKey
 			if err := proto.Unmarshal(kv.Value, &dk); err != nil {
 				return errors.Wrapf(err, "unmarshal failed %s", kv.Value)
 			}
 			readerId := dk.KeyId
-			if id, ok := sw.keyId[readerId]; ok {
+			if _, ok := sw.keyId[readerId]; !ok {
+				// Insert the data key to the key registry if not already inserted.
+				id, err := sw.db.registry.AddKey(dk)
+				if err != nil {
+					return errors.Wrap(err, "failed to write data key")
+				}
 				dk.KeyId = id
+				sw.keyId[readerId] = &dk
 			}
-			keyId, err := sw.db.registry.AddKey(dk)
-			if err != nil {
-				return errors.Wrap(err, "failed to write data key")
-			}
-			sw.keyId[readerId] = keyId
+			return nil
 		case pb.KV_FILE:
 			// All tables should be recieved before any of the keys.
 			if sw.processingKeys {
 				return errors.New("Received pb.KV_FILE after pb.KV_KEY")
 			}
-			level := int(kv.Version)
+			var change pb.ManifestChange
+			if err := proto.Unmarshal(kv.Key, &change); err != nil {
+				return errors.Wrap(err, "unable to unmarshal manifest change")
+			}
+			level := int(change.Level)
 			if sw.senderPrevLevel == 0 {
 				// We received the first file, set the sender's and receiver's max levels.
 				sw.senderPrevLevel = level
@@ -152,7 +160,8 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 				sw.senderPrevLevel = level
 				sw.prevLevel--
 			}
-			return sw.db.lc.AddTable(&kv, sw.prevLevel)
+			dk := sw.keyId[change.KeyId]
+			return sw.db.lc.AddTable(&kv, sw.prevLevel, dk, &change)
 		case pb.KV_KEY:
 			// Pass. The following code will handle the keys.
 		}

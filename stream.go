@@ -85,8 +85,7 @@ type Stream struct {
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs uint64
-	// FullCopy should be set to true only when the and encryption is enabled/disabled in both
-	// the sender and receiver.
+	// FullCopy should be set to true only when encryption mode is same for sender and receiver.
 	FullCopy     bool
 	readTs       uint64
 	db           *DB
@@ -129,6 +128,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
+		kv.Meta = []byte{item.meta}
 		kv.UserMeta = a.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
@@ -368,7 +368,6 @@ outer:
 }
 
 func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Table) error {
-	y.AssertTrue(st.SinceTs == 0)
 	// TODO: See if making this concurrent would be helpful. Most likely it won't.
 	// But, if it does work, then most like <3 goroutines might be sufficient.
 	infof := st.db.opt.Infof
@@ -422,10 +421,9 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 			// destination DB would write streamed keys one level above.
 			kv := &pb.KV{
 				// Key can be used for MANIFEST.
-				Key:     buf,
-				Value:   t.Data,
-				Kind:    pb.KV_FILE,
-				Version: uint64(level),
+				Key:   buf,
+				Value: t.Data,
+				Kind:  pb.KV_FILE,
 			}
 			KVToBuffer(kv, out)
 
@@ -448,7 +446,7 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	if st.FullCopy {
-		if st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
+		if !st.db.opt.managedTxns || st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
 			panic("Got invalid stream options when doing full copy")
 		}
 	}

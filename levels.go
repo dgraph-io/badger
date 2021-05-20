@@ -37,7 +37,6 @@ import (
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -1764,19 +1763,14 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 }
 
 // AddTable builds the table from the KV.value options passed through the KV.Key.
-func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
-	y.AssertTrue(kv.Kind == pb.KV_FILE)
-
-	var change pb.ManifestChange
-	if err := proto.Unmarshal(kv.Key, &change); err != nil {
-		return errors.Wrap(err, "unable to unmarshal manifest change")
-	}
+func (lc *levelsController) AddTable(
+	kv *pb.KV, lev int, dk *pb.DataKey, change *pb.ManifestChange) error {
+	// TODO: Encryption / Decryption might be required for the table, if the sender and receiver
+	// don't have same encryption mode. See if inplace encryption/decryption can be done.
+	// Tables are sent in the sorted order, so no need to sort them here.
+	encrypted := len(lc.kv.opt.EncryptionKey) > 0
+	y.AssertTrue((dk != nil && encrypted) || (dk == nil && !encrypted))
 	// The keyId is zero if there is no encryption.
-	dk, err := lc.kv.registry.DataKey(change.KeyId)
-	if err != nil {
-		return errors.Wrap(err, "while getting key from registry")
-	}
-
 	opts := buildTableOptions(lc.kv)
 	opts.Compression = options.CompressionType(change.Compression)
 	opts.DataKey = dk
@@ -1784,21 +1778,29 @@ func (lc *levelsController) AddTable(kv *pb.KV, lev int) error {
 	fileID := lc.reserveFileID()
 	fname := table.NewFilename(fileID, lc.kv.opt.Dir)
 
-	// Create a copy of the kv.Value because it is owned by the z.buffer.
-	tbl, err := table.CreateTableFromBuffer(fname, y.Copy(kv.Value), opts)
-	if err != nil {
-		return errors.Wrap(err, "while creating table from buffer")
+	// kv.Value is owned by the z.buffer. Ensure that we copy this buffer.
+	var tbl *table.Table
+	var err error
+	if lc.kv.opt.InMemory {
+		if tbl, err = table.OpenInMemoryTable(y.Copy(kv.Value), fileID, &opts); err != nil {
+			return errors.Wrap(err, "while creating in-memory table from buffer")
+		}
+	} else {
+		if tbl, err = table.CreateTableFromBuffer(fname, kv.Value, opts); err != nil {
+			return errors.Wrap(err, "while creating table from buffer")
+		}
 	}
 
-	// TODO(ibrahim): Check all the increment refs are done correctly.
-	// TODO: Encryption / Decryption might be required for the table, if the sender and receiver
-	// don't have same encryption mode. Just do inplace encrypt/decrypt.
-	// Tables are sent in the sorted order, so no need to sort them here.
 	lc.levels[lev].addTable(tbl)
+	// Release the ref held by OpenTable.
+	_ = tbl.DecrRef()
 
 	change.Id = fileID
 	change.Level = uint32(lev)
+	if dk != nil {
+		change.KeyId = dk.KeyId
+	}
 	// We use the same data KeyId. So, change.KeyId remains the same.
 	y.AssertTrue(change.Op == pb.ManifestChange_CREATE)
-	return lc.kv.manifest.addChanges([]*pb.ManifestChange{&change})
+	return lc.kv.manifest.addChanges([]*pb.ManifestChange{change})
 }

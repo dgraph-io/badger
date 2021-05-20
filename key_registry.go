@@ -387,7 +387,7 @@ func (kr *KeyRegistry) AddKey(dk pb.DataKey) (uint64, error) {
 	kr.dataKeys[dk.KeyId] = &dk
 
 	if kr.opt.InMemory {
-		return 0, nil
+		return dk.KeyId, nil
 	}
 	// Store the datakey.
 	return dk.KeyId, storeDataKey(kr.fp, kr.opt.EncryptionKey, dk)
