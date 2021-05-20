@@ -50,8 +50,10 @@ type StreamWriter struct {
 	writers         map[uint32]*sortedWriter
 	prevLevel       int
 	senderPrevLevel int
-	keyId           map[uint64]*pb.DataKey // stores reader's keyId to data key map.
-	processingKeys  bool                   // true if we have started processing keys.
+	keyId           map[uint64]*pb.DataKey // map to store stores reader's keyId to data key.
+	// Writer might receive tables first, and then receive keys. If true, that means we have
+	// started processing keys.
+	processingKeys bool
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be

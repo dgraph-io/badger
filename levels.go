@@ -1792,7 +1792,7 @@ func (lc *levelsController) AddTable(
 	}
 
 	lc.levels[lev].addTable(tbl)
-	// Release the ref held by OpenTable.
+	// Release the ref held by OpenTable. addTable would add a reference.
 	_ = tbl.DecrRef()
 
 	change.Id = fileID

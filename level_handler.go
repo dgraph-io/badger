@@ -353,6 +353,7 @@ func (s *levelHandler) getTables(opt *IteratorOptions) []*table.Table {
 		}
 		return out
 	}
+
 	tables := opt.pickTables(s.tables)
 	for _, t := range tables {
 		t.IncrRef()
