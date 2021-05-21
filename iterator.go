@@ -368,17 +368,17 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	filterTables := func(tables []*table.Table) []*table.Table {
-		if opt.SinceTs > 0 {
-			tmp := tables[:0]
-			for _, t := range tables {
-				if t.MaxVersion() < opt.SinceTs {
-					continue
-				}
-				tmp = append(tmp, t)
-			}
-			tables = tmp
+		if opt.SinceTs == 0 {
+			return tables
 		}
-		return tables
+		out := tables[:0]
+		for _, t := range tables {
+			if t.MaxVersion() < opt.SinceTs {
+				continue
+			}
+			out = append(out, t)
+		}
+		return out
 	}
 
 	if len(opt.Prefix) == 0 {
@@ -492,7 +492,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
-	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
+	iters = append(iters, txn.db.lc.iterators(&opt)...) // This will increment references.
 	res := &Iterator{
 		txn:    txn,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),

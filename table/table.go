@@ -146,7 +146,8 @@ func (t *Table) KeyCount() uint32 { return t.cheapIndex().KeyCount }
 
 // OnDiskSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) OnDiskSize() uint32 { return t.cheapIndex().OnDiskSize }
+func (t *Table) OnDiskSize() uint32   { return t.cheapIndex().OnDiskSize }
+func (t *Table) DataKey() *pb.DataKey { return t.opt.DataKey }
 
 // CompressionType returns the compression algorithm used for block compression.
 func (t *Table) CompressionType() options.CompressionType {
@@ -256,13 +257,9 @@ func (b block) verifyCheckSum() error {
 
 func CreateTable(fname string, builder *Builder) (*Table, error) {
 	bd := builder.Done()
-	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
-	if err == z.NewFile {
-		// Expected.
-	} else if err != nil {
-		return nil, y.Wrapf(err, "while creating table: %s", fname)
-	} else {
-		return nil, errors.Errorf("file already exists: %s", fname)
+	mf, err := newFile(fname, bd.Size)
+	if err != nil {
+		return nil, err
 	}
 
 	written := bd.Copy(mf.Data)
@@ -271,6 +268,33 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 		return nil, y.Wrapf(err, "while calling msync on %s", fname)
 	}
 	return OpenTable(mf, *builder.opts)
+}
+
+func newFile(fname string, sz int) (*z.MmapFile, error) {
+	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, sz)
+	if err == z.NewFile {
+		// Expected.
+	} else if err != nil {
+		return nil, y.Wrapf(err, "while creating table: %s", fname)
+	} else {
+		return nil, errors.Errorf("file already exists: %s", fname)
+	}
+	return mf, nil
+}
+
+func CreateTableFromBuffer(fname string, buf []byte, opts Options) (*Table, error) {
+	mf, err := newFile(fname, len(buf))
+	if err != nil {
+		return nil, err
+	}
+
+	// We cannot use the buf directly here because it is not mmapped.
+	written := copy(mf.Data, buf)
+	y.AssertTrue(written == len(mf.Data))
+	if err := z.Msync(mf.Data); err != nil {
+		return nil, y.Wrapf(err, "while calling msync on %s", fname)
+	}
+	return OpenTable(mf, opts)
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
@@ -693,6 +717,12 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 	return !mayContain
 }
 
+// CoveredByPrefix returns true if all the keys in the table are prefixed by the given prefix.
+func (t *Table) CoveredByPrefix(prefix []byte) bool {
+	return bytes.HasPrefix(y.ParseKey(t.Biggest()), prefix) &&
+		bytes.HasPrefix(y.ParseKey(t.Smallest()), prefix)
+}
+
 // readTableIndex reads table index from the sst and returns its pb format.
 func (t *Table) readTableIndex() (*fb.TableIndex, error) {
 	data := t.readNoFail(t.indexStart, t.indexLen)
@@ -809,7 +839,7 @@ func (t *Table) decompress(b *block) error {
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {

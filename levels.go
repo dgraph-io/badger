@@ -32,6 +32,7 @@ import (
 
 	otrace "go.opencensus.io/trace"
 
+	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
@@ -900,7 +901,7 @@ func (s *levelsController) compactBuildTables(
 		var iters []y.Iterator
 		switch {
 		case lev == 0:
-			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
+			iters = append(iters, iteratorsReversed(topTables, table.NOCACHE)...)
 		case len(topTables) > 0:
 			y.AssertTrue(len(topTables) == 1)
 			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
@@ -1606,7 +1607,8 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 	return maxVs, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
+func iteratorsReversed(th []*table.Table, opt int) []y.Iterator {
+	out := make([]y.Iterator, 0, len(th))
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
 		out = append(out, th[i].NewIterator(opt))
@@ -1614,16 +1616,25 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.I
 	return out
 }
 
-// appendIterators appends iterators to an array of iterators, for merging.
+// getTables return tables from all levels. It would call IncrRef on all returned tables.
+func (s *levelsController) getTables(opt *IteratorOptions) [][]*table.Table {
+	res := make([][]*table.Table, 0, len(s.levels))
+	for _, level := range s.levels {
+		res = append(res, level.getTables(opt))
+	}
+	return res
+}
+
+// iterators returns an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelsController) appendIterators(
-	iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
+func (s *levelsController) iterators(opt *IteratorOptions) []y.Iterator {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
+	itrs := make([]y.Iterator, 0, len(s.levels))
 	for _, level := range s.levels {
-		iters = level.appendIterators(iters, opt)
+		itrs = append(itrs, level.iterators(opt)...)
 	}
-	return iters
+	return itrs
 }
 
 // TableInfo represents the information about a table.
@@ -1749,4 +1760,47 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 	}
 	sort.Strings(splits)
 	return splits
+}
+
+// AddTable builds the table from the KV.value options passed through the KV.Key.
+func (lc *levelsController) AddTable(
+	kv *pb.KV, lev int, dk *pb.DataKey, change *pb.ManifestChange) error {
+	// TODO: Encryption / Decryption might be required for the table, if the sender and receiver
+	// don't have same encryption mode. See if inplace encryption/decryption can be done.
+	// Tables are sent in the sorted order, so no need to sort them here.
+	encrypted := len(lc.kv.opt.EncryptionKey) > 0
+	y.AssertTrue((dk != nil && encrypted) || (dk == nil && !encrypted))
+	// The keyId is zero if there is no encryption.
+	opts := buildTableOptions(lc.kv)
+	opts.Compression = options.CompressionType(change.Compression)
+	opts.DataKey = dk
+
+	fileID := lc.reserveFileID()
+	fname := table.NewFilename(fileID, lc.kv.opt.Dir)
+
+	// kv.Value is owned by the z.buffer. Ensure that we copy this buffer.
+	var tbl *table.Table
+	var err error
+	if lc.kv.opt.InMemory {
+		if tbl, err = table.OpenInMemoryTable(y.Copy(kv.Value), fileID, &opts); err != nil {
+			return errors.Wrap(err, "while creating in-memory table from buffer")
+		}
+	} else {
+		if tbl, err = table.CreateTableFromBuffer(fname, kv.Value, opts); err != nil {
+			return errors.Wrap(err, "while creating table from buffer")
+		}
+	}
+
+	lc.levels[lev].addTable(tbl)
+	// Release the ref held by OpenTable. addTable would add a reference.
+	_ = tbl.DecrRef()
+
+	change.Id = fileID
+	change.Level = uint32(lev)
+	if dk != nil {
+		change.KeyId = dk.KeyId
+	}
+	// We use the same data KeyId. So, change.KeyId remains the same.
+	y.AssertTrue(change.Op == pb.ManifestChange_CREATE)
+	return lc.kv.manifest.addChanges([]*pb.ManifestChange{change})
 }

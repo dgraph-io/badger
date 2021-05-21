@@ -788,7 +788,9 @@ func estimateRequestSize(req *request) uint64 {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
-	if vlog.db.opt.InMemory {
+	if vlog.db.opt.InMemory || vlog.db.opt.managedTxns {
+		// Don't do value log writes in managed mode.
+		// TODO: In the managed mode, don't create a value log.
 		return nil
 	}
 	// Validate writes before writing to vlog. Because, we don't want to partially write and return

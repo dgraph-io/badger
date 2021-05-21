@@ -26,6 +26,7 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -41,12 +42,18 @@ import (
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock  sync.Mutex
-	db         *DB
-	done       func()
-	throttle   *y.Throttle
-	maxVersion uint64
-	writers    map[uint32]*sortedWriter
+	writeLock       sync.Mutex
+	db              *DB
+	done            func()
+	throttle        *y.Throttle
+	maxVersion      uint64
+	writers         map[uint32]*sortedWriter
+	prevLevel       int
+	senderPrevLevel int
+	keyId           map[uint64]*pb.DataKey // map to store stores reader's keyId to data key.
+	// Writer might receive tables first, and then receive keys. If true, that means we have
+	// started processing keys.
+	processingKeys bool
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -60,6 +67,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
+		keyId:    make(map[uint64]*pb.DataKey),
 	}
 }
 
@@ -108,7 +116,64 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		if _, ok := closedStreams[kv.StreamId]; ok {
 			panic(fmt.Sprintf("write performed on closed stream: %d", kv.StreamId))
 		}
+		switch kv.Kind {
+		case pb.KV_DATA_KEY:
+			y.AssertTrue(len(sw.db.opt.EncryptionKey) > 0)
+			var dk pb.DataKey
+			if err := proto.Unmarshal(kv.Value, &dk); err != nil {
+				return errors.Wrapf(err, "unmarshal failed %s", kv.Value)
+			}
+			readerId := dk.KeyId
+			if _, ok := sw.keyId[readerId]; !ok {
+				// Insert the data key to the key registry if not already inserted.
+				id, err := sw.db.registry.AddKey(dk)
+				if err != nil {
+					return errors.Wrap(err, "failed to write data key")
+				}
+				dk.KeyId = id
+				sw.keyId[readerId] = &dk
+			}
+			return nil
+		case pb.KV_FILE:
+			// All tables should be recieved before any of the keys.
+			if sw.processingKeys {
+				return errors.New("Received pb.KV_FILE after pb.KV_KEY")
+			}
+			var change pb.ManifestChange
+			if err := proto.Unmarshal(kv.Key, &change); err != nil {
+				return errors.Wrap(err, "unable to unmarshal manifest change")
+			}
+			level := int(change.Level)
+			if sw.senderPrevLevel == 0 {
+				// We received the first file, set the sender's and receiver's max levels.
+				sw.senderPrevLevel = level
+				sw.prevLevel = len(sw.db.lc.levels) - 1
+			}
 
+			// This is based on the assumption that the tables from the last
+			// level will be sent first and then the second last level tables.
+			// As long as the kv.Version (which stores the level) is same as
+			// the prevLevel, we know we're processing a last level table.
+			// The last level for this DB can be 8 while the DB that's sending
+			// this could have the last level at 7.
+			if sw.senderPrevLevel != level {
+				// If the previous level and the current level is different, we
+				// must be processing a table from the next last level.
+				sw.senderPrevLevel = level
+				sw.prevLevel--
+			}
+			dk := sw.keyId[change.KeyId]
+			return sw.db.lc.AddTable(&kv, sw.prevLevel, dk, &change)
+		case pb.KV_KEY:
+			// Pass. The following code will handle the keys.
+		}
+
+		sw.processingKeys = true
+		if sw.prevLevel == 0 {
+			// If prevLevel is 0, that means that we have not written anything yet. Equivalently,
+			// we were virtually writing to the maxLevel+1.
+			sw.prevLevel = len(sw.db.lc.levels)
+		}
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -284,6 +349,7 @@ type sortedWriter struct {
 
 	builder  *table.Builder
 	lastKey  []byte
+	level    int
 	streamID uint32
 	reqCh    chan *request
 	// Have separate closer for each writer, as it can be closed at any time.
@@ -303,6 +369,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
 		closer:   z.NewCloser(1),
+		level:    sw.prevLevel - 1, // Write at the level just above the one we were writing to.
 	}
 
 	go w.handleRequests()
@@ -434,7 +501,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	lc := w.db.lc
 
-	lhandler := lc.levels[len(lc.levels)-1]
+	lhandler := lc.levels[w.level]
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
 		Id:          tbl.ID(),
