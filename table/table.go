@@ -884,7 +884,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 		dst := builder.allocate(len(data))
 		if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
-			return nil, y.Wrapf(err, "while decrypt")
+			return nil, y.Wrapf(err, "encryptOrDecrypt: Error while decrypting")
 		}
 		return dst, nil
 	}
@@ -892,13 +892,13 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	encrypt := func(data []byte) ([]byte, error) {
 		iv, err := y.GenerateIV()
 		if err != nil {
-			return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
+			return data, y.Wrapf(err, "encryptOrDecrypt: Error while generating IV")
 		}
+
 		needSz := len(data) + len(iv)
 		dst := builder.allocate(needSz)
-
 		if err = y.XORBlock(dst[:len(data)], data, builder.DataKey().Data, iv); err != nil {
-			return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
+			return data, y.Wrapf(err, "encryptOrDecrypt: Error while encrypting")
 		}
 
 		y.AssertTrue(len(iv) == copy(dst[len(data):], iv))
@@ -925,13 +925,12 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 		}
 
 		if shouldEncrypt {
-			if blk.data, err = encrypt(blk.data); err != nil {
-				return err
-			}
+			blk.data, err = encrypt(blk.data)
 		} else {
-			if blk.data, err = decrypt(blk.data); err != nil {
-				return err
-			}
+			blk.data, err = decrypt(blk.data)
+		}
+		if err != nil {
+			return err
 		}
 		bb := &bblock{
 			data:         blk.data,
@@ -944,7 +943,14 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 	// Now build the index.
 	builder.uncompressedSize = ti.UncompressedSize()
-	index, dataSize := builder.buildIndex(nil)
+	builder.maxVersion = ti.MaxVersion()
+	builder.staleDataSize = int(ti.StaleDataSize())
+	bf := y.Filter(ti.BloomFilterBytes())
+	cnt := ti.KeyCount()
+	index, dataSize := builder.buildIndex(bf)
+	// Update the key count.
+	ti = fb.GetRootAsTableIndex(index, 0)
+	ti.MutateKeyCount(cnt)
 	if shouldEncrypt {
 		index, err = builder.encrypt(index)
 	}
@@ -957,27 +963,30 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	bd.checksum = checksum
 	bd.Size = int(dataSize) + len(index) + len(checksum) + 4 + 4
 
-	if err := t.MmapFile.Truncate(int64(bd.Size)); err != nil {
-		return err
-	}
-	written := bd.Copy(t.Data)
-	y.AssertTruef(written == len(t.Data), "len:%d, written: %d", len(t.Data), written)
-	if err := z.Msync(t.Data); err != nil {
-		return y.Wrapf(err, "while calling msync on %s", t.Fd.Name())
+	if t.IsInmemory {
+		t.Data = make([]byte, bd.Size)
+		written := bd.Copy(t.Data)
+		y.AssertTrue(written == len(t.Data))
+	} else {
+		if err := t.MmapFile.Truncate(int64(bd.Size)); err != nil {
+			return err
+		}
+		written := bd.Copy(t.Data)
+		y.AssertTrue(written == len(t.Data))
+		if err := z.Msync(t.Data); err != nil {
+			return y.Wrapf(err, "encryptOrDecrypt: while calling msync on %s", t.Fd.Name())
+		}
 	}
 
 	t.opt = bopt
 	t.tableSize = len(t.Data)
 	if err := t.initBiggestAndSmallest(); err != nil {
-		return y.Wrapf(err, "failed to initialize table")
+		t.Data = make([]byte, bd.Size)
+		written := bd.Copy(t.Data)
+		y.AssertTrue(written == len(t.Data))
+		return y.Wrapf(err, "encryptOrDecrypt: failed to initialize table")
 	}
 
-	if bopt.ChkMode == options.OnTableRead || bopt.ChkMode == options.OnTableAndBlockRead {
-		if err := t.VerifyChecksum(); err != nil {
-			t.MmapFile.Close(-1)
-			return y.Wrapf(err, "failed to verify checksum")
-		}
-	}
 	return nil
 }
 
@@ -986,6 +995,7 @@ func (t *Table) Encrypt(dk *pb.DataKey) error {
 	bopts := *(t.opt)
 	bopts.DataKey = dk
 	builder := NewTableBuilder(bopts)
+	defer builder.Close()
 	return t.encryptOrDecrypt(builder)
 }
 
@@ -995,5 +1005,6 @@ func (t *Table) Decrypt() error {
 	bopts := *(t.opt)
 	bopts.DataKey = nil
 	builder := NewTableBuilder(bopts)
+	defer builder.Close()
 	return t.encryptOrDecrypt(builder)
 }

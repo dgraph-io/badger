@@ -135,6 +135,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 				sw.keyId[readerId] = &dk
 			}
 			return nil
+
 		case pb.KV_FILE:
 			// All tables should be recieved before any of the keys.
 			if sw.processingKeys {
@@ -172,6 +173,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 				sw.throttle.Done(err)
 			}(sw.prevLevel)
 			return nil
+
 		case pb.KV_KEY:
 			// Pass. The following code will handle the keys.
 		}

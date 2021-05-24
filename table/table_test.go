@@ -50,6 +50,35 @@ func getTestTableOptions() Options {
 	}
 
 }
+
+func buildTestTableInMemory(t *testing.T, prefix string, n int, opts Options) *Table {
+	if opts.BlockSize == 0 {
+		opts.BlockSize = 4 * 1024
+	}
+	y.AssertTrue(n <= 10000)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
+		k := key(prefix, i)
+		v := fmt.Sprintf("%d", i)
+		keyValues[i] = []string{k, v}
+	}
+	b := NewTableBuilder(opts)
+	defer b.Close()
+
+	sort.Slice(keyValues, func(i, j int) bool {
+		return keyValues[i][0] < keyValues[j][0]
+	})
+	for _, kv := range keyValues {
+		y.AssertTrue(len(kv) == 2)
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0),
+			y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
+	}
+	data := b.Finish()
+	tbl, err := OpenInMemoryTable(data, 1, &opts)
+	require.NoError(t, err, "writing to file failed")
+	return tbl
+}
+
 func buildTestTable(t *testing.T, prefix string, n int, opts Options) *Table {
 	if opts.BlockSize == 0 {
 		opts.BlockSize = 4 * 1024
@@ -291,43 +320,58 @@ func TestTable(t *testing.T) {
 }
 
 func TestTableEncryptDecrypt(t *testing.T) {
-	opts := getTestTableOptions()
 	encKey := make([]byte, 24)
 	_, err := rand.Read(encKey)
 	require.NoError(t, err)
 	dk := &pb.DataKey{Data: encKey}
 
-	opts.BlockCache, err = ristretto.NewCache(&ristretto.Config{
+	bopts := getTestTableOptions()
+	bopts.BlockCache, err = ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1000,
 		MaxCost:     1 << 20,
 		BufferItems: 64,
 	})
 	require.NoError(t, err)
-	opts.IndexCache, err = ristretto.NewCache(&ristretto.Config{
+	bopts.IndexCache, err = ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1000,
 		MaxCost:     1 << 20,
 		BufferItems: 64,
 	})
 	require.NoError(t, err)
-	table := buildTestTable(t, "key", 10000, opts)
-	defer table.DecrRef()
 
-	iterate := func() {
-		ti := table.NewIterator(0)
-		defer ti.Close()
-		i := 0
-		for ti.Rewind(); ti.Valid(); ti.Next() {
-			k := ti.Key()
-			require.EqualValues(t, string(y.ParseKey(k)), key("key", i))
-			i++
+	test := func(t *testing.T, table *Table) {
+		iterate := func() {
+			ti := table.NewIterator(0)
+			defer ti.Close()
+			i := 0
+			for ti.Rewind(); ti.Valid(); ti.Next() {
+				k := ti.Key()
+				require.EqualValues(t, string(y.ParseKey(k)), key("key", i))
+				i++
+			}
+			require.Equal(t, 10000, i)
 		}
-		require.Equal(t, 10000, i)
+		iterate()
+		require.NoError(t, table.Encrypt(dk))
+		require.True(t, table.shouldDecrypt())
+		iterate()
+		require.NoError(t, table.Decrypt())
+		require.False(t, table.shouldDecrypt())
+		iterate()
 	}
-	iterate()
-	require.NoError(t, table.Encrypt(dk))
-	iterate()
-	require.NoError(t, table.Decrypt())
-	iterate()
+
+	t.Run("on-disk", func(t *testing.T) {
+		opts := bopts
+		table := buildTestTable(t, "key", 10000, opts)
+		defer table.DecrRef()
+		test(t, table)
+	})
+	t.Run("in-memory", func(t *testing.T) {
+		opts := bopts
+		table := buildTestTableInMemory(t, "key", 10000, opts)
+		defer table.DecrRef()
+		test(t, table)
+	})
 }
 
 func TestIterateBackAndForth(t *testing.T) {

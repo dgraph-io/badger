@@ -85,7 +85,8 @@ type Stream struct {
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs uint64
-	// FullCopy should be set to true only when encryption mode is same for sender and receiver.
+	// FullCopy allows copying over the entire tables from the botto-most levels. This should only
+	// be used in managed mode.
 	FullCopy     bool
 	readTs       uint64
 	db           *DB
@@ -375,9 +376,8 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 	manifest := st.db.manifest.manifest.clone()
 	dataKeys := make(map[uint64]struct{})
 	// Iterate in reverse order so that the receiver gets the bottommost level first.
-	for i := len(tableMatrix) - 1; i >= 0; i-- {
-		level := i
-		tables := tableMatrix[i]
+	for level := len(tableMatrix) - 1; level >= 0; level-- {
+		tables := tableMatrix[level]
 		for _, t := range tables {
 			// This table can be picked for copying directly.
 			out := z.NewBuffer(int(t.Size())+1024, "Stream.Table")
@@ -420,7 +420,7 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 			// place the tables. We'd send all the tables first, before we start streaming. So, the
 			// destination DB would write streamed keys one level above.
 			kv := &pb.KV{
-				// Key can be used for MANIFEST.
+				// Using Key for table MANIFEST.
 				Key:   buf,
 				Value: t.Data,
 				Kind:  pb.KV_FILE,
