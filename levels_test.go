@@ -1340,7 +1340,6 @@ func TestStreamWithFullCopy(t *testing.T) {
 		opts.BlockCacheSize = 1 << 20
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			outOpts := opts
-			// Set it to zero so that we have more than one data keys.
 			outOpts.EncryptionKey = encKey
 			outOpts.EncryptionKeyRotationDuration = 0
 			test(db, outOpts)

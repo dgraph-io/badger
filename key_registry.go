@@ -379,6 +379,8 @@ func (kr *KeyRegistry) AddKey(dk pb.DataKey) (uint64, error) {
 		return 0, errors.New("No encryption key found. Cannot add data key")
 	}
 
+	kr.Lock()
+	defer kr.Unlock()
 	if _, ok := kr.dataKeys[dk.KeyId]; !ok {
 		// If KeyId does not exists already, then use the next available KeyId to store data key.
 		kr.nextKeyID++

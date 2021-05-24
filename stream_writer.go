@@ -164,7 +164,14 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 				sw.prevLevel--
 			}
 			dk := sw.keyId[change.KeyId]
-			return sw.db.lc.AddTable(&kv, sw.prevLevel, dk, &change)
+			if err := sw.throttle.Do(); err != nil {
+				return err
+			}
+			go func(lev int) {
+				err := sw.db.lc.AddTable(&kv, lev, dk, &change)
+				sw.throttle.Done(err)
+			}(sw.prevLevel)
+			return nil
 		case pb.KV_KEY:
 			// Pass. The following code will handle the keys.
 		}

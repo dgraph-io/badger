@@ -1765,7 +1765,6 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 // AddTable builds the table from the KV.value options passed through the KV.Key.
 func (lc *levelsController) AddTable(
 	kv *pb.KV, lev int, decKey *pb.DataKey, change *pb.ManifestChange) error {
-	// Tables are sent in the sorted order, so no need to sort them here.
 	opts := buildTableOptions(lc.kv)
 	// We are not doing compression/decompression for now. So compression mode remains same.
 	opts.Compression = options.CompressionType(change.Compression)

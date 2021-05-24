@@ -31,6 +31,7 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/v3/options"
+	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
@@ -287,6 +288,46 @@ func TestTable(t *testing.T) {
 	require.True(t, ti.Valid())
 	k := ti.Key()
 	require.EqualValues(t, string(y.ParseKey(k)), key("key", 0))
+}
+
+func TestTableEncryptDecrypt(t *testing.T) {
+	opts := getTestTableOptions()
+	encKey := make([]byte, 24)
+	_, err := rand.Read(encKey)
+	require.NoError(t, err)
+	dk := &pb.DataKey{Data: encKey}
+
+	opts.BlockCache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1 << 20,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	opts.IndexCache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1 << 20,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	table := buildTestTable(t, "key", 10000, opts)
+	defer table.DecrRef()
+
+	iterate := func() {
+		ti := table.NewIterator(0)
+		defer ti.Close()
+		i := 0
+		for ti.Rewind(); ti.Valid(); ti.Next() {
+			k := ti.Key()
+			require.EqualValues(t, string(y.ParseKey(k)), key("key", i))
+			i++
+		}
+		require.Equal(t, 10000, i)
+	}
+	iterate()
+	require.NoError(t, table.Encrypt(dk))
+	iterate()
+	require.NoError(t, table.Decrypt())
+	iterate()
 }
 
 func TestIterateBackAndForth(t *testing.T) {
