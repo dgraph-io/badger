@@ -536,7 +536,7 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20)
 
 	boList, dataSize := b.writeBlockOffsets(builder)
-	// Write block offset vector the the idxBuilder.
+	// Write block offset vector to the idxBuilder.
 	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
 	// Write individual block offsets in reverse order to work around how Flatbuffers expects it.

@@ -118,7 +118,6 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		}
 		switch kv.Kind {
 		case pb.KV_DATA_KEY:
-			y.AssertTrue(len(sw.db.opt.EncryptionKey) > 0)
 			var dk pb.DataKey
 			if err := proto.Unmarshal(kv.Value, &dk); err != nil {
 				return errors.Wrapf(err, "unmarshal failed %s", kv.Value)
@@ -126,11 +125,13 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			readerId := dk.KeyId
 			if _, ok := sw.keyId[readerId]; !ok {
 				// Insert the data key to the key registry if not already inserted.
-				id, err := sw.db.registry.AddKey(dk)
-				if err != nil {
-					return errors.Wrap(err, "failed to write data key")
+				if len(sw.db.opt.EncryptionKey) > 0 {
+					id, err := sw.db.registry.AddKey(dk)
+					if err != nil {
+						return errors.Wrap(err, "failed to write data key")
+					}
+					dk.KeyId = id
 				}
-				dk.KeyId = id
 				sw.keyId[readerId] = &dk
 			}
 			return nil

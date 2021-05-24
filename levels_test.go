@@ -1244,6 +1244,7 @@ func TestStreamWithFullCopy(t *testing.T) {
 	dbopts.managedTxns = true
 	dbopts.MaxLevels = 7
 	dbopts.NumVersionsToKeep = math.MaxInt32
+	dbopts.ChecksumVerificationMode = options.OnTableAndBlockRead
 
 	encKey := make([]byte, 24)
 	_, err := rand.Read(encKey)
@@ -1317,6 +1318,32 @@ func TestStreamWithFullCopy(t *testing.T) {
 			outOpts.InMemory = false
 			test(db, outOpts)
 			require.Greater(t, len(db.registry.dataKeys), 1)
+		})
+	})
+	t.Run("from encrypted to unencrypted", func(t *testing.T) {
+		opts := dbopts
+		opts.IndexCacheSize = 1 << 20
+		opts.BlockCacheSize = 1 << 20
+		// Set it to zero so that we have more than one data keys.
+		opts.EncryptionKey = encKey
+		opts.EncryptionKeyRotationDuration = 0
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			outOpts := opts
+			outOpts.EncryptionKey = nil
+			test(db, outOpts)
+			require.Greater(t, len(db.registry.dataKeys), 1)
+		})
+	})
+	t.Run("from unencrypted to encrypted", func(t *testing.T) {
+		opts := dbopts
+		opts.IndexCacheSize = 1 << 20
+		opts.BlockCacheSize = 1 << 20
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			outOpts := opts
+			// Set it to zero so that we have more than one data keys.
+			outOpts.EncryptionKey = encKey
+			outOpts.EncryptionKeyRotationDuration = 0
+			test(db, outOpts)
 		})
 	})
 }

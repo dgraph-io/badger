@@ -108,7 +108,6 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	Checksum       []byte
 	CreatedAt      time.Time
 	indexStart     int
 	indexLen       int
@@ -559,9 +558,8 @@ func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
 // slice stored in the block will be reused when the ref becomes zero. The
 // caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int, useCache bool) (*block, error) {
-	y.AssertTruef(idx >= 0, "idx=%d", idx)
-	if idx >= t.offsetsLength() {
-		return nil, errors.New("block out of index")
+	if idx < 0 || idx >= t.offsetsLength() {
+		return nil, errors.Errorf("block out of index. idx=%d", idx)
 	}
 	if t.opt.BlockCache != nil {
 		key := t.blockCacheKey(idx)
@@ -869,4 +867,133 @@ func (t *Table) decompress(b *block) error {
 		b.freeMe = true
 	}
 	return nil
+}
+
+// encryptOrDecrypt based on the builder options, encrypt or decrypt the given table.
+// The compression mode should be same for table as well table builder.
+func (t *Table) encryptOrDecrypt(builder *Builder) error {
+	bopt := builder.opts
+	y.AssertTrue(bopt.Compression == t.opt.Compression)
+	shouldEncrypt := builder.shouldEncrypt()
+	ti, err := t.readTableIndex()
+	y.Check(err)
+
+	decrypt := func(data []byte) ([]byte, error) {
+		iv := data[len(data)-aes.BlockSize:]
+		data = data[:len(data)-aes.BlockSize]
+
+		dst := builder.allocate(len(data))
+		if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
+			return nil, y.Wrapf(err, "while decrypt")
+		}
+		return dst, nil
+	}
+
+	encrypt := func(data []byte) ([]byte, error) {
+		iv, err := y.GenerateIV()
+		if err != nil {
+			return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
+		}
+		needSz := len(data) + len(iv)
+		dst := builder.allocate(needSz)
+
+		if err = y.XORBlock(dst[:len(data)], data, builder.DataKey().Data, iv); err != nil {
+			return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
+		}
+
+		y.AssertTrue(len(iv) == copy(dst[len(data):], iv))
+		return dst, nil
+	}
+
+	// Iterate over the blocks and encrypt/decrypt them and add them to builder.
+	for idx := 0; idx < ti.OffsetsLength(); idx++ {
+		if idx < 0 || idx >= t.offsetsLength() {
+			return errors.Errorf("block out of index. idx=%d", idx)
+		}
+
+		var ko fb.BlockOffset
+		y.AssertTrue(t.offsets(&ko, idx))
+		blk := &block{
+			offset: int(ko.Offset()),
+		}
+
+		var err error
+		if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
+			return y.Wrapf(err,
+				"failed to read from file: %s at offset: %d, len: %d",
+				t.Fd.Name(), blk.offset, ko.Len())
+		}
+
+		if shouldEncrypt {
+			if blk.data, err = encrypt(blk.data); err != nil {
+				return err
+			}
+		} else {
+			if blk.data, err = decrypt(blk.data); err != nil {
+				return err
+			}
+		}
+		bb := &bblock{
+			data:         blk.data,
+			baseKey:      ko.KeyBytes(),
+			end:          len(blk.data),
+			entryOffsets: nil, //not needed
+		}
+		builder.blockList = append(builder.blockList, bb)
+	}
+
+	// Now build the index.
+	builder.uncompressedSize = ti.UncompressedSize()
+	index, dataSize := builder.buildIndex(nil)
+	if shouldEncrypt {
+		index, err = builder.encrypt(index)
+	}
+	checksum := builder.calculateChecksum(index)
+	bd := buildData{
+		blockList: builder.blockList,
+		alloc:     builder.alloc,
+	}
+	bd.index = index
+	bd.checksum = checksum
+	bd.Size = int(dataSize) + len(index) + len(checksum) + 4 + 4
+
+	if err := t.MmapFile.Truncate(int64(bd.Size)); err != nil {
+		return err
+	}
+	written := bd.Copy(t.Data)
+	y.AssertTruef(written == len(t.Data), "len:%d, written: %d", len(t.Data), written)
+	if err := z.Msync(t.Data); err != nil {
+		return y.Wrapf(err, "while calling msync on %s", t.Fd.Name())
+	}
+
+	t.opt = bopt
+	t.tableSize = len(t.Data)
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return y.Wrapf(err, "failed to initialize table")
+	}
+
+	if bopt.ChkMode == options.OnTableRead || bopt.ChkMode == options.OnTableAndBlockRead {
+		if err := t.VerifyChecksum(); err != nil {
+			t.MmapFile.Close(-1)
+			return y.Wrapf(err, "failed to verify checksum")
+		}
+	}
+	return nil
+}
+
+// Encrypt encrypts an unencrypted table using the given datakey.
+func (t *Table) Encrypt(dk *pb.DataKey) error {
+	bopts := *(t.opt)
+	bopts.DataKey = dk
+	builder := NewTableBuilder(bopts)
+	return t.encryptOrDecrypt(builder)
+}
+
+// Decrypt decrypts an encrypted table.
+func (t *Table) Decrypt() error {
+	y.AssertTrue(t.shouldDecrypt())
+	bopts := *(t.opt)
+	bopts.DataKey = nil
+	builder := NewTableBuilder(bopts)
+	return t.encryptOrDecrypt(builder)
 }

@@ -1764,16 +1764,13 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 
 // AddTable builds the table from the KV.value options passed through the KV.Key.
 func (lc *levelsController) AddTable(
-	kv *pb.KV, lev int, dk *pb.DataKey, change *pb.ManifestChange) error {
-	// TODO: Encryption / Decryption might be required for the table, if the sender and receiver
-	// don't have same encryption mode. See if inplace encryption/decryption can be done.
+	kv *pb.KV, lev int, decKey *pb.DataKey, change *pb.ManifestChange) error {
 	// Tables are sent in the sorted order, so no need to sort them here.
-	encrypted := len(lc.kv.opt.EncryptionKey) > 0
-	y.AssertTrue((dk != nil && encrypted) || (dk == nil && !encrypted))
-	// The keyId is zero if there is no encryption.
 	opts := buildTableOptions(lc.kv)
+	// We are not doing compression/decompression for now. So compression mode remains same.
 	opts.Compression = options.CompressionType(change.Compression)
-	opts.DataKey = dk
+	encKey := opts.DataKey
+	opts.DataKey = decKey
 
 	fileID := lc.reserveFileID()
 	fname := table.NewFilename(fileID, lc.kv.opt.Dir)
@@ -1783,12 +1780,25 @@ func (lc *levelsController) AddTable(
 	var err error
 	if lc.kv.opt.InMemory {
 		if tbl, err = table.OpenInMemoryTable(y.Copy(kv.Value), fileID, &opts); err != nil {
-			return errors.Wrap(err, "while creating in-memory table from buffer")
+			return errors.Wrap(err, "AddTable: create in-memory table from buffer failed")
 		}
 	} else {
 		if tbl, err = table.CreateTableFromBuffer(fname, kv.Value, opts); err != nil {
-			return errors.Wrap(err, "while creating table from buffer")
+			return errors.Wrap(err, "AddTable: create table from buffer failed")
 		}
+	}
+
+	encryptDecrypt := func() error {
+		if encKey != nil && decKey == nil {
+			return tbl.Encrypt(encKey)
+		}
+		if encKey == nil && decKey != nil {
+			return tbl.Decrypt()
+		}
+		return nil
+	}
+	if err := encryptDecrypt(); err != nil {
+		return errors.Wrap(err, "AddTable: encryptDecrypt failed")
 	}
 
 	lc.levels[lev].addTable(tbl)
@@ -1797,10 +1807,13 @@ func (lc *levelsController) AddTable(
 
 	change.Id = fileID
 	change.Level = uint32(lev)
-	if dk != nil {
-		change.KeyId = dk.KeyId
+	if tbl.DataKey() != nil {
+		change.KeyId = tbl.DataKey().GetKeyId()
+		change.EncryptionAlgo = pb.EncryptionAlgo_aes
+	} else {
+		// KeyId is zero when there is no encryption.
+		change.KeyId = 0
 	}
-	// We use the same data KeyId. So, change.KeyId remains the same.
 	y.AssertTrue(change.Op == pb.ManifestChange_CREATE)
 	return lc.kv.manifest.addChanges([]*pb.ManifestChange{change})
 }
