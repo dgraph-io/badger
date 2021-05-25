@@ -559,7 +559,7 @@ func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
 // caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int, useCache bool) (*block, error) {
 	if idx < 0 || idx >= t.offsetsLength() {
-		return nil, errors.Errorf("block out of index. idx=%d", idx)
+		return nil, errors.Errorf("block out of index. idx=%d, len=%d", idx, t.offsetsLength())
 	}
 	if t.opt.BlockCache != nil {
 		key := t.blockCacheKey(idx)
@@ -876,7 +876,6 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	if bopt.Compression != t.opt.Compression {
 		return errors.New("Compression mode should be same while doing encryptOrDecrypt")
 	}
-	shouldEncrypt := builder.shouldEncrypt()
 	ti, err := t.readTableIndex()
 	if err != nil {
 		return errors.Wrap(err, "encryptOrDecrypt: Error while reading index")
@@ -912,7 +911,9 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	// Iterate over the blocks and encrypt/decrypt them and add them to builder.
 	for idx := 0; idx < ti.OffsetsLength(); idx++ {
 		var ko fb.BlockOffset
-		y.AssertTrue(t.offsets(&ko, idx))
+		if !t.offsets(&ko, idx) {
+			return errors.Errorf("encryptOrDecrypt: failed to get block offset for idx=%d", idx)
+		}
 		blk := &block{
 			offset: int(ko.Offset()),
 		}
@@ -923,7 +924,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 				t.Fd.Name(), blk.offset, ko.Len())
 		}
 
-		if shouldEncrypt {
+		if builder.shouldEncrypt() {
 			blk.data, err = encrypt(blk.data)
 		} else {
 			blk.data, err = decrypt(blk.data)
@@ -950,7 +951,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	// Update the key count.
 	ti = fb.GetRootAsTableIndex(index, 0)
 	ti.MutateKeyCount(cnt)
-	if shouldEncrypt {
+	if builder.shouldEncrypt() {
 		if index, err = builder.encrypt(index); err != nil {
 			return y.Wrap(err, "encryptOrDecrypt: while encrypting index")
 		}
