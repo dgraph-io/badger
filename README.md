@@ -166,7 +166,6 @@ Below is a list of known projects that use Badger:
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
-* [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
