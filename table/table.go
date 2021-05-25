@@ -873,10 +873,14 @@ func (t *Table) decompress(b *block) error {
 // The compression mode should be same for table as well table builder.
 func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	bopt := builder.opts
-	y.AssertTrue(bopt.Compression == t.opt.Compression)
+	if bopt.Compression != t.opt.Compression {
+		return errors.New("Compression mode should be same while doing encryptOrDecrypt")
+	}
 	shouldEncrypt := builder.shouldEncrypt()
 	ti, err := t.readTableIndex()
-	y.Check(err)
+	if err != nil {
+		return errors.Wrap(err, "encryptOrDecrypt: Error while reading index")
+	}
 
 	decrypt := func(data []byte) ([]byte, error) {
 		iv := data[len(data)-aes.BlockSize:]
@@ -884,7 +888,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 		dst := builder.allocate(len(data))
 		if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
-			return nil, y.Wrapf(err, "encryptOrDecrypt: Error while decrypting")
+			return data, y.Wrapf(err, "encryptOrDecrypt: Error while decrypting")
 		}
 		return dst, nil
 	}
@@ -897,7 +901,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 		needSz := len(data) + len(iv)
 		dst := builder.allocate(needSz)
-		if err = y.XORBlock(dst[:len(data)], data, builder.DataKey().Data, iv); err != nil {
+		if err := y.XORBlock(dst[:len(data)], data, builder.DataKey().Data, iv); err != nil {
 			return data, y.Wrapf(err, "encryptOrDecrypt: Error while encrypting")
 		}
 
@@ -907,10 +911,6 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 	// Iterate over the blocks and encrypt/decrypt them and add them to builder.
 	for idx := 0; idx < ti.OffsetsLength(); idx++ {
-		if idx < 0 || idx >= t.offsetsLength() {
-			return errors.Errorf("block out of index. idx=%d", idx)
-		}
-
 		var ko fb.BlockOffset
 		y.AssertTrue(t.offsets(&ko, idx))
 		blk := &block{
@@ -919,8 +919,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 
 		var err error
 		if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
-			return y.Wrapf(err,
-				"failed to read from file: %s at offset: %d, len: %d",
+			return y.Wrapf(err, "failed to read from file: %s at offset: %d, len: %d",
 				t.Fd.Name(), blk.offset, ko.Len())
 		}
 
@@ -952,7 +951,9 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	ti = fb.GetRootAsTableIndex(index, 0)
 	ti.MutateKeyCount(cnt)
 	if shouldEncrypt {
-		index, err = builder.encrypt(index)
+		if index, err = builder.encrypt(index); err != nil {
+			return y.Wrap(err, "encryptOrDecrypt: while encrypting index")
+		}
 	}
 	checksum := builder.calculateChecksum(index)
 	bd := buildData{
@@ -981,10 +982,7 @@ func (t *Table) encryptOrDecrypt(builder *Builder) error {
 	t.opt = bopt
 	t.tableSize = len(t.Data)
 	if err := t.initBiggestAndSmallest(); err != nil {
-		t.Data = make([]byte, bd.Size)
-		written := bd.Copy(t.Data)
-		y.AssertTrue(written == len(t.Data))
-		return y.Wrapf(err, "encryptOrDecrypt: failed to initialize table")
+		return y.Wrap(err, "encryptOrDecrypt: failed to initialize table")
 	}
 
 	return nil
