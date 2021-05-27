@@ -163,6 +163,7 @@ func DefaultOptions(path string) Options {
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
 		// level 3.
+		// NOTE: The benchmarks are with DataDog ZSTD that requires CGO.
 		// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
 		// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
 		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
@@ -729,6 +730,7 @@ func (opt Options) WithInMemory(b bool) Options {
 // algorithm is small (4 KB), we don't get significant benefit at level 3. It is advised to write
 // your own benchmarks before choosing a compression algorithm or level.
 //
+// NOTE: The benchmarks are with DataDog ZSTD that requires CGO.
 // no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
 // zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
 // zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72

@@ -172,11 +172,6 @@ func checkAndSetOptions(opt *Options) error {
 		return ErrValueLogSize
 	}
 
-	// Return error if badger is built without cgo and compression is set to ZSTD.
-	if opt.Compression == options.ZSTD && !y.CgoEnabled {
-		return y.ErrZstdCgo
-	}
-
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false

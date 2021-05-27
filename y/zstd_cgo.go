@@ -22,9 +22,6 @@ import (
 	"github.com/DataDog/zstd"
 )
 
-// CgoEnabled is used to check if CGO is enabled while building badger.
-const CgoEnabled = true
-
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
 func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 	return zstd.Decompress(dst, src)
