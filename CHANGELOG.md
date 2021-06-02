@@ -3,6 +3,111 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.2011.1] - 2021-01-22
+
+### Fixed
+  - Fix(compaction): Set base level correctly after stream (#1651)
+  - Fix: update ristretto and use filepath (#1652)
+  - Fix(badger): Do not reuse variable across badger commands (#1650)
+  - Fix(build): fix 32-bit build (#1646)
+  - Fix(table): always sync SST to disk (#1645)
+
+## [3.2011.0] - 2021-01-15
+
+This release is not backward compatible with Badger v2.x.x
+
+### Breaking:
+  - opt(compactions): Improve compaction performance (#1574)
+  - Change how Badger handles WAL (#1555)
+  - feat(index): Use flatbuffers instead of protobuf (#1546)
+
+### Fixed:
+  - Fix(GC): Set bits correctly for moved keys (#1619)
+  - Fix(tableBuilding): reduce scope of valuePointer (#1617)
+  - Fix(compaction): fix table size estimation on compaction (#1613)
+  - Fix(OOM): Reuse pb.KVs in Stream (#1609)
+  - Fix race condition in L0StallMs variable (#1605)
+  - Fix(stream): Stop produceKVs on error (#1604)
+  - Fix(skiplist): Remove z.Buffer from skiplist (#1600)
+  - Fix(readonly): fix the file opening mode (#1592)
+  - Fix: Disable CompactL0OnClose by default (#1586)
+  - Fix(compaction): Don't drop data when split overlaps with top tables (#1587)
+  - Fix(subcompaction): Close builder before throttle.Done (#1582)
+  - Fix(table): Add onDisk size (#1569)
+  - Fix(Stream): Only send done markers if told to do so
+  - Fix(value log GC): Fix a bug which caused value log files to not be GCed.
+  - Fix segmentation fault when cache sizes are small. (#1552)
+  - Fix(builder): Too many small tables when compression is enabled (#1549)
+  - Fix integer overflow error when building for 386 (#1541)
+  - Fix(writeBatch): Avoid deadlock in commit callback (#1529)
+  - Fix(db): Handle nil logger (#1534)
+  - Fix(maxVersion): Use choosekey instead of KeyToList (#1532)
+  - Fix(Backup/Restore): Keep all versions (#1462)
+  - Fix(build): Fix nocgo builds. (#1493)
+  - Fix(cleanup): Avoid truncating in value.Open on error (#1465)
+  - Fix(compaction): Don't use cache for table compaction (#1467)
+  - Fix(compaction): Use separate compactors for L0, L1 (#1466)
+  - Fix(options): Do not implicitly enable cache (#1458)
+  - Fix(cleanup): Do not close cache before compaction (#1464)
+  - Fix(replay): Update head for LSM entires also (#1456)
+  - fix(levels): Cleanup builder resources on building an empty table (#1414)
+
+###  Performance
+  - perf(GC): Remove move keys (#1539)
+  - Keep the cheaper parts of the index within table struct. (#1608)
+  - Opt(stream): Use z.Buffer to stream data (#1606)
+  - opt(builder): Use z.Allocator for building tables (#1576)
+  - opt(memory): Use z.Calloc for allocating KVList  (#1563)
+  - opt: Small memory usage optimizations (#1562)
+  - KeySplits checks tables and memtables when number of splits is small. (#1544)
+  - perf: Reduce memory usage by better struct packing (#1528)
+  - perf(tableIterator): Don't do next on NewIterator (#1512)
+  - Improvements: Manual Memory allocation via Calloc (#1459)
+  - Various bug fixes: Break up list and run DropAll func (#1439)
+  - Add a limit to the size of the batches sent over a stream. (#1412)
+  - Commit does not panic after Finish, instead returns an error (#1396)
+  - levels: Compaction incorrectly drops some delete markers (#1422)
+  - Remove vlog file if bootstrap, syncDir or mmap fails (#1434)
+
+###  Features:
+  - Use opencensus for tracing (#1566)
+  - Export functions from Key Registry (#1561)
+  - Allow sizes of block and index caches to be updated. (#1551)
+  - Add metric for number of tables being compacted (#1554)
+  - feat(info): Show index and bloom filter size (#1543)
+  - feat(db): Add db.MaxVersion API (#1526)
+  - Expose DB options in Badger. (#1521)
+  - Feature: Add a Calloc based Buffer (#1471)
+  - Add command to stream contents of DB into another DB. (#1463)
+  - Expose NumAlloc metrics via expvar (#1470)
+  - Support fully disabling the bloom filter (#1319)
+  - Add --enc-key flag in badger info tool (#1441)
+
+### New APIs
+- Badger.DB
+  - CacheMaxCost (#1551)
+  - Levels (#1574)
+  - LevelsToString  (#1574)
+  - Opts (#1521)
+- Badger.Options
+  - WithBaseLevelSize (#1574)
+  - WithBaseTableSize (#1574)
+  - WithMemTableSize (#1574)
+- Badger.KeyRegistry
+  - DataKey (#1561)
+  - LatestDataKey (#1561)
+
+### Removed APIs
+- Badger.Options
+  - WithKeepL0InMemory (#1555)
+  - WithLevelOneSize  (#1574)
+  - WithLoadBloomsOnOpen (#1555)
+  - WithLogRotatesToFlush  (#1574)
+  - WithMaxTableSize (#1574)
+  - WithTableLoadingMode (#1555)
+  - WithTruncate (#1555)
+  - WithValueLogLoadingMode (#1555)
+
 ## [2.2007.2] - 2020-08-31
 
 ### Fixed
