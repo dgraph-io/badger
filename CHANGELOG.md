@@ -4,8 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [3.2103.0] - 2021-06-02
+
 ### Breaking
   - Subscribe: Add option to subscribe with holes in prefixes. (#1658)
+
 ### Fixed
   - fix(compaction): Remove compaction backoff mechanism (#1686)
   - Add a name to mutexes to make them unexported (#1678)
@@ -14,10 +16,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - fix(iterator): fix iterator when data does not exist in read only mode (#1670)
   - fix(badger): Do not reuse variable across badger commands (#1624)
   - fix(dropPrefix): check properly if the key is present in a table  (#1623)
+
 ### Performance
   - Opt(Stream): Optimize how we deduce key ranges for iteration (#1687)
   - Increase value threshold from 1 KB to 1 MB (#1664)
   - opt(DropPrefix): check if there exist some data to drop before dropping prefixes (#1621)
+
 ### Features
   - feat(options): allow special handling and checking when creating options from superflag (#1688)
   - overwrite default Options from SuperFlag string (#1663)
@@ -28,6 +32,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - feat(Trie): Working prefix match with holes (#1654)
   - feat: add functionality to ban a prefix (#1638)
   - feat(compaction): Support Lmax to Lmax compaction (#1615)
+
 ### New APIs
 - Badger.DB
   - BanNamespace
@@ -46,11 +51,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Badger.Table.Builder
   - AddStaleKey
 - Badger.InitDiscardStats
+
 ### Removed APIs
 - Badger.DB
   - KeySplits
 - Badger.Options
   - SkipVlog
+
 ### Changed APIs
 - Badger.DB
   - Subscribe
