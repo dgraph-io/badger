@@ -383,7 +383,7 @@ func (w *sortedWriter) handleRequests() {
 		for i, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
 			var vs y.ValueStruct
-			if e.skipVlogAndSetThreshold(w.db.valueThreshold()) {
+			if w.db.opt.managedTxns || e.skipVlogAndSetThreshold(w.db.valueThreshold()) {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,
