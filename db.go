@@ -1480,12 +1480,19 @@ func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
 	return onDiskSize, uncompressedSize
 }
 
-// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
-// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
-// first range would have nil as left key, and the last range would have nil as the right key.
-func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
+func (db *DB) rangesAfterTs(prefix []byte, numRanges int, sinceTs uint64) []*keyRange {
 	var splits []string
 	tables := db.Tables()
+
+	// Pick only those tables whose MaxVersion is more than the sinceTs.
+	filtered := tables[:0]
+	for _, tbl := range tables {
+		if tbl.MaxVersion < sinceTs {
+			continue
+		}
+		filtered = append(filtered, tbl)
+	}
+	tables = filtered
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {
@@ -1594,6 +1601,13 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 		out = append(out, cur)
 	}
 	return out
+}
+
+// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
+// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
+// first range would have nil as left key, and the last range would have nil as the right key.
+func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
+	return db.rangesAfterTs(prefix, numRanges, 0)
 }
 
 // MaxBatchCount returns max possible entries in batch
