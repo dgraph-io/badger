@@ -36,7 +36,7 @@ import (
 func getSortedKVList(valueSize, listSize int) *z.Buffer {
 	value := make([]byte, valueSize)
 	y.Check2(rand.Read(value))
-	buf := z.NewBuffer(10 << 20, "test")
+	buf := z.NewBuffer(10<<20, "test")
 	for i := 0; i < listSize; i++ {
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, uint64(i))
@@ -175,7 +175,7 @@ func TestStreamWriter3(t *testing.T) {
 			value := make([]byte, valueSize)
 			y.Check2(rand.Read(value))
 			counter := 0
-			buf := z.NewBuffer(10 << 20, "test")
+			buf := z.NewBuffer(10<<20, "test")
 			defer buf.Release()
 			for i := 0; i < noOfKeys; i++ {
 				key := make([]byte, 8)
@@ -272,7 +272,7 @@ func TestStreamWriter4(t *testing.T) {
 			require.NoError(t, err, "error while updating db")
 		}
 
-		buf := z.NewBuffer(10 << 20, "test")
+		buf := z.NewBuffer(10<<20, "test")
 		defer buf.Release()
 		KVToBuffer(&pb.KV{
 			Key:     []byte("key-1"),
@@ -297,7 +297,7 @@ func TestStreamWriter5(t *testing.T) {
 		right[0] = 0xff
 		copy(right[1:], []byte("break"))
 
-		buf := z.NewBuffer(10 << 20, "test")
+		buf := z.NewBuffer(10<<20, "test")
 		defer buf.Release()
 		KVToBuffer(&pb.KV{
 			Key:     left,
@@ -336,7 +336,7 @@ func TestStreamWriter6(t *testing.T) {
 		// will be written to level 6, we need to insert at least 1 mb of data.
 		// Setting keycount below 32 would cause this test to fail.
 		keyCount := 40
-		buf := z.NewBuffer(10 << 20, "test")
+		buf := z.NewBuffer(10<<20, "test")
 		defer buf.Release()
 		for i := range str {
 			for j := 0; j < keyCount; j++ {
@@ -377,7 +377,7 @@ func TestStreamWriterCancel(t *testing.T) {
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
-		buf := z.NewBuffer(10 << 20, "test")
+		buf := z.NewBuffer(10<<20, "test")
 		defer buf.Release()
 		for i := range str {
 			kv := &pb.KV{
@@ -411,7 +411,7 @@ func TestStreamDone(t *testing.T) {
 		var val [10]byte
 		rand.Read(val[:])
 		for i := 0; i < 10; i++ {
-			buf := z.NewBuffer(10 << 20, "test")
+			buf := z.NewBuffer(10<<20, "test")
 			defer buf.Release()
 			kv1 := &pb.KV{
 				Key:      []byte(fmt.Sprintf("%d", i)),
@@ -452,7 +452,7 @@ func TestSendOnClosedStream(t *testing.T) {
 
 	var val [10]byte
 	rand.Read(val[:])
-	buf := z.NewBuffer(10 << 20, "test")
+	buf := z.NewBuffer(10<<20, "test")
 	defer buf.Release()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
@@ -475,7 +475,7 @@ func TestSendOnClosedStream(t *testing.T) {
 		require.NoError(t, db.Close())
 	}()
 	// Send once stream is closed.
-	buf1 := z.NewBuffer(10 << 20, "test")
+	buf1 := z.NewBuffer(10<<20, "test")
 	defer buf1.Release()
 	kv1 = &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 2)),
@@ -502,7 +502,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 
 	var val [10]byte
 	rand.Read(val[:])
-	buf := z.NewBuffer(10 << 20, "test")
+	buf := z.NewBuffer(10<<20, "test")
 	defer buf.Release()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
@@ -549,7 +549,7 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	key := []byte("mykey")
 	value := []byte("myvalue")
 
-	buf := z.NewBuffer(10 << 20, "test")
+	buf := z.NewBuffer(10<<20, "test")
 	defer buf.Release()
 	KVToBuffer(&pb.KV{
 		Key:     key,
@@ -577,4 +577,28 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
+}
+
+// Test that stream writer does not crashes with large values in managed mode. In managed mode, we
+// don't write to value log.
+func TestStreamWriterWithLargeValue(t *testing.T) {
+	opts := DefaultOptions("")
+	opts.managedTxns = true
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		buf := z.NewBuffer(10<<20, "test")
+		defer buf.Release()
+		val := make([]byte, 10<<20)
+		_, err := rand.Read(val)
+		require.NoError(t, err)
+		KVToBuffer(&pb.KV{
+			Key:     []byte("key"),
+			Value:   val,
+			Version: 1,
+		}, buf)
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	})
 }
