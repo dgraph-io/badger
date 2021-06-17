@@ -830,26 +830,21 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			continue
 		}
 		numBuilds++
-		fileID := s.reserveFileID()
 		if err := inflightBuilders.Do(); err != nil {
 			// Can't return from here, until I decrRef all the tables that I built so far.
 			break
 		}
-		go func(builder *table.Builder) {
+		go func(builder *table.Builder, fileID uint64) {
 			var err error
 			defer inflightBuilders.Done(err)
 			defer builder.Close()
-
-			build := func(fileID uint64) (*table.Table, error) {
-				fname := table.NewFilename(fileID, s.kv.opt.Dir)
-				return table.CreateTable(fname, builder)
-			}
 
 			var tbl *table.Table
 			if s.kv.opt.InMemory {
 				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
 			} else {
-				tbl, err = build(fileID)
+				fname := table.NewFilename(fileID, s.kv.opt.Dir)
+				tbl, err = table.CreateTable(fname, builder)
 			}
 
 			// If we couldn't build the table, return fast.
@@ -857,7 +852,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				return
 			}
 			res <- tbl
-		}(builder)
+		}(builder, s.reserveFileID())
 	}
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
