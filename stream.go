@@ -128,7 +128,8 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-		kv.Meta = []byte{item.meta}
+		// As we do full copy, we need to transmit only if it is a delete key or not.
+		kv.Meta = []byte{item.meta & bitDelete}
 		kv.UserMeta = a.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)

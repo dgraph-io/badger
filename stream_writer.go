@@ -383,7 +383,11 @@ func (w *sortedWriter) handleRequests() {
 		for i, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
 			var vs y.ValueStruct
-			if e.skipVlogAndSetThreshold(w.db.valueThreshold()) {
+			// Sorted stream writer receives Key-Value (not a pointer to value). So, its upto the
+			// writer (and not the sender) to determine if the Value goes to vlog or stays in SST
+			// only. In managed mode, we do not write values to vlog and hence we would not have
+			// req.Ptrs initialized.
+			if w.db.opt.managedTxns || e.skipVlogAndSetThreshold(w.db.valueThreshold()) {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,
