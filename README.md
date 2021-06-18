@@ -190,6 +190,7 @@ Below is a list of known projects that use Badger:
 * [Veri](https://github.com/bgokden/veri) - A distributed feature store optimized for Search and Recommendation tasks.
 * [bIter](https://github.com/MikkelHJuul/bIter) - A library and Iterator interface for working with the `badger.Iterator`, simplifying from-to, and prefix mechanics.
 * [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
+* [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
 
 
 If you are using Badger in a project please send a pull request to add it to the list.
