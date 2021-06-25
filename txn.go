@@ -160,12 +160,12 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 	return false
 }
 
-func (o *oracle) newCommitTs(txn *Txn) uint64 {
+func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
 	o.Lock()
 	defer o.Unlock()
 
 	if o.hasConflict(txn) {
-		return 0
+		return 0, true
 	}
 
 	var ts uint64
@@ -194,7 +194,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		})
 	}
 
-	return ts
+	return ts, false
 }
 
 func (o *oracle) doneRead(txn *Txn) {
@@ -557,10 +557,8 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	orc.writeChLock.Lock()
 	defer orc.writeChLock.Unlock()
 
-	commitTs := orc.newCommitTs(txn)
-	// The commitTs can be zero if the transaction is running in managed mode.
-	// Individual entries might have their own timestamps.
-	if commitTs == 0 && !txn.db.opt.managedTxns {
+	commitTs, conflict := orc.newCommitTs(txn)
+	if conflict {
 		return nil, ErrConflict
 	}
 
