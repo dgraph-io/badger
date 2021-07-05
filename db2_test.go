@@ -948,7 +948,7 @@ func TestKeyCount(t *testing.T) {
 		es := 8 + valSz // key size is 8 bytes and value size is valSz
 
 		writer := db.NewStreamWriter()
-		require.NoError(t, writer.Prepare())
+		require.NoError(t, writer.Prepare(false))
 
 		wg := &sync.WaitGroup{}
 		writeCh := make(chan *pb.KVList, 3)

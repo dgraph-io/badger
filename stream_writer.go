@@ -75,7 +75,8 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 // Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
 // existing DB, stops compactions and any writes being done by other means. Be very careful when
 // calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
-// in a corrupt Badger instance.
+// in a corrupt Badger instance. It also supports an incremental stream write. In that case, it
+// writes the tables at one level above the current base level.
 func (sw *StreamWriter) Prepare(isIncremental bool) error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
@@ -278,7 +279,9 @@ func (sw *StreamWriter) Flush() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	defer sw.done()
+	if sw.done != nil {
+		defer sw.done()
+	}
 
 	for _, writer := range sw.writers {
 		if writer != nil {

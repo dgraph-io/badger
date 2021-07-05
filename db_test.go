@@ -2105,7 +2105,7 @@ func TestVerifyChecksum(t *testing.T) {
 			}
 
 			sw := db.NewStreamWriter()
-			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+			require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
 			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 

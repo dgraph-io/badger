@@ -2179,7 +2179,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	}
 	defer outDB.Close()
 	writer := outDB.NewStreamWriter()
-	if err := writer.Prepare(); err != nil {
+	if err := writer.Prepare(false); err != nil {
 		y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 
