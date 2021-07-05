@@ -54,6 +54,7 @@ type StreamWriter struct {
 	// Writer might receive tables first, and then receive keys. If true, that means we have
 	// started processing keys.
 	processingKeys bool
+	isIncremental  bool
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -75,17 +76,27 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 // existing DB, stops compactions and any writes being done by other means. Be very careful when
 // calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
 // in a corrupt Badger instance.
-func (sw *StreamWriter) Prepare() error {
+func (sw *StreamWriter) Prepare(isIncremental bool) error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	done, err := sw.db.dropAll()
-
-	// Ensure that done() is never called more than once.
-	var once sync.Once
-	sw.done = func() { once.Do(done) }
-
-	return err
+	if !isIncremental {
+		done, err := sw.db.dropAll()
+		// Ensure that done() is never called more than once.
+		var once sync.Once
+		sw.done = func() { once.Do(done) }
+		return err
+	}
+	sw.isIncremental = true
+	for _, level := range sw.db.Levels() {
+		if level.NumTables > 0 {
+			sw.prevLevel = level.Level
+		}
+	}
+	if sw.prevLevel == 0 {
+		return fmt.Errorf("Unable to do incremental writes because L0 has data")
+	}
+	return nil
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
@@ -168,12 +179,6 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			// Pass. The following code will handle the keys.
 		}
 
-		sw.processingKeys = true
-		if sw.prevLevel == 0 {
-			// If prevLevel is 0, that means that we have not written anything yet. Equivalently,
-			// we were virtually writing to the maxLevel+1.
-			sw.prevLevel = len(sw.db.lc.levels)
-		}
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -218,6 +223,15 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	// for closed stream. At restart, stream writer will drop all the data in Prepare function.
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
+	}
+
+	// Moved this piece of code to within the lock.
+	sw.processingKeys = true
+	if sw.prevLevel == 0 {
+		// If prevLevel is 0, that means that we have not written anything yet.
+		// So, we can write to the maxLevel. newWriter writes to prevLevel - 1,
+		// so we can set prevLevel to len(levels).
+		sw.prevLevel = len(sw.db.lc.levels)
 	}
 
 	for streamID, req := range streamReqs {
