@@ -201,7 +201,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	es := 8 + wo.valSz // key size is 8 bytes and value size is valSz
 
 	writer := db.NewStreamWriter()
-	if err := writer.Prepare(); err != nil {
+	if err := writer.Prepare(false); err != nil {
 		return err
 	}
 
