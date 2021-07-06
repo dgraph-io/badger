@@ -602,3 +602,54 @@ func TestStreamWriterWithLargeValue(t *testing.T) {
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 	})
 }
+
+func TestStreamWriterIncremental(t *testing.T) {
+	addIncremtal := func(t *testing.T, db *DB) {
+		buf := z.NewBuffer(10<<20, "test")
+		defer buf.Release()
+		KVToBuffer(&pb.KV{
+			Key:     []byte("key-2"),
+			Value:   []byte("val"),
+			Version: 1,
+		}, buf)
+		// Now do an incremental stream write.
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	}
+
+	t.Run("incremental on non-empty DB", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			buf := z.NewBuffer(10<<20, "test")
+			defer buf.Release()
+			KVToBuffer(&pb.KV{
+				Key:     []byte("key-1"),
+				Value:   []byte("val"),
+				Version: 1,
+			}, buf)
+			sw := db.NewStreamWriter()
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+			addIncremtal(t, db)
+
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			_, err := txn.Get([]byte("key-1"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("key-2"))
+			require.NoError(t, err)
+		})
+	})
+	t.Run("incremental on empty DB", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			addIncremtal(t, db)
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			_, err := txn.Get([]byte("key-2"))
+			require.NoError(t, err)
+		})
+	})
+}

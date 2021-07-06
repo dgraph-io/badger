@@ -74,18 +74,57 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 // Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
 // existing DB, stops compactions and any writes being done by other means. Be very careful when
 // calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
-// in a corrupt Badger instance.
+// in a corrupt Badger instance. Use PrepareIncremental to do incremental stream write.
 func (sw *StreamWriter) Prepare() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
 	done, err := sw.db.dropAll()
-
 	// Ensure that done() is never called more than once.
 	var once sync.Once
 	sw.done = func() { once.Do(done) }
-
 	return err
+}
+
+// PrepareIncremental should be called before writing any entry to StreamWriter incrementally.
+// In incremental stream write, the tables are written at one level above the current base level.
+func (sw *StreamWriter) PrepareIncremental() error {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	// Ensure that done() is never called more than once.
+	var once sync.Once
+
+	// prepareToDrop will stop all the incoming writes and process any pending flush tasks.
+	// Before we start writing, we'll stop the compactions because no one else should be writing to
+	// the same level as the stream writer is writing to.
+	f, err := sw.db.prepareToDrop()
+	if err != nil {
+		sw.done = func() { once.Do(f) }
+		return err
+	}
+	sw.db.stopCompactions()
+	done := func() {
+		sw.db.startCompactions()
+		f()
+	}
+	sw.done = func() { once.Do(done) }
+
+	isEmptyDB := true
+	for _, level := range sw.db.Levels() {
+		if level.NumTables > 0 {
+			sw.prevLevel = level.Level
+			isEmptyDB = false
+		}
+	}
+	if isEmptyDB {
+		// If DB is empty, we should allow doing incremental stream write.
+		return nil
+	}
+	if sw.prevLevel == 0 {
+		return fmt.Errorf("Unable to do incremental writes because L0 has data")
+	}
+	return nil
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
@@ -169,11 +208,6 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		}
 
 		sw.processingKeys = true
-		if sw.prevLevel == 0 {
-			// If prevLevel is 0, that means that we have not written anything yet. Equivalently,
-			// we were virtually writing to the maxLevel+1.
-			sw.prevLevel = len(sw.db.lc.levels)
-		}
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -218,6 +252,14 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	// for closed stream. At restart, stream writer will drop all the data in Prepare function.
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
+	}
+
+	// Moved this piece of code to within the lock.
+	if sw.prevLevel == 0 {
+		// If prevLevel is 0, that means that we have not written anything yet.
+		// So, we can write to the maxLevel. newWriter writes to prevLevel - 1,
+		// so we can set prevLevel to len(levels).
+		sw.prevLevel = len(sw.db.lc.levels)
 	}
 
 	for streamID, req := range streamReqs {
