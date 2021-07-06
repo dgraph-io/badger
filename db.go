@@ -1741,7 +1741,7 @@ func (db *DB) prepareToDrop() (func(), error) {
 	// write it to db. Then, flush all the pending flushtask. So that, we
 	// don't miss any entries.
 	if err := db.blockWrite(); err != nil {
-		return nil, err
+		return func() {}, err
 	}
 	reqs := make([]*request, 0, 10)
 	for {
@@ -2179,7 +2179,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	}
 	defer outDB.Close()
 	writer := outDB.NewStreamWriter()
-	if err := writer.Prepare(false); err != nil {
+	if err := writer.Prepare(); err != nil {
 		y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 

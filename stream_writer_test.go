@@ -59,7 +59,7 @@ func TestStreamWriter1(t *testing.T) {
 			valueSize := 128
 			list := getSortedKVList(valueSize, noOfKeys)
 			sw := db.NewStreamWriter()
-			require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
@@ -110,7 +110,7 @@ func TestStreamWriter2(t *testing.T) {
 			valueSize := 128
 			list := getSortedKVList(valueSize, noOfKeys)
 			sw := db.NewStreamWriter()
-			require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
 			maxVs := sw.maxVersion
@@ -189,7 +189,7 @@ func TestStreamWriter3(t *testing.T) {
 			}
 
 			sw := db.NewStreamWriter()
-			require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
 			maxVs := sw.maxVersion
@@ -281,7 +281,7 @@ func TestStreamWriter4(t *testing.T) {
 		}, buf)
 
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 	})
@@ -311,7 +311,7 @@ func TestStreamWriter5(t *testing.T) {
 		}, buf)
 
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 		require.NoError(t, db.Close())
@@ -353,7 +353,7 @@ func TestStreamWriter6(t *testing.T) {
 		// list has 3 pairs for equal keys. Since each Key has size equal to MaxTableSize
 		// we would have 6 tables, if keys are not equal. Here we should have 3 tables.
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
@@ -390,14 +390,14 @@ func TestStreamWriterCancel(t *testing.T) {
 		}
 
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		sw.Cancel()
 
 		// Use the API incorrectly.
 		sw1 := db.NewStreamWriter()
 		defer sw1.Cancel()
-		require.NoError(t, sw1.Prepare(false))
+		require.NoError(t, sw1.Prepare())
 		defer sw1.Cancel()
 		sw1.Flush()
 	})
@@ -406,7 +406,7 @@ func TestStreamWriterCancel(t *testing.T) {
 func TestStreamDone(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 
 		var val [10]byte
 		rand.Read(val[:])
@@ -448,7 +448,7 @@ func TestSendOnClosedStream(t *testing.T) {
 	require.NoError(t, err)
 
 	sw := db.NewStreamWriter()
-	require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 
 	var val [10]byte
 	rand.Read(val[:])
@@ -498,7 +498,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 	require.NoError(t, err)
 
 	sw := db.NewStreamWriter()
-	require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 
 	var val [10]byte
 	rand.Read(val[:])
@@ -558,7 +558,7 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	}, buf)
 
 	sw := db.NewStreamWriter()
-	require.NoError(t, sw.Prepare(false), "Prepare failed")
+	require.NoError(t, sw.Prepare(), "Prepare failed")
 	require.NoError(t, sw.Write(buf), "Write failed")
 	require.NoError(t, sw.Flush(), "Flush failed")
 
@@ -597,7 +597,7 @@ func TestStreamWriterWithLargeValue(t *testing.T) {
 		}, buf)
 
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 	})
@@ -612,12 +612,10 @@ func TestStreamWriterIncremental(t *testing.T) {
 			Value:   []byte("val"),
 			Version: 1,
 		}, buf)
-
 		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(false), "sw.Prepare(false) failed")
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
-
 		buf.Reset()
 		KVToBuffer(&pb.KV{
 			Key:     []byte("key-2"),
@@ -626,16 +624,14 @@ func TestStreamWriterIncremental(t *testing.T) {
 		}, buf)
 		// Now do an incremental stream write.
 		sw2 := db.NewStreamWriter()
-		require.NoError(t, sw2.Prepare(true), "sw.Prepare(true) failed")
+		require.NoError(t, sw2.PrepareIncremental(), "sw.PrepareIncremental() failed")
 		require.NoError(t, sw2.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw2.Flush(), "sw.Flush() failed")
-
 		txn := db.NewTransaction(false)
 		defer txn.Discard()
 		_, err := txn.Get([]byte("key-1"))
 		require.NoError(t, err)
 		_, err = txn.Get([]byte("key-2"))
 		require.NoError(t, err)
-
 	})
 }

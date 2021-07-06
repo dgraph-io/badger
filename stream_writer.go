@@ -74,33 +74,33 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 // Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
 // existing DB, stops compactions and any writes being done by other means. Be very careful when
 // calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
-// in a corrupt Badger instance. It also supports an incremental stream write. In that case, it
-// writes the tables at one level above the current base level.
-func (sw *StreamWriter) Prepare(isIncremental bool) error {
+// in a corrupt Badger instance. Use PrepareIncremental to do incremental stream write.
+func (sw *StreamWriter) Prepare() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
+	done, err := sw.db.dropAll()
+	// Ensure that done() is never called more than once.
 	var once sync.Once
-	setDone := func(f func()) {
-		sw.done = func() {
-			if f != nil {
-				once.Do(f)
-			}
-		}
-	}
-	if !isIncremental {
-		done, err := sw.db.dropAll()
-		// Ensure that done() is never called more than once.
-		setDone(done)
-		return err
-	}
+	sw.done = func() { once.Do(done) }
+	return err
+}
+
+// PrepareIncremental should be called before writing any entry to StreamWriter incrementally.
+// In incremental stream write, the tables are written at one level above the current base level.
+func (sw *StreamWriter) PrepareIncremental() error {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	// Ensure that done() is never called more than once.
+	var once sync.Once
 
 	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
 	// Before we start writing, we'll stop the compactions because no one else should be writing to
 	// the same level as the stream writer is writing to.
 	f, err := sw.db.prepareToDrop()
 	if err != nil {
-		setDone(f)
+		sw.done = func() { once.Do(f) }
 		return err
 	}
 	sw.db.stopCompactions()
@@ -108,7 +108,7 @@ func (sw *StreamWriter) Prepare(isIncremental bool) error {
 		sw.db.startCompactions()
 		f()
 	}
-	setDone(done)
+	sw.done = func() { once.Do(done) }
 
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
