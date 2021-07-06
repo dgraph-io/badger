@@ -95,7 +95,7 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	// Ensure that done() is never called more than once.
 	var once sync.Once
 
-	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
+	// prepareToDrop will stop all the incoming writes and process any pending flush tasks.
 	// Before we start writing, we'll stop the compactions because no one else should be writing to
 	// the same level as the stream writer is writing to.
 	f, err := sw.db.prepareToDrop()
@@ -110,10 +110,16 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	}
 	sw.done = func() { once.Do(done) }
 
+	isEmptyDB := true
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
 			sw.prevLevel = level.Level
+			isEmptyDB = false
 		}
+	}
+	if isEmptyDB {
+		// If DB is empty, we should allow doing incremental stream write.
+		return nil
 	}
 	if sw.prevLevel == 0 {
 		return fmt.Errorf("Unable to do incremental writes because L0 has data")
