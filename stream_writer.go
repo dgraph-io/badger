@@ -54,7 +54,6 @@ type StreamWriter struct {
 	// Writer might receive tables first, and then receive keys. If true, that means we have
 	// started processing keys.
 	processingKeys bool
-	isIncremental  bool
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -81,14 +80,31 @@ func (sw *StreamWriter) Prepare(isIncremental bool) error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
+	var once sync.Once
 	if !isIncremental {
 		done, err := sw.db.dropAll()
 		// Ensure that done() is never called more than once.
-		var once sync.Once
 		sw.done = func() { once.Do(done) }
 		return err
 	}
-	sw.isIncremental = true
+
+	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
+	// Before we start writing, we'll stop the compactions because no one else should be writing to
+	// the same level as the stream writer is writing to.
+	f, err := sw.db.prepareToDrop()
+	if err != nil {
+		if f != nil {
+			f()
+		}
+		return err
+	}
+	sw.db.stopCompactions()
+	done := func() {
+		sw.db.startCompactions()
+		f()
+	}
+	sw.done = func() { once.Do(done) }
+
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
 			sw.prevLevel = level.Level
