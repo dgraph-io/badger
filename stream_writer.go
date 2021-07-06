@@ -81,10 +81,17 @@ func (sw *StreamWriter) Prepare(isIncremental bool) error {
 	defer sw.writeLock.Unlock()
 
 	var once sync.Once
+	setDone := func(f func()) {
+		sw.done = func() {
+			if f != nil {
+				once.Do(f)
+			}
+		}
+	}
 	if !isIncremental {
 		done, err := sw.db.dropAll()
 		// Ensure that done() is never called more than once.
-		sw.done = func() { once.Do(done) }
+		setDone(done)
 		return err
 	}
 
@@ -93,9 +100,7 @@ func (sw *StreamWriter) Prepare(isIncremental bool) error {
 	// the same level as the stream writer is writing to.
 	f, err := sw.db.prepareToDrop()
 	if err != nil {
-		if f != nil {
-			f()
-		}
+		setDone(f)
 		return err
 	}
 	sw.db.stopCompactions()
@@ -103,7 +108,7 @@ func (sw *StreamWriter) Prepare(isIncremental bool) error {
 		sw.db.startCompactions()
 		f()
 	}
-	sw.done = func() { once.Do(done) }
+	setDone(done)
 
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
@@ -196,6 +201,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 			// Pass. The following code will handle the keys.
 		}
 
+		sw.processingKeys = true
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -243,7 +249,6 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	}
 
 	// Moved this piece of code to within the lock.
-	sw.processingKeys = true
 	if sw.prevLevel == 0 {
 		// If prevLevel is 0, that means that we have not written anything yet.
 		// So, we can write to the maxLevel. newWriter writes to prevLevel - 1,
@@ -295,9 +300,7 @@ func (sw *StreamWriter) Flush() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	if sw.done != nil {
-		defer sw.done()
-	}
+	defer sw.done()
 
 	for _, writer := range sw.writers {
 		if writer != nil {
