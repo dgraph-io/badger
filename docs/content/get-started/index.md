@@ -633,7 +633,6 @@ the `Options` struct that is passed in when opening the database using
   - If you modify `Options.NumMemtables`, also adjust `Options.NumLevelZeroTables` and
    `Options.NumLevelZeroTablesStall` accordingly.
 - Number of concurrent compactions (`Options.NumCompactors`)
-- Mode in which LSM tree is loaded (`Options.TableLoadingMode`)
 - Size of table (`Options.MaxTableSize`)
 - Size of value log file (`Options.ValueLogFileSize`)
 
