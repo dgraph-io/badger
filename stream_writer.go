@@ -115,6 +115,7 @@ func (sw *StreamWriter) PrepareIncremental() error {
 		if level.NumTables > 0 {
 			sw.prevLevel = level.Level
 			isEmptyDB = false
+			break
 		}
 	}
 	if isEmptyDB {
