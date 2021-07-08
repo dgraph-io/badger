@@ -638,7 +638,7 @@ func (it *Iterator) parseItem() bool {
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
 	// Ignore everything that is above the readTs and below or at the sinceTs.
-	if version > it.readTs || version <= it.opt.SinceTs {
+	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
 		mi.Next()
 		return false
 	}
