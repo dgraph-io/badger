@@ -626,9 +626,6 @@ Badger's memory usage can be managed by tweaking several options available in
 the `Options` struct that is passed in when opening the database using
 `DB.Open`.
 
-- `Options.ValueLogLoadingMode` can be set to `options.FileIO` (instead of the
-  default `options.MemoryMap`) to avoid memory-mapping log files. This can be
-  useful in environments with low RAM.
 - Number of memtables (`Options.NumMemtables`)
   - If you modify `Options.NumMemtables`, also adjust `Options.NumLevelZeroTables` and
    `Options.NumLevelZeroTablesStall` accordingly.
