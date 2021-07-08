@@ -817,6 +817,15 @@ func TestManagedDB(t *testing.T) {
 			}
 		}
 		txn.Discard()
+
+		// Write data to same key, causing a conflict
+		txn = db.NewTransactionAt(10, true)
+		txnb := db.NewTransactionAt(10, true)
+		txnb.Get(key(0))
+		require.NoError(t, txn.SetEntry(NewEntry(key(0), val(0))))
+		require.NoError(t, txnb.SetEntry(NewEntry(key(0), val(1))))
+		require.NoError(t, txn.CommitAt(11, nil))
+		require.Equal(t, ErrConflict, txnb.CommitAt(11, nil))
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		db, err := Open(opt)

@@ -40,11 +40,6 @@ var (
 	// and encountering the end of slice.
 	ErrEOF = errors.New("ErrEOF: End of file")
 
-	// ErrZstdCgo indicates that badger was built without cgo but ZSTD
-	// compression algorithm is being used for compression. ZSTD cannot work
-	// without CGO.
-	ErrZstdCgo = errors.New("ErrZstdCgo: zstd compression requires building badger with cgo enabled")
-
 	// ErrCommitAfterFinish indicates that write batch commit was called after
 	// finish
 	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")

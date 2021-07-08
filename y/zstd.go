@@ -1,5 +1,3 @@
-// +build cgo
-
 /*
  * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
@@ -19,23 +17,48 @@
 package y
 
 import (
-	"github.com/DataDog/zstd"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// CgoEnabled is used to check if CGO is enabled while building badger.
-const CgoEnabled = true
+var (
+	decoder *zstd.Decoder
+	encoder *zstd.Encoder
+
+	encOnce, decOnce sync.Once
+)
 
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
 func ZSTDDecompress(dst, src []byte) ([]byte, error) {
-	return zstd.Decompress(dst, src)
+	decOnce.Do(func() {
+		var err error
+		decoder, err = zstd.NewReader(nil)
+		Check(err)
+	})
+	return decoder.DecodeAll(src, dst[:0])
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
 func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
-	return zstd.CompressLevel(dst, src, compressionLevel)
+	encOnce.Do(func() {
+		var err error
+		level := zstd.EncoderLevelFromZstd(compressionLevel)
+		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+		Check(err)
+	})
+	return encoder.EncodeAll(src, dst[:0]), nil
 }
 
 // ZSTDCompressBound returns the worst case size needed for a destination buffer.
+// Klauspost ZSTD library does not provide any API for Compression Bound. This
+// calculation is based on the DataDog ZSTD library.
+// See https://pkg.go.dev/github.com/DataDog/zstd#CompressBound
 func ZSTDCompressBound(srcSize int) int {
-	return zstd.CompressBound(srcSize)
+	lowLimit := 128 << 10 // 128 kB
+	var margin int
+	if srcSize < lowLimit {
+		margin = (lowLimit - srcSize) >> 11
+	}
+	return srcSize + (srcSize >> 8) + margin
 }
