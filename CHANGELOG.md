@@ -3,6 +3,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.2103.1] - 2021-07-08
+
+### Fixed
+  - fix(compaction): copy over the file ID when building tables #1713
+  - fix: Fix conflict detection for managed DB (#1716)
+  - fix(pendingWrites): don't skip the pending entries with version=0 (#1721)
+
+### Features
+  - feat(zstd): replace datadog's zstd with Klauspost's zstd (#1709)
+
 ## [3.2103.0] - 2021-06-02
 
 ### Breaking
