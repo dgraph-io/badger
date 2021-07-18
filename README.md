@@ -164,8 +164,10 @@ Below is a list of known projects that use Badger:
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
+* [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
@@ -192,7 +194,7 @@ Below is a list of known projects that use Badger:
 * [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
 * [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
 * [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
-
+* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocal.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 

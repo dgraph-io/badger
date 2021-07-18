@@ -12,6 +12,7 @@ Below is a list of known projects that use Badger:
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
 * [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
 * [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
+* [smallstep/certificates](https://github.com/smallstep/certificates) - Step-ca is an online certificate authority for secure, automated certificate management.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
@@ -38,6 +39,13 @@ Below is a list of known projects that use Badger:
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
+* [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
+* [Pyroscope](https://github.com/pyroscope-io/pyroscope) - Open source confinuous profiling platform built with BadgerDB
+* [Veri](https://github.com/bgokden/veri) - A distributed feature store optimized for Search and Recommendation tasks.
+* [bIter](https://github.com/MikkelHJuul/bIter) - A library and Iterator interface for working with the `badger.Iterator`, simplifying from-to, and prefix mechanics.
+* [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
+* [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
+* [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
 * [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocal.
 
 If you are using Badger in a project please send a pull request to add it to the list.
