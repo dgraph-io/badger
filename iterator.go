@@ -590,7 +590,7 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	// excapse when current key doesn't have prefix
+	// escape when current key doesn't have prefix
 	for it.iitr.Valid() && hasPrefix(it.iitr, it.opt.Prefix) {
 		if it.parseItem() {
 			// parseItem calls one extra next.
@@ -736,7 +736,7 @@ func (it *Iterator) prefetch() {
 	i := it.iitr
 	var count int
 	it.item = nil
-	// excapse when current key doesn't have prefix
+	// escape when current key doesn't have prefix
 	for i.Valid() && hasPrefix(i, it.opt.Prefix) {
 		if !it.parseItem() {
 			continue
