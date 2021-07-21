@@ -3,6 +3,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.2007.3] - 2021-07-21
+
+### Fixed
+  - fix(maxVersion): Use choosekey instead of KeyToList (#1532) #1533
+  - fix(flatten): Add --num_versions flag (#1518) #1520
+  - fix(build): Fix integer overflow on 32-bit architectures #1558
+  - fix(pb): avoid protobuf warning due to common filename (#1519)
+
+### Features
+  - Add command to stream contents of DB into another DB. (#1486)
+
+### New APIs
+  - DB.StreamDB
+  - DB.MaxVersion
+
 ## [2.2007.2] - 2020-08-31
 
 ### Fixed
