@@ -2516,13 +2516,13 @@ func TestLatestTs(t *testing.T) {
 	opt.managedTxns = true
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		for i := uint64(1); i < 10; i++ {
+		for i := uint64(1); i < 50; i++ {
 			txn := db.NewTransactionAt(i, true)
 			require.NoError(t, txn.SetEntry(NewEntry([]byte("foo"), []byte("bar")).WithMeta(0x00)))
-			require.NoError(t, txn.CommitAt(i+1, func(err error) { y.Check(err) }))
+			require.NoError(t, txn.CommitAt(i+1, nil))
+			txn.Discard()
 		}
-		// time.Sleep(5 * time.Second)
 		ts := db.LatestTs([]byte("foo"))
-		require.Equal(t, uint64(10), ts)
+		require.Equal(t, uint64(50), ts)
 	})
 }
