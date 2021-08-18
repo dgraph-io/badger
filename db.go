@@ -2278,6 +2278,8 @@ func (db *DB) LatestTs(key []byte) uint64 {
 	it := txn.NewKeyIterator(key, iopts)
 	defer it.Close()
 
-	it.Seek(key)
-	return it.Item().Version()
+	for it.Seek(key); it.Valid(); it.Next() {
+		return it.Item().Version()
+	}
+	return 0
 }
