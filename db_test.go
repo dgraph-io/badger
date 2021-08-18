@@ -2509,3 +2509,15 @@ func TestBannedAtZeroOffset(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestLatestTs(t *testing.T) {
+	opt := getTestOptions("")
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		for i := 0; i < 100; i++ {
+			txnSet(t, db, []byte("foo"), []byte("bar"), 0x00)
+		}
+		ts := db.LatestTs([]byte("foo"))
+		require.Equal(t, uint64(100), ts)
+	})
+}

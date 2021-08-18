@@ -2269,3 +2269,17 @@ func (db *DB) LevelsToString() string {
 	b.WriteString("Level Done\n")
 	return b.String()
 }
+
+func (db *DB) LatestTs(key []byte) uint64 {
+	txn := db.NewTransaction(false)
+
+	iopts := DefaultIteratorOptions
+	iopts.AllVersions = true
+	it := txn.NewKeyIterator(key, iopts)
+	defer it.Close()
+
+	for it.Seek(key); it.Valid(); it.Next() {
+		return it.Item().Version()
+	}
+	return 0
+}

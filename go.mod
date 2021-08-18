@@ -14,7 +14,7 @@ require (
 	github.com/google/flatbuffers v1.12.0
 	github.com/google/go-cmp v0.5.4 // indirect
 	github.com/klauspost/compress v1.12.3
-	github.com/kr/pretty v0.1.0 // indirect
+	github.com/kr/pretty v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cobra v0.0.5
