@@ -226,10 +226,6 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, ErrInvalidLoadingMode
 	}
 
-	// Return error if badger is built without cgo and compression is set to ZSTD.
-	if opt.Compression == options.ZSTD && !y.CgoEnabled {
-		return nil, y.ErrZstdCgo
-	}
 	// Keep L0 in memory if either KeepL0InMemory is set or if InMemory is set.
 	opt.KeepL0InMemory = opt.KeepL0InMemory || opt.InMemory
 

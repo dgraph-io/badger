@@ -74,7 +74,6 @@ $ go get github.com/dgraph-io/badger/v2
 This will retrieve the library and install the `badger` command line
 utility into your `$GOBIN` path.
 
-##### Note: Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd for compression and it requires gcc/cgo. If you wish to use badger without gcc/cgo, you can run `CGO_ENABLED=0 go get github.com/dgraph-io/badger/...` which will download badger without the support for ZSTD compression algorithm.
 
 #### Choosing a version
 

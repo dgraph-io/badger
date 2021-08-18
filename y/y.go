@@ -36,11 +36,6 @@ var (
 	// ErrEOF indicates an end of file when trying to read from a memory mapped file
 	// and encountering the end of slice.
 	ErrEOF = errors.New("End of mapped region")
-
-	// ErrZstdCgo indicates that badger was built without cgo but ZSTD
-	// compression algorithm is being used for compression. ZSTD cannot work
-	// without CGO.
-	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 )
 
 const (
