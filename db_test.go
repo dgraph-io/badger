@@ -2512,12 +2512,17 @@ func TestBannedAtZeroOffset(t *testing.T) {
 
 func TestLatestTs(t *testing.T) {
 	opt := getTestOptions("")
+	opt = opt.WithNumVersionsToKeep(1000)
+	opt.managedTxns = true
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		for i := 0; i < 100; i++ {
-			txnSet(t, db, []byte("foo"), []byte("bar"), 0x00)
+		for i := uint64(1); i < 10; i++ {
+			txn := db.NewTransactionAt(i, true)
+			require.NoError(t, txn.SetEntry(NewEntry([]byte("foo"), []byte("bar")).WithMeta(0x00)))
+			require.NoError(t, txn.CommitAt(i+1, func(err error) { y.Check(err) }))
 		}
+		// time.Sleep(5 * time.Second)
 		ts := db.LatestTs([]byte("foo"))
-		require.Equal(t, uint64(100), ts)
+		require.Equal(t, uint64(10), ts)
 	})
 }

@@ -2271,15 +2271,16 @@ func (db *DB) LevelsToString() string {
 }
 
 func (db *DB) LatestTs(key []byte) uint64 {
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, true)
 
 	iopts := DefaultIteratorOptions
 	iopts.AllVersions = true
 	it := txn.NewKeyIterator(key, iopts)
 	defer it.Close()
 
-	for it.Seek(key); it.Valid(); it.Next() {
-		return it.Item().Version()
-	}
-	return 0
+	// for it.Seek(key); it.Valid(); it.Next() {
+	// 	fmt.Printf("Version: %d\n", it.Item().Version())
+	// }
+	it.Seek(key)
+	return it.Item().Version()
 }
