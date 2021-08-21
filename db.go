@@ -49,7 +49,8 @@ var (
 )
 
 const (
-	maxNumSplits = 128
+	maxNumSplits     = 128
+	TimestampMapFile = "TSMAP"
 )
 
 type closers struct {
@@ -127,6 +128,8 @@ type DB struct {
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
+
+	TsMap *z.Tree
 }
 
 const (
@@ -383,6 +386,10 @@ func Open(opt Options) (*DB, error) {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
+	if err := db.initTsMap(opt.Dir); err != nil {
+		return db, errors.Wrapf(err, "While initializing timestamp map")
+	}
+
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
@@ -398,6 +405,31 @@ func Open(opt Options) (*DB, error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+func (db *DB) initTsMap(dir string) error {
+	if db.opt.InMemory {
+		db.TsMap = z.NewTree("tsmap")
+		return nil
+	}
+	var err error
+	db.TsMap, err = z.NewTreePersistent(filepath.Join(dir, TimestampMapFile))
+	return err
+}
+
+func (db *DB) updateTsMap(key []byte) {
+	keyHash, ts := z.MemHash(y.ParseKey(key)), y.ParseTs(key)
+	if curTs := db.TsMap.Get(keyHash); curTs < ts {
+		db.TsMap.Set(keyHash, ts)
+	}
+}
+
+// The key passed to this API must not contain timestamp
+func (db *DB) SetToTsMap(key []byte, ts uint64) {
+	keyHash := z.MemHash(key)
+	if curTs := db.TsMap.Get(keyHash); curTs < ts {
+		db.TsMap.Set(keyHash, ts)
+	}
 }
 
 // initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
@@ -788,6 +820,7 @@ func (db *DB) writeToLSM(b *request) error {
 		if err != nil {
 			return y.Wrapf(err, "while writing to memTable")
 		}
+		db.updateTsMap(entry.Key)
 	}
 	if db.opt.SyncWrites {
 		return db.mt.SyncWAL()
@@ -1042,15 +1075,15 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 		}
 		entries = append(entries, e)
 	}
-	req := &request{
-		Entries: entries,
-	}
-	reqs := []*request{req}
-	db.pub.sendUpdates(reqs)
+	reqs := []*request{{Entries: entries}}
 
 	select {
 	case db.flushChan <- flushTask{mt: mt, cb: callback}:
 		db.imm = append(db.imm, mt)
+		db.pub.sendUpdates(reqs)
+		for _, e := range entries {
+			db.updateTsMap(e.Key)
+		}
 		return nil
 	default:
 		return errNoRoom
@@ -2282,4 +2315,8 @@ func (db *DB) LatestTs(key []byte) uint64 {
 		return it.Item().Version()
 	}
 	return 0
+}
+
+func (db *DB) LatestTsFromMap(key []byte) uint64 {
+	return db.TsMap.Get(z.MemHash(key))
 }
