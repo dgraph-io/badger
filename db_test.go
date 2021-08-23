@@ -2509,3 +2509,41 @@ func TestBannedAtZeroOffset(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestSeekTs(t *testing.T) {
+	opt := getTestOptions("")
+	opt = opt.WithNumVersionsToKeep(1000)
+	opt.managedTxns = true
+
+	key := []byte("foo")
+
+	testReadTs := func(db *DB, readTs, maxTs uint64) {
+		txn := db.NewTransactionAt(readTs, true)
+		iterOpts := DefaultIteratorOptions
+		iterOpts.AllVersions = true
+		iterOpts.PrefetchValues = false
+		itr := txn.NewKeyIterator(key, iterOpts)
+
+		latestTs := itr.Seek(key)
+		require.Equal(t, latestTs, maxTs)
+
+		for ; itr.Valid(); itr.Next() {
+			version := itr.Item().Version()
+			require.LessOrEqual(t, uint64(version), readTs)
+			break
+		}
+	}
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		for i := uint64(1); i < 50; i++ {
+			txn := db.NewTransactionAt(i, true)
+			require.NoError(t, txn.SetEntry(NewEntry(key, []byte("bar")).WithMeta(0x00)))
+			require.NoError(t, txn.CommitAt(i+1, nil))
+			txn.Discard()
+		}
+
+		for i := uint64(1); i < 55; i++ {
+			testReadTs(db, i, 50)
+		}
+	})
+}
