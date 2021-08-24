@@ -47,4 +47,6 @@ script: >-
       go test -v ./...
       # Another round of tests after turning off mmap.
       go test -v -vlog_mmap=false github.com/dgraph-io/badger
+      # Cross-compile for Plan 9
+      GOOS=plan9 go build ./...
     fi
