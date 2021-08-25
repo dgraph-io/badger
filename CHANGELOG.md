@@ -179,6 +179,14 @@ This release is not backward compatible with Badger v2.x.x
   - WithTruncate (#1555)
   - WithValueLogLoadingMode (#1555)
 
+## [2.2007.4] - 2021-08-25
+
+### Fixed
+  - Fix build on Plan 9 (#1451)  (#1508) (#1738)
+
+### Features
+  - feat(zstd): backport replacement of DataDog's zstd with Klauspost's zstd (#1736)
+
 ## [2.2007.3] - 2021-07-21
 
 ### Fixed
