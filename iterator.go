@@ -776,10 +776,8 @@ func (it *Iterator) Seek(key []byte) uint64 {
 	}
 
 	if !it.opt.Reverse {
-		// key = y.KeyWithTs(key, it.txn.readTs)
-		// Using maxUint64 because we want seek to return latestTs of the key as well.
+		// Using maxUint64 instead of it.readTs because we want seek to return latestTs of the key.
 		// All the keys with ts > readTs will be discarded for iteration by the prefetch function.
-		// TODO: See if we can keep it.txn.readTs instead.
 		key = y.KeyWithTs(key, math.MaxUint64)
 	} else {
 		key = y.KeyWithTs(key, 0)
