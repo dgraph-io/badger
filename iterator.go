@@ -456,7 +456,8 @@ type Iterator struct {
 	// iterators created by the stream interface
 	ThreadId int
 
-	Alloc *z.Allocator
+	latestTs uint64
+	Alloc    *z.Allocator
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
@@ -637,6 +638,9 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
+	if version > it.latestTs {
+		it.latestTs = version
+	}
 	// Ignore everything that is above the readTs and below or at the sinceTs.
 	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
 		mi.Next()
@@ -749,9 +753,9 @@ func (it *Iterator) prefetch() {
 // Seek would seek to the provided key if present. If absent, it would seek to the next
 // smallest key greater than the provided key if iterating in the forward direction.
 // Behavior would be reversed if iterating backwards.
-func (it *Iterator) Seek(key []byte) {
+func (it *Iterator) Seek(key []byte) uint64 {
 	if it.iitr == nil {
-		return
+		return it.latestTs
 	}
 	if len(key) > 0 {
 		it.txn.addReadKey(key)
@@ -768,16 +772,19 @@ func (it *Iterator) Seek(key []byte) {
 	if len(key) == 0 {
 		it.iitr.Rewind()
 		it.prefetch()
-		return
+		return it.latestTs
 	}
 
 	if !it.opt.Reverse {
-		key = y.KeyWithTs(key, it.txn.readTs)
+		// Using maxUint64 instead of it.readTs because we want seek to return latestTs of the key.
+		// All the keys with ts > readTs will be discarded for iteration by the prefetch function.
+		key = y.KeyWithTs(key, math.MaxUint64)
 	} else {
 		key = y.KeyWithTs(key, 0)
 	}
 	it.iitr.Seek(key)
 	it.prefetch()
+	return it.latestTs
 }
 
 // Rewind would rewind the iterator cursor all the way to zero-th position, which would be the
