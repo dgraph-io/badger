@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.2007.4] - 2021-08-25
+
+### Fixed
+  - Fix build on Plan 9 (#1451)  (#1508) (#1738)
+
+### Features
+  - feat(zstd): backport replacement of DataDog's zstd with Klauspost's zstd (#1736)
+
 ## [2.2007.3] - 2021-07-21
 
 ### Fixed
