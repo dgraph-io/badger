@@ -195,6 +195,7 @@ Below is a list of known projects that use Badger:
 * [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
 * [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
 * [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocal.
+* [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
