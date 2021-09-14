@@ -1119,8 +1119,22 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	cd.nextRange = keyRange{}
 	cd.bot = nil
 
-	cd.lockLevels()
-	defer cd.unlockLevels()
+	// Because this level and next level are both level 0, we should NOT acquire
+	// the read lock twice, because it can result in a deadlock. So, we don't
+	// call compactDef.lockLevels, instead locking the level only once and
+	// directly here.
+	//
+	// As per godocs on RWMutex:
+	// If a goroutine holds a RWMutex for reading and another goroutine might
+	// call Lock, no goroutine should expect to be able to acquire a read lock
+	// until the initial read lock is released. In particular, this prohibits
+	// recursive read locking. This is to ensure that the lock eventually
+	// becomes available; a blocked Lock call excludes new readers from
+	// acquiring the lock.
+	y.AssertTrue(cd.thisLevel.level == 0)
+	y.AssertTrue(cd.nextLevel.level == 0)
+	s.levels[0].RLock()
+	defer s.levels[0].RUnlock()
 
 	s.cstatus.Lock()
 	defer s.cstatus.Unlock()
