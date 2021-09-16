@@ -371,6 +371,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 
 	extVersion := y.BytesToU16(magicBuf[4:6])
 	version := y.BytesToU16(magicBuf[6:8])
+
 	if version != badgerMagicVersion {
 		return Manifest{}, 0,
 			//nolint:lll
@@ -379,9 +380,9 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 				" on how to fix this.",
 				version, badgerMagicVersion)
 	}
-	if extMagic != extVersion {
+	if extVersion != extMagic {
 		return Manifest{}, 0,
-			fmt.Errorf("Cannot open DB because the external magic number doesn't match."+
+			fmt.Errorf("Cannot open DB because the external magic number doesn't match. "+
 				"Expected: %d, version present in manifest: %d\n", extMagic, extVersion)
 	}
 

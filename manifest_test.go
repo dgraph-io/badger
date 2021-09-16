@@ -102,7 +102,7 @@ func TestManifestMagic(t *testing.T) {
 }
 
 func TestManifestVersion(t *testing.T) {
-	helpTestManifestFileCorruption(t, 4, "unsupported version")
+	helpTestManifestFileCorruption(t, 6, "unsupported version")
 }
 
 func TestManifestChecksum(t *testing.T) {
