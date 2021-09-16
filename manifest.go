@@ -79,6 +79,10 @@ type TableManifest struct {
 type manifestFile struct {
 	fp        *os.File
 	directory string
+
+	// The external magic number used by the application running badger.
+	externalMagic uint16
+
 	// We make this configurable so that unit tests can hit rewrite() code quickly
 	deletionsRewriteThreshold int
 
@@ -145,7 +149,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
 			return nil, Manifest{}, fmt.Errorf("no manifest found, required for read-only db")
 		}
 		m := createManifest()
-		fp, netCreations, err := helpRewrite(dir, &m)
+		fp, netCreations, err := helpRewrite(dir, &m, extMagic)
 		if err != nil {
 			return nil, Manifest{}, err
 		}
@@ -153,6 +157,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
 		mf := &manifestFile{
 			fp:                        fp,
 			directory:                 dir,
+			externalMagic:             extMagic,
 			manifest:                  m.clone(),
 			deletionsRewriteThreshold: deletionsThreshold,
 		}
@@ -180,6 +185,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
 	mf := &manifestFile{
 		fp:                        fp,
 		directory:                 dir,
+		externalMagic:             extMagic,
 		manifest:                  manifest.clone(),
 		deletionsRewriteThreshold: deletionsThreshold,
 	}
@@ -239,9 +245,9 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
 // The magic version number. It is allocated 2 bytes, so it's value must be <= math.MaxUint16
-const magicVersion = 8
+const badgerMagicVersion = 8
 
-func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
+func helpRewrite(dir string, m *Manifest, extMagic uint16) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
 	// We explicitly sync.
 	fp, err := y.OpenTruncFile(rewritePath, false)
@@ -249,9 +255,15 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 		return nil, 0, err
 	}
 
+	// magic bytes are structured as
+	// +---------------------+-------------------------+-----------------------+
+	// | magicText (4 bytes) | externalMagic (2 bytes) | badgerMagic (2 bytes) |
+	// +---------------------+-------------------------+-----------------------+
+
 	buf := make([]byte, 8)
 	copy(buf[0:4], magicText[:])
-	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
+	binary.BigEndian.PutUint16(buf[4:6], extMagic)
+	binary.BigEndian.PutUint16(buf[6:8], badgerMagicVersion)
 
 	netCreations := len(m.Tables)
 	changes := m.asChanges()
@@ -306,7 +318,7 @@ func (mf *manifestFile) rewrite() error {
 	if err := mf.fp.Close(); err != nil {
 		return err
 	}
-	fp, netCreations, err := helpRewrite(mf.directory, &mf.manifest)
+	fp, netCreations, err := helpRewrite(mf.directory, &mf.manifest, mf.externalMagic)
 	if err != nil {
 		return err
 	}
@@ -359,13 +371,13 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 
 	extVersion := y.BytesToU16(magicBuf[4:6])
 	version := y.BytesToU16(magicBuf[6:8])
-	if version != magicVersion {
+	if version != badgerMagicVersion {
 		return Manifest{}, 0,
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
 				"Please see https://github.com/dgraph-io/badger/blob/master/README.md#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
 				" on how to fix this.",
-				version, magicVersion)
+				version, badgerMagicVersion)
 	}
 	if extMagic != extVersion {
 		return Manifest{}, 0,
