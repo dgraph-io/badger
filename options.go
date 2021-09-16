@@ -115,6 +115,10 @@ type Options struct {
 	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
 	NamespaceOffset int
 
+	// Magic version used by the application using badger to ensure that it doesn't open the DB
+	// with incompatible data format.
+	ExternalMagicVersion uint16
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -793,6 +797,13 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 // The default value for NamespaceOffset is -1.
 func (opt Options) WithNamespaceOffset(offset int) Options {
 	opt.NamespaceOffset = offset
+	return opt
+}
+
+// WithExternalMagic returns a new Options value with ExternalMagicVersion set to the given value.
+// The DB would fail to start if either the internal or the external magic number fails validated.
+func (opt Options) WithExternalMagic(magic uint16) Options {
+	opt.ExternalMagicVersion = magic
 	return opt
 }
 

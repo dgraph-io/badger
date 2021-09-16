@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -79,6 +80,10 @@ type TableManifest struct {
 type manifestFile struct {
 	fp        *os.File
 	directory string
+
+	// The external magic number used by the application running badger.
+	externalMagic uint16
+
 	// We make this configurable so that unit tests can hit rewrite() code quickly
 	deletionsRewriteThreshold int
 
@@ -124,11 +129,12 @@ func openOrCreateManifestFile(opt Options) (
 	if opt.InMemory {
 		return &manifestFile{inMemory: true, manifest: createManifest()}, Manifest{}, nil
 	}
-	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, manifestDeletionsRewriteThreshold)
+	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.ExternalMagicVersion,
+		manifestDeletionsRewriteThreshold)
 }
 
-func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
-	*manifestFile, Manifest, error) {
+func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
+	deletionsThreshold int) (*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
 	var flags y.Flags
@@ -144,7 +150,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 			return nil, Manifest{}, fmt.Errorf("no manifest found, required for read-only db")
 		}
 		m := createManifest()
-		fp, netCreations, err := helpRewrite(dir, &m)
+		fp, netCreations, err := helpRewrite(dir, &m, extMagic)
 		if err != nil {
 			return nil, Manifest{}, err
 		}
@@ -152,13 +158,14 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 		mf := &manifestFile{
 			fp:                        fp,
 			directory:                 dir,
+			externalMagic:             extMagic,
 			manifest:                  m.clone(),
 			deletionsRewriteThreshold: deletionsThreshold,
 		}
 		return mf, m, nil
 	}
 
-	manifest, truncOffset, err := ReplayManifestFile(fp)
+	manifest, truncOffset, err := ReplayManifestFile(fp, extMagic)
 	if err != nil {
 		_ = fp.Close()
 		return nil, Manifest{}, err
@@ -179,6 +186,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 	mf := &manifestFile{
 		fp:                        fp,
 		directory:                 dir,
+		externalMagic:             extMagic,
 		manifest:                  manifest.clone(),
 		deletionsRewriteThreshold: deletionsThreshold,
 	}
@@ -237,10 +245,10 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 // Has to be 4 bytes.  The value can never change, ever, anyway.
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
-// The magic version number.
-const magicVersion = 8
+// The magic version number. It is allocated 2 bytes, so it's value must be <= math.MaxUint16
+const badgerMagicVersion = 8
 
-func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
+func helpRewrite(dir string, m *Manifest, extMagic uint16) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
 	// We explicitly sync.
 	fp, err := y.OpenTruncFile(rewritePath, false)
@@ -248,9 +256,16 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 		return nil, 0, err
 	}
 
+	// magic bytes are structured as
+	// +---------------------+-------------------------+-----------------------+
+	// | magicText (4 bytes) | externalMagic (2 bytes) | badgerMagic (2 bytes) |
+	// +---------------------+-------------------------+-----------------------+
+
+	y.AssertTrue(badgerMagicVersion <= math.MaxUint16)
 	buf := make([]byte, 8)
 	copy(buf[0:4], magicText[:])
-	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
+	binary.BigEndian.PutUint16(buf[4:6], extMagic)
+	binary.BigEndian.PutUint16(buf[6:8], badgerMagicVersion)
 
 	netCreations := len(m.Tables)
 	changes := m.asChanges()
@@ -305,7 +320,7 @@ func (mf *manifestFile) rewrite() error {
 	if err := mf.fp.Close(); err != nil {
 		return err
 	}
-	fp, netCreations, err := helpRewrite(mf.directory, &mf.manifest)
+	fp, netCreations, err := helpRewrite(mf.directory, &mf.manifest, mf.externalMagic)
 	if err != nil {
 		return err
 	}
@@ -345,7 +360,7 @@ var (
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
+func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	var magicBuf [8]byte
@@ -355,14 +370,22 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 	if !bytes.Equal(magicBuf[0:4], magicText[:]) {
 		return Manifest{}, 0, errBadMagic
 	}
-	version := y.BytesToU32(magicBuf[4:8])
-	if version != magicVersion {
+
+	extVersion := y.BytesToU16(magicBuf[4:6])
+	version := y.BytesToU16(magicBuf[6:8])
+
+	if version != badgerMagicVersion {
 		return Manifest{}, 0,
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
 				"Please see https://github.com/dgraph-io/badger/blob/master/README.md#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
 				" on how to fix this.",
-				version, magicVersion)
+				version, badgerMagicVersion)
+	}
+	if extVersion != extMagic {
+		return Manifest{}, 0,
+			fmt.Errorf("Cannot open DB because the external magic number doesn't match. "+
+				"Expected: %d, version present in manifest: %d\n", extMagic, extVersion)
 	}
 
 	stat, err := fp.Stat()

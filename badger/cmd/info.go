@@ -51,6 +51,7 @@ type flagOptions struct {
 	encryptionKey            string
 	checksumVerificationMode string
 	discard                  bool
+	externalMagicVersion     uint16
 }
 
 var (
@@ -82,6 +83,8 @@ func init() {
 		"[none, table, block, tableAndBlock] Specifies when the db should verify checksum for SST.")
 	infoCmd.Flags().BoolVar(&opt.discard, "discard", false,
 		"Parse and print DISCARD file from value logs.")
+	infoCmd.Flags().Uint16Var(&opt.externalMagicVersion, "external-magic", 0,
+		"External magic number")
 }
 
 var infoCmd = &cobra.Command{
@@ -104,7 +107,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey([]byte(opt.encryptionKey)).
-		WithChecksumVerificationMode(cvMode)
+		WithChecksumVerificationMode(cvMode).
+		WithExternalMagic(opt.externalMagicVersion)
 
 	if opt.discard {
 		ds, err := badger.InitDiscardStats(bopt)
@@ -322,7 +326,7 @@ func printInfo(dir, valueDir string) error {
 			fp.Close()
 		}
 	}()
-	manifest, truncOffset, err := badger.ReplayManifestFile(fp)
+	manifest, truncOffset, err := badger.ReplayManifestFile(fp, opt.externalMagicVersion)
 	if err != nil {
 		return err
 	}
