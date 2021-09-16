@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -260,6 +261,7 @@ func helpRewrite(dir string, m *Manifest, extMagic uint16) (*os.File, int, error
 	// | magicText (4 bytes) | externalMagic (2 bytes) | badgerMagic (2 bytes) |
 	// +---------------------+-------------------------+-----------------------+
 
+	y.AssertTrue(badgerMagicVersion <= math.MaxUint16)
 	buf := make([]byte, 8)
 	copy(buf[0:4], magicText[:])
 	binary.BigEndian.PutUint16(buf[4:6], extMagic)

@@ -262,18 +262,6 @@ func (t *Throttle) Finish() error {
 	return t.finishErr
 }
 
-// U32ToBytes converts the given Uint32 to bytes
-func U32ToBytes(v uint32) []byte {
-	var uBuf [4]byte
-	binary.BigEndian.PutUint32(uBuf[:], v)
-	return uBuf[:]
-}
-
-// BytesToU32 converts the given byte slice to uint32
-func BytesToU32(b []byte) uint32 {
-	return binary.BigEndian.Uint32(b)
-}
-
 // U16ToBytes converts the given Uint16 to bytes
 func U16ToBytes(v uint16) []byte {
 	var uBuf [2]byte
@@ -284,6 +272,18 @@ func U16ToBytes(v uint16) []byte {
 // BytesToU16 converts the given byte slice to uint16
 func BytesToU16(b []byte) uint16 {
 	return binary.BigEndian.Uint16(b)
+}
+
+// U32ToBytes converts the given Uint32 to bytes
+func U32ToBytes(v uint32) []byte {
+	var uBuf [4]byte
+	binary.BigEndian.PutUint32(uBuf[:], v)
+	return uBuf[:]
+}
+
+// BytesToU32 converts the given byte slice to uint32
+func BytesToU32(b []byte) uint32 {
+	return binary.BigEndian.Uint32(b)
 }
 
 // U32SliceToBytes converts the given Uint32 slice to byte slice

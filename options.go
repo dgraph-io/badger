@@ -800,8 +800,8 @@ func (opt Options) WithNamespaceOffset(offset int) Options {
 	return opt
 }
 
-// WithExternalMagic returns a new Options value with WithExternalMagic set to the given value.
-// The DB would fail to start if both the internal and the external magic number are not validated.
+// WithExternalMagic returns a new Options value with ExternalMagicVersion set to the given value.
+// The DB would fail to start if either the internal or the external magic number fails validated.
 func (opt Options) WithExternalMagic(magic uint16) Options {
 	opt.ExternalMagicVersion = magic
 	return opt
