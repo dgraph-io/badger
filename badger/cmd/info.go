@@ -322,7 +322,7 @@ func printInfo(dir, valueDir string) error {
 			fp.Close()
 		}
 	}()
-	manifest, truncOffset, err := badger.ReplayManifestFile(fp)
+	manifest, truncOffset, err := badger.ReplayManifestFile(fp, 0)
 	if err != nil {
 		return err
 	}
