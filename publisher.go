@@ -42,7 +42,7 @@ func (s *subscribers) sendMessages(id uint64, kvs *pb.KVList) {
 	s.Lock()
 	defer s.Unlock()
 
-	if sub, ok := s.subs[id]; ok && sub.active {
+	if sub, ok := s.subs[id]; ok {
 		sub.sendCh <- kvs
 	}
 }
@@ -94,7 +94,6 @@ type subscriber struct {
 	matches   []pb.Match
 	sendCh    chan<- *pb.KVList
 	subCloser *z.Closer
-	active    bool
 }
 
 type publisher struct {
@@ -199,6 +198,7 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (<-chan *pb.K
 	for _, m := range matches {
 		p.indexer.AddMatch(m, id)
 	}
+	p.subMatcherMap[id] = matches
 	return ch, id
 }
 
@@ -206,10 +206,11 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (<-chan *pb.K
 func (p *publisher) cleanSubscribers() {
 	p.Lock()
 
-	for subid, matches := range p.subMatcherMap {
+	for id, matches := range p.subMatcherMap {
 		for _, m := range matches {
-			p.indexer.DeleteMatch(m, subid)
+			p.indexer.DeleteMatch(m, id)
 		}
+		delete(p.inactiveSubs, id)
 	}
 	p.Unlock()
 	p.subscribers.clean()
@@ -223,7 +224,9 @@ func (p *publisher) deleteSubscriber(id uint64) {
 			p.indexer.DeleteMatch(m, id)
 		}
 	}
+	delete(p.inactiveSubs, id)
 	p.Unlock()
+
 	p.subscribers.delete(id)
 }
 
