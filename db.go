@@ -2127,6 +2127,12 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
+				// we ran into the deadlock state with subscription with following
+				// inactivate the subscription so we dont have any more updates on this channel
+				db.pub.inactivateSubscription(id)
+				// drain the whole channel so that if there is any locked go routine it will be cleared
+				for range recvCh {
+				}
 				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)
 				return err
