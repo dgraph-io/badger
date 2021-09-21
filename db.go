@@ -2131,7 +2131,8 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 				db.pub.inactivateSubscription(id)
 				// drain the whole channel so that if there is any blocked
 				// go routine to send message on this channel it will be cleared
-				for range recvCh {
+				for len(recvCh) > 0 {
+					<-recvCh
 				}
 				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)

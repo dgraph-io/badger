@@ -114,6 +114,7 @@ func newPublisher() *publisher {
 		},
 		indexer:       trie.NewTrie(),
 		subMatcherMap: make(map[uint64][]pb.Match),
+		inactiveSubs: make(map[uint64]struct{}),
 	}
 }
 
