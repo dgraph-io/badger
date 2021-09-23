@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/pkg/errors"
+	"log"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,28 +47,33 @@ func TestPublisherDeadlock(t *testing.T) {
 		go func() {
 			subWg.Done()
 			match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
-			db.Subscribe(context.Background(), func(kvs *pb.KVList) error {
+			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) error {
 				firstUpdate.Done()
 				time.Sleep(time.Second * 20)
 				return errors.New("error returned")
 			}, []pb.Match{match})
+			require.Error(t, err, errors.New("error returned"))
 			subDone.Done()
 		}()
 		subWg.Wait()
-		go db.Update(func(txn *Txn) error {
-			e := NewEntry([]byte(fmt.Sprintf("key%d", 0)), []byte(fmt.Sprintf("value%d", 0)))
-			return txn.SetEntry(e)
-		})
+		go func() {
+			err := db.Update(func(txn *Txn) error {
+				e := NewEntry([]byte(fmt.Sprintf("key%d", 0)), []byte(fmt.Sprintf("value%d", 0)))
+				return txn.SetEntry(e)
+			})
+			require.NoError(t, err)
+		} ()
 
 		firstUpdate.Wait()
 		req := int64(0)
 		for i := 1; i < 1110; i++ {
 			time.Sleep(time.Millisecond * 10)
 			go func(i int) {
-				db.Update(func(txn *Txn) error {
+				err := db.Update(func(txn *Txn) error {
 					e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
 					return txn.SetEntry(e)
 				})
+				require.NoError(t, err)
 				atomic.AddInt64(&req, 1)
 			}(i)
 		}
