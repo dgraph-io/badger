@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/pkg/errors"
-	"log"
 	"sync"
 	"sync/atomic"
 	"testing"
