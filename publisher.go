@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"log"
 	"sync"
 
 	"github.com/dgraph-io/badger/v3/pb"
@@ -49,6 +50,7 @@ func (s *subscriber) sendMessages(id uint64, kvs *pb.KVList) {
 	defer s.Unlock()
 
 	if sub, ok := s.subs[id]; ok {
+		log.Println("subscription channel size is ", len(sub.sendCh))
 		sub.sendCh <- kvs
 	}
 }

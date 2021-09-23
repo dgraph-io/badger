@@ -30,6 +30,9 @@ import (
 	"github.com/dgraph-io/badger/v3/pb"
 )
 
+// This test will result in deadlock for commits before this.
+// Exiting this test gracefully will be the proof that the
+// publisher is no longer stuck in deadlock.
 func TestPublisherDeadlock(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var subWg sync.WaitGroup
@@ -38,6 +41,9 @@ func TestPublisherDeadlock(t *testing.T) {
 		var firstUpdate sync.WaitGroup
 		firstUpdate.Add(1)
 
+
+		var subDone sync.WaitGroup
+		subDone.Add(1)
 		go func() {
 			subWg.Done()
 			match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
@@ -47,19 +53,18 @@ func TestPublisherDeadlock(t *testing.T) {
 				}
 
 				firstUpdate.Done()
-				time.Sleep(time.Second * 20)
+				time.Sleep(time.Second * 30)
+
 				return errors.New("sending out the error")
 			}, []pb.Match{match})
+			subDone.Done()
 		}()
 		subWg.Wait()
-		time.Sleep(time.Second * 1)
-		log.Print("sending the first update")
 		go db.Update(func(txn *Txn) error {
 			e := NewEntry([]byte(fmt.Sprintf("key%d", 0)), []byte(fmt.Sprintf("value%d", 0)))
 			return txn.SetEntry(e)
 		})
 
-		log.Println("first update send")
 		firstUpdate.Wait()
 		req := int64(0)
 		for i := 1; i < 1110; i++ {
@@ -80,8 +85,7 @@ func TestPublisherDeadlock(t *testing.T) {
 			}
 			time.Sleep(time.Second)
 		}
-
-		time.Sleep(time.Second * 10)
+		subDone.Wait()
 	})
 }
 
