@@ -100,8 +100,12 @@ type Builder struct {
 func (b *Builder) allocate(need int) []byte {
 	bb := b.curBlock
 	if len(bb.data[bb.end:]) < need {
-		// We need to reallocate.
+		// We need to reallocate. 1GB is the max size that the allocator can allocate.
+		// While reallocating, if doubling exceeds that limit, then put the upper bound on it.
 		sz := 2 * len(bb.data)
+		if sz > (1 << 30) {
+			sz = 1 << 30
+		}
 		if bb.end+need > sz {
 			sz = bb.end + need
 		}
