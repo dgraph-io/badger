@@ -26,19 +26,25 @@ import (
 )
 
 // so the problem is we have channels and mutex and both are locking in nature
-type subscribers struct {
+type subscriber struct {
 	sync.Mutex
-	subs   map[uint64]*subscriber
+	subs   map[uint64]*subscription
 	nextID uint64
 }
 
-func (s *subscribers) len() int {
+type subscription struct {
+	id        uint64
+	sendCh    chan *pb.KVList
+	subCloser *z.Closer
+}
+
+func (s *subscriber) len() int {
 	s.Lock()
 	defer s.Unlock()
 	return len(s.subs)
 }
 
-func (s *subscribers) sendMessages(id uint64, kvs *pb.KVList) {
+func (s *subscriber) sendMessages(id uint64, kvs *pb.KVList) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -47,23 +53,22 @@ func (s *subscribers) sendMessages(id uint64, kvs *pb.KVList) {
 	}
 }
 
-func (s *subscribers) addNewSubscriber(c *z.Closer, matches []pb.Match) (uint64, <-chan *pb.KVList) {
+func (s *subscriber) addSubscription(c *z.Closer) (uint64, <-chan *pb.KVList) {
 	s.Lock()
 	defer s.Unlock()
 
 	id := s.nextID
 	s.nextID++
 	ch := make(chan *pb.KVList, 1000)
-	s.subs[id] = &subscriber{
-		matches:   matches,
+	s.subs[id] = &subscription{
+		id:        id,
 		sendCh:    ch,
 		subCloser: c,
 	}
-
 	return id, ch
 }
 
-func (s *subscribers) delete(id uint64) {
+func (s *subscriber) delete(id uint64) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -72,16 +77,7 @@ func (s *subscribers) delete(id uint64) {
 	}
 }
 
-func (s *subscribers) get(id uint64) *subscriber {
-	s.Lock()
-	defer s.Unlock()
-	if sub, ok := s.subs[id]; ok {
-		return sub
-	}
-	return nil
-}
-
-func (s *subscribers) clean() {
+func (s *subscriber) clean() {
 	s.Lock()
 	defer s.Unlock()
 	for id, sub := range s.subs {
@@ -90,43 +86,42 @@ func (s *subscribers) clean() {
 	}
 }
 
-type subscriber struct {
-	matches   []pb.Match
-	sendCh    chan<- *pb.KVList
-	subCloser *z.Closer
-}
-
 type publisher struct {
 	sync.Mutex
-	pubCh         chan requests
-	subscribers   subscribers
-	subMatcherMap map[uint64][]pb.Match
-	inactiveSubs  map[uint64]struct{}
-	indexer       *trie.Trie
+	subscribers *subscriber
+	pubCh       chan requests
+	matchersMap map[uint64][]pb.Match
+	activeSubs  map[uint64]struct{}
+	indexer     *trie.Trie
 }
 
-func newPublisher() *publisher {
+func newPublisher(sub *subscriber) *publisher {
 	return &publisher{
-		pubCh: make(chan requests, 1000),
-		subscribers: subscribers{
-			Mutex: sync.Mutex{},
-			subs:  make(map[uint64]*subscriber),
-		},
-		indexer:       trie.NewTrie(),
-		subMatcherMap: make(map[uint64][]pb.Match),
-		inactiveSubs: make(map[uint64]struct{}),
+		subscribers: sub,
+		pubCh:       make(chan requests, 1000),
+		indexer:     trie.NewTrie(),
+		matchersMap: make(map[uint64][]pb.Match),
+		activeSubs:  make(map[uint64]struct{}),
 	}
 }
 
-func (p *publisher) inactivateSubscription(id uint64) {
+// will mark the subscriber inactivate then then delete the matchers map and everything
+func (p *publisher) inactivateSubscriber(id uint64) {
 	p.Lock()
 	defer p.Unlock()
-	p.inactiveSubs[id] = struct{}{}
+	delete(p.activeSubs, id)
+	if matches, ok := p.matchersMap[id]; ok {
+		for _, m := range matches {
+			p.indexer.DeleteMatch(m, id)
+		}
+	}
+	delete(p.matchersMap, id)
 }
 
 func (p *publisher) listenForUpdates(c *z.Closer) {
 	defer func() {
-		p.cleanSubscribers()
+		p.cleanPublisher()
+		p.subscribers.clean()
 		c.Done()
 	}()
 	slurp := func(batch requests) {
@@ -156,6 +151,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 		// Release all the request.
 		reqs.DecrRef()
 	}()
+
 	batchedUpdates := make(map[uint64]*pb.KVList)
 	for _, req := range reqs {
 		for _, e := range req.Entries {
@@ -172,8 +168,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 				Version:   y.ParseTs(k),
 			}
 			for id := range ids {
-				// if its part of inactive subscription don't send anymore updates
-				if _, ok := p.inactiveSubs[id]; ok {
+				if _, ok := p.activeSubs[id]; !ok {
 					continue
 				}
 				if _, ok := batchedUpdates[id]; !ok {
@@ -184,51 +179,34 @@ func (p *publisher) publishUpdates(reqs requests) {
 		}
 	}
 
+	 p.Unlock()
 	// we don't need to lock to send updates to subscribers
 	// subscribers have mutex and manage concurrency on their own
-	p.Unlock()
 	for id, kvs := range batchedUpdates {
 		p.subscribers.sendMessages(id, kvs)
 	}
 }
 
-func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (<-chan *pb.KVList, uint64) {
-	id, ch := p.subscribers.addNewSubscriber(c, matches)
+func (p *publisher) activateSubscriber(id uint64, matches []pb.Match) {
 	p.Lock()
 	defer p.Unlock()
 	for _, m := range matches {
 		p.indexer.AddMatch(m, id)
 	}
-	p.subMatcherMap[id] = matches
-	return ch, id
+	p.activeSubs[id] = struct{}{}
+	p.matchersMap[id] = matches
 }
 
 // cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB.
-func (p *publisher) cleanSubscribers() {
+func (p *publisher) cleanPublisher() {
 	p.Lock()
-
-	for id, matches := range p.subMatcherMap {
+	defer p.Unlock()
+	for id, matches := range p.matchersMap {
 		for _, m := range matches {
 			p.indexer.DeleteMatch(m, id)
 		}
-		delete(p.inactiveSubs, id)
+		delete(p.activeSubs, id)
 	}
-	p.Unlock()
-	p.subscribers.clean()
-}
-
-func (p *publisher) deleteSubscriber(id uint64) {
-	p.Lock()
-	get := p.subscribers.get(id)
-	if get != nil {
-		for _, m := range get.matches {
-			p.indexer.DeleteMatch(m, id)
-		}
-	}
-	delete(p.inactiveSubs, id)
-	p.Unlock()
-
-	p.subscribers.delete(id)
 }
 
 func (p *publisher) sendUpdates(reqs requests) {
@@ -239,5 +217,7 @@ func (p *publisher) sendUpdates(reqs requests) {
 }
 
 func (p *publisher) noOfSubscribers() int {
-	return p.subscribers.len()
+	p.Lock()
+	defer p.Unlock()
+	return len(p.activeSubs)
 }

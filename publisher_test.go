@@ -18,13 +18,72 @@ package badger
 import (
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
+	"log"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v3/pb"
 )
+
+func TestPublisherDeadlock(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		var subWg sync.WaitGroup
+		subWg.Add(1)
+
+		var firstUpdate sync.WaitGroup
+		firstUpdate.Add(1)
+
+		go func() {
+			subWg.Done()
+			match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
+			db.Subscribe(context.Background(), func(kvs *pb.KVList) error {
+				for _, kv := range kvs.GetKv() {
+					log.Printf("%+v\n", string(kv.Value))
+				}
+
+				firstUpdate.Done()
+				time.Sleep(time.Second * 20)
+				return errors.New("sending out the error")
+			}, []pb.Match{match})
+		}()
+		subWg.Wait()
+		time.Sleep(time.Second * 1)
+		log.Print("sending the first update")
+		go db.Update(func(txn *Txn) error {
+			e := NewEntry([]byte(fmt.Sprintf("key%d", 0)), []byte(fmt.Sprintf("value%d", 0)))
+			return txn.SetEntry(e)
+		})
+
+		log.Println("first update send")
+		firstUpdate.Wait()
+		req := int64(0)
+		for i := 1; i < 1110; i++ {
+			time.Sleep(time.Millisecond * 10)
+			go func(i int) {
+				db.Update(func(txn *Txn) error {
+					e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+					return txn.SetEntry(e)
+				})
+				atomic.AddInt64(&req, 1)
+			}(i)
+		}
+		log.Println("all updates are done")
+		for {
+			log.Println(atomic.LoadInt64(&req))
+			if atomic.LoadInt64(&req) == 1109 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		time.Sleep(time.Second * 10)
+	})
+}
 
 func TestPublisherOrdering(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {

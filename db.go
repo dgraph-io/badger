@@ -122,11 +122,12 @@ type DB struct {
 	bannedNamespaces *lockedKeys
 	threshold        *vlogThreshold
 
-	pub        *publisher
-	registry   *KeyRegistry
-	blockCache *ristretto.Cache
-	indexCache *ristretto.Cache
-	allocPool  *z.AllocatorPool
+	pub         *publisher
+	subscribers *subscriber
+	registry    *KeyRegistry
+	blockCache  *ristretto.Cache
+	indexCache  *ristretto.Cache
+	allocPool   *z.AllocatorPool
 }
 
 const (
@@ -241,6 +242,10 @@ func Open(opt Options) (*DB, error) {
 		}
 	}()
 
+	subscriber := &subscriber{
+		Mutex: sync.Mutex{},
+		subs:  make(map[uint64]*subscription),
+	}
 	db := &DB{
 		imm:              make([]*memTable, 0, opt.NumMemtables),
 		flushChan:        make(chan flushTask, opt.NumMemtables),
@@ -250,7 +255,8 @@ func Open(opt Options) (*DB, error) {
 		dirLockGuard:     dirLockGuard,
 		valueDirGuard:    valueDirLockGuard,
 		orc:              newOracle(opt),
-		pub:              newPublisher(),
+		pub:              newPublisher(subscriber),
+		subscribers:      subscriber,
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
@@ -2095,7 +2101,8 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	}
 
 	c := z.NewCloser(1)
-	recvCh, id := db.pub.newSubscriber(c, matches)
+	id, recvCh := db.subscribers.addSubscription(c)
+	db.pub.activateSubscriber(id, matches)
 	slurp := func(batch *pb.KVList) error {
 		for {
 			select {
@@ -2120,7 +2127,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 			return err
 		case <-ctx.Done():
 			c.Done()
-			db.pub.deleteSubscriber(id)
+			db.subscribers.delete(id)
 			// Delete the subscriber to avoid further updates.
 			return ctx.Err()
 		case batch := <-recvCh:
@@ -2128,14 +2135,14 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 			if err != nil {
 				c.Done()
 				// inactivate the subscription so we don't have any more updates on this channel
-				db.pub.inactivateSubscription(id)
+				db.pub.inactivateSubscriber(id)
 				// drain the whole channel so that if there is any blocked
 				// go routine to send message on this channel it will be cleared
 				for len(recvCh) > 0 {
 					<-recvCh
 				}
 				// Delete the subscriber if there is an error by the callback.
-				db.pub.deleteSubscriber(id)
+				db.subscribers.delete(id)
 				return err
 			}
 		}
