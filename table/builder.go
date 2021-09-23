@@ -100,11 +100,10 @@ type Builder struct {
 func (b *Builder) allocate(need int) []byte {
 	bb := b.curBlock
 	if len(bb.data[bb.end:]) < need {
-		// We need to reallocate. 1GB is the max size that the allocator can allocate.
-		// While reallocating, if doubling exceeds that limit, then put the upper bound on it.
+		// We need to reallocate. While reallocating, don't cross the max allocator limit.
 		sz := 2 * len(bb.data)
-		if sz > (1 << 30) {
-			sz = 1 << 30
+		if sz > b.alloc.MaxAlloc() {
+			sz = b.alloc.MaxAlloc()
 		}
 		if bb.end+need > sz {
 			sz = bb.end + need
@@ -163,8 +162,9 @@ func maxEncodedLen(ctype options.CompressionType, sz int) int {
 		return snappy.MaxEncodedLen(sz)
 	case options.ZSTD:
 		return y.ZSTDCompressBound(sz)
+	default:
+		return sz
 	}
-	return sz
 }
 
 func (b *Builder) handleBlock() {
@@ -319,6 +319,9 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4) // checksum length
 	estimatedSize := uint32(b.curBlock.end) + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+
+	// TODO(Naman): Should we also add the padding here?
+	estimatedSize = uint32(maxEncodedLen(b.opts.Compression, int(estimatedSize)))
 
 	if b.shouldEncrypt() {
 		// IV is added at the end of the block, while encrypting.
