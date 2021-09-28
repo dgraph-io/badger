@@ -559,11 +559,6 @@ func (db *DB) close() (err error) {
 	db.closers.pub.SignalAndWait()
 	db.closers.cacheHealth.Signal()
 
-	// Now close the value log.
-	if vlogErr := db.vlog.Close(); vlogErr != nil {
-		err = y.Wrap(vlogErr, "DB.Close")
-	}
-
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
 	// and remove them completely, while the block / memtable writer is still
@@ -617,6 +612,11 @@ func (db *DB) close() (err error) {
 		default:
 			db.opt.Warningf("While forcing compaction on level 0: %v", err)
 		}
+	}
+
+	// Now close the value log.
+	if vlogErr := db.vlog.Close(); vlogErr != nil {
+		err = y.Wrap(vlogErr, "DB.Close")
 	}
 
 	db.opt.Infof(db.LevelsToString())
@@ -2113,7 +2113,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	drain := func() {
 		for {
 			select {
-			case <- s.sendCh:
+			case <-s.sendCh:
 			default:
 				return
 			}
