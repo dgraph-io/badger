@@ -2547,3 +2547,32 @@ func TestSeekTs(t *testing.T) {
 		}
 	})
 }
+
+func TestCompactL0OnClose(t *testing.T) {
+	opt := getTestOptions("")
+	opt.CompactL0OnClose = true
+	opt.ValueThreshold = 1 // Every value goes to value log
+	opt.NumVersionsToKeep = 1
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		var keys [][]byte
+		val := make([]byte, 1<<12)
+		for i := 0; i < 10; i++ {
+			key := make([]byte, 40)
+			_, err := rand.Read(key)
+			require.NoError(t, err)
+			keys = append(keys, key)
+
+			err = db.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry(key, val))
+			})
+			require.NoError(t, err)
+		}
+
+		for _, key := range keys {
+			err := db.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry(key, val))
+			})
+			require.NoError(t, err)
+		}
+	})
+}
