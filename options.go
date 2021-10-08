@@ -184,7 +184,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries: 1000000,
 
 		VLogPercentile: 0.0,
-		ValueThreshold: maxValueThreshold,
+		ValueThreshold: defValueThreshold,
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
@@ -215,7 +215,8 @@ func buildTableOptions(db *DB) table.Options {
 }
 
 const (
-	maxValueThreshold = (1 << 20) // 1 MB
+	maxValueThreshold = (8 << 20) // 8 MB
+	defValueThreshold = (1 << 20) // 1 MB
 )
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
@@ -233,7 +234,7 @@ func LSMOnlyOptions(path string) Options {
 	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
 	// values smaller than 1KB to be collocated with the keys in the LSM tree.
-	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
+	return DefaultOptions(path).WithValueThreshold(defValueThreshold /* 1 MB */)
 }
 
 // parseCompression returns badger.compressionType and compression level given compression string
