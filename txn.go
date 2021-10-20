@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"github.com/google/btree"
 	"math"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -245,6 +245,13 @@ func (o *oracle) doneCommit(cts uint64) {
 	o.txnMark.Done(cts)
 }
 
+type EntryItem Entry
+
+func (e *EntryItem) Less(than btree.Item) bool {
+	other := than.(*EntryItem)
+	return bytes.Compare(e.Key, other.Key) < 0
+}
+
 // Txn represents a Badger transaction.
 type Txn struct {
 	readTs   uint64
@@ -258,8 +265,8 @@ type Txn struct {
 	conflictKeys map[uint64]struct{}
 	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
-	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
-	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
+	pendingWrites   *btree.BTree // cache stores any writes done by txn.
+	duplicateWrites []*Entry     // Used in managed mode to store duplicate entries.
 
 	numIterators int32
 	discarded    bool
@@ -268,40 +275,74 @@ type Txn struct {
 }
 
 type pendingWritesIterator struct {
-	entries  []*Entry
-	nextIdx  int
+	entries  *btree.BTree
+	itClose  chan<- interface{}
+	it       <-chan *Entry
+	current  *Entry
 	readTs   uint64
 	reversed bool
 }
 
 func (pi *pendingWritesIterator) Next() {
-	pi.nextIdx++
+	pi.current = <-pi.it
+}
+
+func (pi *pendingWritesIterator) reset(itConsumer func(it btree.ItemIterator)) {
+	if pi.it != nil {
+		close(pi.itClose)
+	}
+	it := make(chan *Entry, 0)
+	itClose := make(chan interface{}, 0)
+	go func() {
+		itFunc := func(i btree.Item) bool {
+			select {
+			case it <- (*Entry)(i.(*EntryItem)):
+				return true
+			case <-itClose:
+				return false
+			}
+		}
+		itConsumer(itFunc)
+		close(it)
+	}()
+
+	pi.it = it
+	pi.itClose = itClose
+
+	pi.Next()
 }
 
 func (pi *pendingWritesIterator) Rewind() {
-	pi.nextIdx = 0
+	pi.reset(func(itFunc btree.ItemIterator) {
+		if pi.reversed {
+			pi.entries.Descend(itFunc)
+		} else {
+			pi.entries.Ascend(itFunc)
+		}
+	})
 }
 
 func (pi *pendingWritesIterator) Seek(key []byte) {
 	key = y.ParseKey(key)
-	pi.nextIdx = sort.Search(len(pi.entries), func(idx int) bool {
-		cmp := bytes.Compare(pi.entries[idx].Key, key)
-		if !pi.reversed {
-			return cmp >= 0
+	pivot := &EntryItem{Key: key}
+
+	pi.reset(func(itFunc btree.ItemIterator) {
+		if pi.reversed {
+			pi.entries.DescendLessOrEqual(pivot, itFunc)
+		} else {
+			pi.entries.AscendGreaterOrEqual(pivot, itFunc)
 		}
-		return cmp <= 0
 	})
 }
 
 func (pi *pendingWritesIterator) Key() []byte {
 	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
-	return y.KeyWithTs(entry.Key, pi.readTs)
+	return y.KeyWithTs(pi.current.Key, pi.readTs)
 }
 
 func (pi *pendingWritesIterator) Value() y.ValueStruct {
 	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
+	entry := pi.current
 	return y.ValueStruct{
 		Value:     entry.Value,
 		Meta:      entry.meta,
@@ -312,7 +353,7 @@ func (pi *pendingWritesIterator) Value() y.ValueStruct {
 }
 
 func (pi *pendingWritesIterator) Valid() bool {
-	return pi.nextIdx < len(pi.entries)
+	return pi.current != nil
 }
 
 func (pi *pendingWritesIterator) Close() error {
@@ -320,24 +361,28 @@ func (pi *pendingWritesIterator) Close() error {
 }
 
 func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
-	if !txn.update || len(txn.pendingWrites) == 0 {
+	if !txn.update || txn.pendingWrites.Len() == 0 {
 		return nil
 	}
-	entries := make([]*Entry, 0, len(txn.pendingWrites))
-	for _, e := range txn.pendingWrites {
-		entries = append(entries, e)
-	}
-	// Number of pending writes per transaction shouldn't be too big in general.
-	sort.Slice(entries, func(i, j int) bool {
-		cmp := bytes.Compare(entries[i].Key, entries[j].Key)
-		if !reversed {
-			return cmp < 0
-		}
-		return cmp > 0
-	})
+	//entries := make([]*Entry, 0, txn.pendingWrites.Len())
+	//
+	//txn.pendingWrites.Ascend(func(i btree.Item) bool {
+	//	entries = append(entries, (*Entry)(i.(*EntryItem)))
+	//	return true
+	//})
+	//
+	//// Number of pending writes per transaction shouldn't be too big in general.
+	//sort.Slice(entries, func(i, j int) bool {
+	//	cmp := bytes.Compare(entries[i].Key, entries[j].Key)
+	//	if !reversed {
+	//		return cmp < 0
+	//	}
+	//	return cmp > 0
+	//})
+
 	return &pendingWritesIterator{
 		readTs:   txn.readTs,
-		entries:  entries,
+		entries:  txn.pendingWrites.Clone(),
 		reversed: reversed,
 	}
 }
@@ -381,6 +426,14 @@ func ValidEntry(db *DB, key, val []byte) error {
 	return nil
 }
 
+func (txn *Txn) getFromPendingWrites(key []byte) (*Entry, bool) {
+	result := txn.pendingWrites.Get(&EntryItem{Key: key})
+	if result == nil {
+		return nil, false
+	}
+	return (*Entry)(result.(*EntryItem)), true
+}
+
 func (txn *Txn) modify(e *Entry) error {
 	switch {
 	case !txn.update:
@@ -418,10 +471,10 @@ func (txn *Txn) modify(e *Entry) error {
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
 	// same versions, we will overwrite the existing entry.
-	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+	if oldEntry, ok := txn.getFromPendingWrites(e.Key); ok && oldEntry.version != e.version {
 		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
 	}
-	txn.pendingWrites[string(e.Key)] = e
+	txn.pendingWrites.ReplaceOrInsert((*EntryItem)(e))
 	return nil
 }
 
@@ -474,7 +527,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 
 	item = new(Item)
 	if txn.update {
-		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+		if e, has := txn.getFromPendingWrites(key); has && bytes.Equal(key, e.Key) {
 			if isDeletedOrExpired(e.meta, e.ExpiresAt) {
 				return nil, ErrKeyNotFound
 			}
@@ -570,16 +623,18 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			keepTogether = false
 		}
 	}
-	for _, e := range txn.pendingWrites {
-		setVersion(e)
-	}
+	txn.pendingWrites.Ascend(func(i btree.Item) bool {
+		setVersion((*Entry)(i.(*EntryItem)))
+		return true
+	})
+
 	// The duplicateWrites slice will be non-empty only if there are duplicate
 	// entries with different versions.
 	for _, e := range txn.duplicateWrites {
 		setVersion(e)
 	}
 
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
+	entries := make([]*Entry, 0, txn.pendingWrites.Len()+len(txn.duplicateWrites)+1)
 
 	processEntry := func(e *Entry) {
 		// Suffix the keys with commit ts, so the key versions are sorted in
@@ -602,9 +657,10 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
 	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
-	for _, e := range txn.pendingWrites {
-		processEntry(e)
-	}
+	txn.pendingWrites.Ascend(func(i btree.Item) bool {
+		processEntry((*Entry)(i.(*EntryItem)))
+		return true
+	})
 	for _, e := range txn.duplicateWrites {
 		processEntry(e)
 	}
@@ -641,11 +697,14 @@ func (txn *Txn) commitPrecheck() error {
 		return errors.New("Trying to commit a discarded txn")
 	}
 	keepTogether := true
-	for _, e := range txn.pendingWrites {
+	txn.pendingWrites.Ascend(func(i btree.Item) bool {
+		e := (*Entry)(i.(*EntryItem))
 		if e.version != 0 {
 			keepTogether = false
+			return false
 		}
-	}
+		return true
+	})
 
 	// If keepTogether is True, it implies transaction markers will be added.
 	// In that case, commitTs should not be never be zero. This might happen if
@@ -679,7 +738,7 @@ func (txn *Txn) commitPrecheck() error {
 func (txn *Txn) Commit() error {
 	// txn.conflictKeys can be zero if conflict detection is turned off. So we
 	// should check txn.pendingWrites.
-	if len(txn.pendingWrites) == 0 {
+	if txn.pendingWrites.Len() == 0 {
 		return nil // Nothing to do.
 	}
 	// Precheck before discarding txn.
@@ -730,7 +789,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	if len(txn.pendingWrites) == 0 {
+	if txn.pendingWrites.Len() == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
@@ -800,7 +859,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		if db.opt.DetectConflicts {
 			txn.conflictKeys = make(map[uint64]struct{})
 		}
-		txn.pendingWrites = make(map[string]*Entry)
+		txn.pendingWrites = btree.New(5)
 	}
 	if !isManaged {
 		txn.readTs = db.orc.readTs()
