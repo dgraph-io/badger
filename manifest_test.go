@@ -24,7 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	otrace "go.opencensus.io/trace"
 
@@ -244,4 +246,45 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, map[uint64]TableManifest{
 		uint64(deletionsThreshold * 3): {Level: 0},
 	}, m.Tables)
+}
+
+func TestConcurrentManifestCompaction(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	// set this low so rewrites will happen more often
+	deletionsThreshold := 1
+
+	// overwrite the sync function to make this race condition easily reproducible
+	syncFunc = func(f *os.File) error {
+		// effectively making the Sync() take around 1s makes this reproduce every time
+		time.Sleep(1 * time.Second)
+		return f.Sync()
+	}
+
+	mf, _, err := helpOpenOrCreateManifestFile(dir, false, 0, deletionsThreshold)
+	require.NoError(t, err)
+
+	cs := &pb.ManifestChangeSet{}
+	for i := uint64(0); i < 1000; i++ {
+		cs.Changes = append(cs.Changes,
+			newCreateChange(i, 0, 0, 0),
+			newDeleteChange(i),
+		)
+	}
+
+	// simulate 2 concurrent compaction threads
+	n := 2
+	wg := sync.WaitGroup{}
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			require.NoError(t, mf.addChanges(cs.Changes))
+		}()
+	}
+	wg.Wait()
+
+	require.NoError(t, mf.close())
 }

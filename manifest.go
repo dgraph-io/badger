@@ -239,8 +239,11 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 	}
 
 	mf.appendLock.Unlock()
-	return mf.fp.Sync()
+	return syncFunc(mf.fp)
 }
+
+// this function is saved here to allow injection of fake filesystem latency at test time.
+var syncFunc = func(f *os.File) error { return f.Sync() }
 
 // Has to be 4 bytes.  The value can never change, ever, anyway.
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
