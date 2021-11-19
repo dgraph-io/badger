@@ -174,7 +174,7 @@ func (wb *WriteBatch) Set(k, v []byte) error {
 
 // DeleteAt is equivalent of Txn.Delete but accepts a delete timestamp.
 func (wb *WriteBatch) DeleteAt(k []byte, ts uint64) error {
-	e := Entry{Key: k, meta: bitDelete, version: ts}
+	e := Entry{Key: k, meta: BitDelete, version: ts}
 	return wb.SetEntry(&e)
 }
 

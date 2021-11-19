@@ -1860,7 +1860,7 @@ func (db *DB) DropPrefixNonBlocking(prefixes ...[]byte) error {
 
 		b := skl.NewBuilder(db.opt.MemTableSize)
 		err := cbuf.SliceIterate(func(s []byte) error {
-			b.Add(s, y.ValueStruct{Meta: bitDelete})
+			b.Add(s, y.ValueStruct{Meta: BitDelete})
 			return nil
 		})
 		if err != nil {

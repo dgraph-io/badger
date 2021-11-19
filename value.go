@@ -45,7 +45,7 @@ var maxVlogFileSize uint32 = math.MaxUint32
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	bitDelete                 byte = 1 << 0 // Set if the key has been deleted.
+	BitDelete                 byte = 1 << 0 // Set if the key has been deleted.
 	bitValuePointer           byte = 1 << 1 // Set if the value is NOT stored directly next to key.
 	BitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
 	// Set if item shouldn't be discarded via compactions (used by merge operator)

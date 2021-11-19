@@ -454,7 +454,7 @@ func (txn *Txn) SetEntry(e *Entry) error {
 func (txn *Txn) Delete(key []byte) error {
 	e := &Entry{
 		Key:  key,
-		meta: bitDelete,
+		meta: BitDelete,
 	}
 	return txn.modify(e)
 }

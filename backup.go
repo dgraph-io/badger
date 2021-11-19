@@ -110,7 +110,7 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 				list.Kv = append(list.Kv, &pb.KV{
 					Key:     item.KeyCopy(nil),
 					Version: item.Version() - 1,
-					Meta:    []byte{bitDelete},
+					Meta:    []byte{BitDelete},
 				})
 				return list, nil
 

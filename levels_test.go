@@ -312,7 +312,7 @@ func TestCompaction(t *testing.T) {
 	t.Run("level 1 to level 2 with delete", func(t *testing.T) {
 		t.Run("with overlap", func(t *testing.T) {
 			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+				l1 := []keyValVersion{{"foo", "bar", 3, BitDelete}, {"fooz", "baz", 1, BitDelete}}
 				l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 				l3 := []keyValVersion{{"foo", "bar", 1, 0}}
 				createAndOpen(db, l1, 1)
@@ -343,7 +343,7 @@ func TestCompaction(t *testing.T) {
 				// beginning of `compactBuildTables` method.
 				// everything from level 1 is now in level 2.
 				getAllAndCheck(t, db, []keyValVersion{
-					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 3, BitDelete},
 					{"foo", "bar", 1, 0},
 					{"fooz", "baz", 1, 1},
 				})
@@ -363,8 +363,8 @@ func TestCompaction(t *testing.T) {
 		})
 		t.Run("with bottom overlap", func(t *testing.T) {
 			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}}
-				l2 := []keyValVersion{{"foo", "bar", 2, 0}, {"fooz", "baz", 2, bitDelete}}
+				l1 := []keyValVersion{{"foo", "bar", 3, BitDelete}}
+				l2 := []keyValVersion{{"foo", "bar", 2, 0}, {"fooz", "baz", 2, BitDelete}}
 				l3 := []keyValVersion{{"fooz", "baz", 1, 0}}
 				createAndOpen(db, l1, 1)
 				createAndOpen(db, l2, 2)
@@ -374,9 +374,9 @@ func TestCompaction(t *testing.T) {
 				db.SetDiscardTs(10)
 
 				getAllAndCheck(t, db, []keyValVersion{
-					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 3, BitDelete},
 					{"foo", "bar", 2, 0},
-					{"fooz", "baz", 2, bitDelete},
+					{"fooz", "baz", 2, BitDelete},
 					{"fooz", "baz", 1, 0},
 				})
 				cdef := compactDef{
@@ -391,15 +391,15 @@ func TestCompaction(t *testing.T) {
 				// the top table at L1 doesn't overlap L3, but the bottom table at L2
 				// does, delete keys should not be removed.
 				getAllAndCheck(t, db, []keyValVersion{
-					{"foo", "bar", 3, bitDelete},
-					{"fooz", "baz", 2, bitDelete},
+					{"foo", "bar", 3, BitDelete},
+					{"fooz", "baz", 2, BitDelete},
 					{"fooz", "baz", 1, 0},
 				})
 			})
 		})
 		t.Run("without overlap", func(t *testing.T) {
 			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+				l1 := []keyValVersion{{"foo", "bar", 3, BitDelete}, {"fooz", "baz", 1, BitDelete}}
 				l2 := []keyValVersion{{"fooo", "barr", 2, 0}}
 				createAndOpen(db, l1, 1)
 				createAndOpen(db, l2, 2)
@@ -425,7 +425,7 @@ func TestCompaction(t *testing.T) {
 		})
 		t.Run("with splits", func(t *testing.T) {
 			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-				l1 := []keyValVersion{{"C", "bar", 3, bitDelete}}
+				l1 := []keyValVersion{{"C", "bar", 3, BitDelete}}
 				l21 := []keyValVersion{{"A", "bar", 2, 0}}
 				l22 := []keyValVersion{{"B", "bar", 2, 0}}
 				l23 := []keyValVersion{{"C", "bar", 2, 0}}
@@ -444,7 +444,7 @@ func TestCompaction(t *testing.T) {
 				getAllAndCheck(t, db, []keyValVersion{
 					{"A", "bar", 2, 0},
 					{"B", "bar", 2, 0},
-					{"C", "bar", 3, bitDelete},
+					{"C", "bar", 3, BitDelete},
 					{"C", "bar", 2, 0},
 					{"D", "bar", 2, 0},
 					{"fooz", "baz", 1, 0},
@@ -475,7 +475,7 @@ func TestCompactionTwoVersions(t *testing.T) {
 	opt.managedTxns = true
 	t.Run("with overlap", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, bitDelete}}
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, BitDelete}}
 			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 			l3 := []keyValVersion{{"foo", "bar", 1, 0}}
 			createAndOpen(db, l1, 1)
@@ -532,7 +532,7 @@ func TestCompactionAllVersions(t *testing.T) {
 	opt.managedTxns = true
 	t.Run("without overlap", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, bitDelete}}
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, BitDelete}}
 			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 			l3 := []keyValVersion{{"foo", "bar", 1, 0}}
 			createAndOpen(db, l1, 1)
@@ -584,7 +584,7 @@ func TestCompactionAllVersions(t *testing.T) {
 	})
 	t.Run("without overlap", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+			l1 := []keyValVersion{{"foo", "bar", 3, BitDelete}, {"fooz", "baz", 1, BitDelete}}
 			l2 := []keyValVersion{{"fooo", "barr", 2, 0}}
 			createAndOpen(db, l1, 1)
 			createAndOpen(db, l2, 2)
@@ -1250,7 +1250,7 @@ func TestStreamWithFullCopy(t *testing.T) {
 	require.NoError(t, err)
 
 	test := func(db *DB, outOpts Options) {
-		l4 := []keyValVersion{{"a", "1", 3, bitDelete}, {"d", "4", 3, 0}}
+		l4 := []keyValVersion{{"a", "1", 3, BitDelete}, {"d", "4", 3, 0}}
 		l5 := []keyValVersion{{"b", "2", 2, 0}}
 		l6 := []keyValVersion{{"a", "1", 2, 0}, {"c", "3", 1, 0}}
 		createAndOpenWithOptions(db, l4, 4, nil)

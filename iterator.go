@@ -601,7 +601,7 @@ func (it *Iterator) Next() {
 }
 
 func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
-	if meta&bitDelete > 0 {
+	if meta&BitDelete > 0 {
 		return true
 	}
 	if expiresAt == 0 {

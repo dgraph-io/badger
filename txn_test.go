@@ -643,7 +643,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 			err = txn.db.batchSet([]*Entry{
 				{
 					Key:  y.KeyWithTs(item.key, item.version),
-					meta: bitDelete,
+					meta: BitDelete,
 				},
 			})
 			require.NoError(t, err)
@@ -665,7 +665,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 				item := it.Item()
 				if count == 1 {
 					require.Equal(t, []byte("answer1"), item.Key())
-					require.True(t, item.meta&bitDelete > 0)
+					require.True(t, item.meta&BitDelete > 0)
 				} else {
 					require.Equal(t, []byte("answer2"), item.Key())
 				}
@@ -721,7 +721,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, val, []byte("value"))
 				} else {
-					require.True(t, item.meta&bitDelete > 0)
+					require.True(t, item.meta&BitDelete > 0)
 				}
 				count++
 			}

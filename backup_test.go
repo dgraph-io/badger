@@ -416,7 +416,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 				if err := txn.Delete(entries[i].Key); err != nil {
 					return err
 				}
-				updates[i] = bitDelete
+				updates[i] = BitDelete
 			}
 			return nil
 		})
@@ -431,7 +431,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
-				updates[i] = bitDelete // expired
+				updates[i] = BitDelete // expired
 			}
 			return nil
 		})
