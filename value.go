@@ -32,6 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
@@ -675,6 +676,13 @@ type request struct {
 	Wg   sync.WaitGroup
 	Err  error
 	ref  int32
+}
+
+type handoverRequest struct {
+	skl      *skl.Skiplist
+	callback func()
+	err      error
+	wg       sync.WaitGroup
 }
 
 func (req *request) reset() {
