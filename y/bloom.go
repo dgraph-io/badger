@@ -50,7 +50,7 @@ func NewFilter(keys []uint32, bitsPerKey int) Filter {
 // the false positive rate.
 func BloomBitsPerKey(numEntries int, fp float64) int {
 	size := -1 * float64(numEntries) * math.Log(fp) / math.Pow(float64(0.69314718056), 2)
-	locs := math.Ceil(float64(0.69314718056) * size / float64(numEntries))
+	locs := math.Ceil(size / float64(numEntries))
 	return int(locs)
 }
 
