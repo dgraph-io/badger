@@ -46,7 +46,8 @@ Below is a list of known projects that use Badger:
 * [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
 * [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
 * [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
-* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocal.
+* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocol.
 * [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
+* [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
 
 If you are using Badger in a project please send a pull request to add it to the list.
