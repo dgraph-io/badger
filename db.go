@@ -112,6 +112,7 @@ type DB struct {
 	lc        *levelsController
 	vlog      valueLog
 	writeCh   chan *request
+	sklCh     chan *handoverRequest
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
@@ -245,6 +246,7 @@ func Open(opt Options) (*DB, error) {
 		imm:              make([]*memTable, 0, opt.NumMemtables),
 		flushChan:        make(chan flushTask, opt.NumMemtables),
 		writeCh:          make(chan *request, kvWriteChCapacity),
+		sklCh:            make(chan *handoverRequest),
 		opt:              opt,
 		manifest:         manifestFile,
 		dirLockGuard:     dirLockGuard,
@@ -383,8 +385,9 @@ func Open(opt Options) (*DB, error) {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
-	db.closers.writes = z.NewCloser(1)
+	db.closers.writes = z.NewCloser(2)
 	go db.doWrites(db.closers.writes)
+	go db.handleHandovers(db.closers.writes)
 
 	if !db.opt.InMemory {
 		db.closers.valueGC = z.NewCloser(1)
@@ -555,6 +558,7 @@ func (db *DB) close() (err error) {
 
 	// Don't accept any more write.
 	close(db.writeCh)
+	close(db.sklCh)
 
 	db.closers.pub.SignalAndWait()
 	db.closers.cacheHealth.Signal()
@@ -875,6 +879,19 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	return req, nil
 }
 
+func (db *DB) handleHandovers(lc *z.Closer) {
+	defer lc.Done()
+	for {
+		select {
+		case r := <-db.sklCh:
+			r.err = db.handoverSkiplist(r)
+			r.wg.Done()
+		case <-lc.HasBeenClosed():
+			return
+		}
+	}
+}
+
 func (db *DB) doWrites(lc *z.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
@@ -1001,13 +1018,8 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
-func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
-	if !db.opt.managedTxns {
-		panic("Handover Skiplist is only available in managed mode.")
-	}
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
+func (db *DB) handoverSkiplist(r *handoverRequest) error {
+	skl, callback := r.skl, r.callback
 	// If we have some data in db.mt, we should push that first, so the ordering of writes is
 	// maintained.
 	if !db.mt.sl.Empty() {
@@ -1055,6 +1067,25 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 	default:
 		return errNoRoom
 	}
+}
+
+func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
+	if !db.opt.managedTxns {
+		panic("Handover Skiplist is only available in managed mode.")
+	}
+
+	if atomic.LoadInt32(&db.blockWrites) == 1 {
+		return ErrBlockedWrites
+	}
+
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	req := &handoverRequest{skl: skl, callback: callback}
+	req.wg.Add(1)
+	db.sklCh <- req
+	req.wg.Wait()
+	return req.err
 }
 
 func arenaSize(opt Options) int64 {
@@ -1726,8 +1757,9 @@ func (db *DB) blockWrite() error {
 }
 
 func (db *DB) unblockWrite() {
-	db.closers.writes = z.NewCloser(1)
+	db.closers.writes = z.NewCloser(2)
 	go db.doWrites(db.closers.writes)
+	go db.handleHandovers(db.closers.writes)
 
 	// Resume writes.
 	atomic.StoreInt32(&db.blockWrites, 0)
@@ -1744,13 +1776,23 @@ func (db *DB) prepareToDrop() (func(), error) {
 		return func() {}, err
 	}
 	reqs := make([]*request, 0, 10)
+	skls := make([]*handoverRequest, 0, 5)
 	for {
 		select {
 		case r := <-db.writeCh:
 			reqs = append(reqs, r)
+		case skl := <-db.sklCh:
+			skls = append(skls, skl)
 		default:
 			if err := db.writeRequests(reqs); err != nil {
 				db.opt.Errorf("writeRequests: %v", err)
+			}
+			for _, skl := range skls {
+				skl.err = db.handoverSkiplist(skl)
+				skl.wg.Done()
+				if skl.err != nil {
+					db.opt.Errorf("handoverSkiplists: %v", skl.err)
+				}
 			}
 			db.stopMemoryFlush()
 			return func() {
