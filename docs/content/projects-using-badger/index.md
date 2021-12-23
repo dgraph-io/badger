@@ -48,6 +48,7 @@ Below is a list of known projects that use Badger:
 * [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
 * [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on raft protocol.
 * [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
+* [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 * [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
 
 If you are using Badger in a project please send a pull request to add it to the list.
