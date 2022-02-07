@@ -123,7 +123,8 @@ func stream(cmd *cobra.Command, args []string) error {
 
 	} else if len(so.outFile) > 0 {
 		stream.LogPrefix = "DB.Backup"
-		f, err := os.OpenFile(so.outFile, os.O_RDWR|os.O_CREATE, 0666)
+		var f *os.File
+		f, err = os.OpenFile(so.outFile, os.O_RDWR|os.O_CREATE, 0666)
 		y.Check(err)
 		_, err = stream.Backup(f, 0)
 	}
