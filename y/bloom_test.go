@@ -5,6 +5,8 @@
 package y
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 )
 
@@ -121,6 +123,20 @@ loop:
 
 	if nMediocreFilters > nGoodFilters/5 {
 		t.Errorf("%d mediocre filters but only %d good filters", nMediocreFilters, nGoodFilters)
+	}
+}
+func BenchmarkHash(b *testing.B) {
+	var acc uint32
+	for _, sz := range []int64{1, 3, 4, 7, 8, 16, 32, 256, 1024} {
+		d := make([]byte, sz)
+		b.Run(fmt.Sprintf("hasher-%d", sz), func(b *testing.B) {
+			b.SetBytes(sz)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				acc = Hash(d)
+			}
+			runtime.KeepAlive(acc)
+		})
 	}
 }
 
