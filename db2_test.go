@@ -685,7 +685,7 @@ func TestWindowsDataLoss(t *testing.T) {
 		err := db.Update(func(txn *Txn) error {
 			key := []byte(fmt.Sprintf("%d", i))
 			v := []byte("barValuebarValuebarValuebarValuebarValue")
-			require.Greater(t, len(v), db.valueThreshold())
+			require.Greater(t, int64(len(v)), db.valueThreshold())
 
 			//32 bytes length and now it's not working
 			err := txn.Set(key, v)
@@ -710,6 +710,7 @@ func TestWindowsDataLoss(t *testing.T) {
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
 	require.NoError(t, z.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
+	require.NoError(t, db.mt.wal.Close(-1))
 	for _, f := range db.vlog.filesMap {
 		require.NoError(t, f.Fd.Close())
 	}

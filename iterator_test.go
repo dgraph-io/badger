@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -303,6 +304,11 @@ func TestIteratorReadOnlyWithNoData(t *testing.T) {
 
 	opts.ReadOnly = true
 	db, err = Open(opts)
+	if runtime.GOOS == "windows" {
+		require.Equal(t, err, ErrWindowsNotSupported)
+		return
+	}
+
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())

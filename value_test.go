@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -726,8 +727,12 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
 	_, err = Open(opts)
-	require.Error(t, err)
-	require.Regexp(t, "Log truncate required", err.Error())
+	if runtime.GOOS == "windows" {
+		require.Equal(t, err, ErrWindowsNotSupported)
+	} else {
+		require.Error(t, err)
+		require.Regexp(t, "Log truncate required", err.Error())
+	}
 }
 
 func TestValueLogTrigger(t *testing.T) {
@@ -796,6 +801,10 @@ func createMemFile(t *testing.T, entries []*Entry) ([]byte, uint32) {
 
 // This test creates two mem files and corrupts the last bit of the first file.
 func TestPenultimateMemCorruption(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping corruption tests on Windows since it does not allow removal of mmaped files")
+	}
+
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
