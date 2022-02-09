@@ -49,6 +49,12 @@ func NewFilter(keys []uint32, bitsPerKey int) Filter {
 // BloomBitsPerKey returns the bits per key required by bloomfilter based on
 // the false positive rate.
 func BloomBitsPerKey(fp float64) int {
+	if fp <= 0 {
+		return 75
+	}
+	if fp >= 1 {
+		return 1
+	}
 	return int(math.Ceil(-1.44 * math.Log2(fp)))
 }
 

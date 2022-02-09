@@ -5,6 +5,7 @@
 package y
 
 import (
+	"math"
 	"testing"
 )
 
@@ -142,6 +143,28 @@ func TestHash(t *testing.T) {
 	for _, tc := range testCases {
 		if got := Hash([]byte(tc.s)); got != tc.want {
 			t.Errorf("s=%q: got 0x%08x, want 0x%08x", tc.s, got, tc.want)
+		}
+	}
+}
+
+func TestBloomBitsPerKey(t *testing.T) {
+	testCases := []struct {
+		fp   float64
+		want int
+	}{
+		// epsilon (minimum possible float)
+		{math.Nextafter(1, 2) - 1, 75},
+		{0, 75},
+		{0.1, 5},
+		{0.01, 10},
+		{0.001, 15},
+		{0.999, 1},
+		{1, 1},
+		{math.MaxFloat64, 1},
+	}
+	for _, tc := range testCases {
+		if got := BloomBitsPerKey(tc.fp); got != tc.want {
+			t.Errorf("fp=%f: got %d, want %d", tc.fp, got, tc.want)
 		}
 	}
 }
