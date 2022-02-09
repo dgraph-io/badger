@@ -48,10 +48,8 @@ func NewFilter(keys []uint32, bitsPerKey int) Filter {
 
 // BloomBitsPerKey returns the bits per key required by bloomfilter based on
 // the false positive rate.
-func BloomBitsPerKey(numEntries int, fp float64) int {
-	size := -1 * float64(numEntries) * math.Log(fp) / math.Pow(float64(0.69314718056), 2)
-	locs := math.Ceil(float64(0.69314718056) * size / float64(numEntries))
-	return int(locs)
+func BloomBitsPerKey(fp float64) int {
+	return int(math.Ceil(-1.44 * math.Log2(fp)))
 }
 
 func appendFilter(buf []byte, keys []uint32, bitsPerKey int) []byte {

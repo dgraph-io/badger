@@ -446,7 +446,7 @@ func (b *Builder) Done() buildData {
 
 	var f y.Filter
 	if b.opts.BloomFalsePositive > 0 {
-		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
+		bits := y.BloomBitsPerKey(b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
 	index, dataSize := b.buildIndex(f)
