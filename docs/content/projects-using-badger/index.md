@@ -7,6 +7,7 @@ Below is a list of known projects that use Badger:
 
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
+* [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
 * [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
 * [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
