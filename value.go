@@ -171,6 +171,46 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	return e, nil
 }
 
+// calculateDiscardStat returns discard ratio for the specified logfile.
+func (vlog *valueLog) calculateDiscardStat(f *logFile) (discardedRatio float64, err error) {
+	vlog.filesLock.RLock()
+	for _, fid := range vlog.filesToBeDeleted {
+		if fid == f.fid {
+			vlog.filesLock.RUnlock()
+			return 0, errors.Errorf("value log file already marked for deletion fid: %d", fid)
+		}
+	}
+	maxFid := vlog.maxFid
+	y.AssertTruef(uint32(f.fid) < maxFid, "fid to calculateDiscardStat: %d. Current max fid: %d", f.fid, maxFid)
+	vlog.filesLock.RUnlock()
+
+	y.AssertTrue(vlog.db != nil)
+	var discarded, count int
+	fe := func(e Entry) error {
+		count++
+		ts := vlog.db.orc.readTs()
+		key := y.ParseKey(e.Key)
+		vs, err := vlog.db.get(y.KeyWithTs(key, ts))
+		if err != nil {
+			return err
+		}
+
+		if discardEntry(e, vs, vlog.db) {
+			discarded++
+		}
+		return nil
+	}
+
+	_, err = f.iterate(vlog.opt.ReadOnly, 0, func(e Entry, vp valuePointer) error {
+		return fe(e)
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return float64(discarded) / float64(count), nil
+}
+
 func (vlog *valueLog) rewrite(f *logFile) error {
 	vlog.filesLock.RLock()
 	for _, fid := range vlog.filesToBeDeleted {
@@ -194,8 +234,9 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if count%100000 == 0 {
 			vlog.opt.Debugf("Processing entry %d", count)
 		}
-
-		vs, err := vlog.db.get(e.Key)
+		ts := vlog.db.orc.readTs()
+		key := y.ParseKey(e.Key)
+		vs, err := vlog.db.get(y.KeyWithTs(key, ts))
 		if err != nil {
 			return err
 		}
@@ -450,6 +491,7 @@ type valueLog struct {
 	filesLock        sync.RWMutex
 	filesMap         map[uint32]*logFile
 	maxFid           uint32
+	nextGCFid        uint32
 	filesToBeDeleted []uint32
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
 	numActiveIterators int32
@@ -1013,7 +1055,22 @@ LOOP:
 	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
 	// vlog files start from 1.
 	if fid == 0 {
-		vlog.opt.Debugf("No file with discard stats")
+		for fid = vlog.nextGCFid; fid < vlog.maxFid; fid++ {
+			lf := vlog.filesMap[fid]
+			if lf == nil {
+				continue
+			}
+
+			discarded, err := vlog.calculateDiscardStat(lf)
+			if err != nil || discarded < discardRatio {
+				continue
+			}
+			vlog.nextGCFid = fid + 1
+			return lf
+		}
+
+		// reset the counter so next time we will start from the start
+		vlog.nextGCFid = 0
 		return nil
 	}
 	lf, ok := vlog.filesMap[fid]
