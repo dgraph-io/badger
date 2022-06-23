@@ -21,7 +21,7 @@ import (
 
 	"github.com/dgraph-io/badger/v3/pb"
 
-	"github.com/cespare/xxhash"
+	"github.com/cespare/xxhash/v2"
 	"github.com/pkg/errors"
 )
 
