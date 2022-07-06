@@ -172,6 +172,8 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 }
 
 // calculateDiscardStat returns discard ratio for the specified logfile.
+// race condition due to calculateDiscardStat must be fixed
+// see discussion: https://github.com/dgraph-io/badger/pull/1784
 func (vlog *valueLog) calculateDiscardStat(f *logFile) (discardedRatio float64, err error) {
 	vlog.filesLock.RLock()
 	for _, fid := range vlog.filesToBeDeleted {
