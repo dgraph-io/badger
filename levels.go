@@ -1095,11 +1095,15 @@ func (s *levelsController) addSplits(cd *compactDef) {
 
 func (cd *compactDef) lockLevels() {
 	cd.thisLevel.RLock()
-	cd.nextLevel.RLock()
+	if cd.thisLevel.level != cd.nextLevel.level {
+		cd.nextLevel.RLock()
+	}
 }
 
 func (cd *compactDef) unlockLevels() {
-	cd.nextLevel.RUnlock()
+	if cd.thisLevel.level != cd.nextLevel.level {
+		cd.nextLevel.RUnlock()
+	}
 	cd.thisLevel.RUnlock()
 }
 
