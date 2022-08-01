@@ -252,3 +252,69 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
 	return nil
 }
+
+type KeyFilter func([]byte) bool
+
+// HACK ALERT: This function is used to selectively load keys from a backup file, without first
+// loading everything into the database.
+// Alternatives that were tried:
+// 1. Using the KVLoader API as suggested by the documentation - this fails since the DB's
+//    transaction timestamp is not updated properly, which causes reads to fail after the
+//    restoration.
+// 2. Using the KVLoader, but zeroing out the versions on the entires before writing them. This
+//    seems to work, but is fragile. There are a few cases the version is decremented for deletion
+//    markers and such, and due to the risk of prod data-loss, this was not pursued further.
+// 3. Using the WriteBatcher API - this resulted in data-corruption (root-cause TBD).
+// TODO(avinash, ian): We'll have to find an alternative to this when switching back to mainline
+// Badger, but given that we won't always be re-sharding our backups, we should be able to do this
+// without prod impact.
+func (db *DB) LoadWithFilter(r io.Reader, maxPendingWrites int, keyFilter func([]byte) bool) error {
+	br := bufio.NewReaderSize(r, 16<<10)
+	unmarshalBuf := make([]byte, 1<<10)
+
+	ldr := db.NewKVLoader(maxPendingWrites)
+	for {
+		var sz uint64
+		err := binary.Read(br, binary.LittleEndian, &sz)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+
+		if cap(unmarshalBuf) < int(sz) {
+			unmarshalBuf = make([]byte, sz)
+		}
+
+		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
+			return err
+		}
+
+		list := &pb.KVList{}
+		if err := proto.Unmarshal(unmarshalBuf[:sz], list); err != nil {
+			return err
+		}
+
+		for _, kv := range list.Kv {
+			if !keyFilter(kv.Key) {
+				continue
+			}
+
+			if err := ldr.Set(kv); err != nil {
+				return err
+			}
+
+			// Update nextTxnTs, memtable stores this
+			// timestamp in badger head when flushed.
+			if kv.Version >= db.orc.nextTxnTs {
+				db.orc.nextTxnTs = kv.Version + 1
+			}
+		}
+	}
+
+	if err := ldr.Finish(); err != nil {
+		return err
+	}
+	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
+	return nil
+}
