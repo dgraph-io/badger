@@ -253,8 +253,6 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	return nil
 }
 
-type KeyFilter func([]byte) bool
-
 // HACK ALERT: This function is used to selectively load keys from a backup file, without first
 // loading everything into the database.
 // Alternatives that were tried:
@@ -268,7 +266,7 @@ type KeyFilter func([]byte) bool
 // TODO(avinash, ian): We'll have to find an alternative to this when switching back to mainline
 // Badger, but given that we won't always be re-sharding our backups, we should be able to do this
 // without prod impact.
-func (db *DB) LoadWithFilter(r io.Reader, maxPendingWrites int, keyFilter func([]byte) bool) error {
+func (db *DB) LoadWithFilter(r io.Reader, maxPendingWrites int, keyFilter func([]byte) (bool, error)) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
 
@@ -296,7 +294,11 @@ func (db *DB) LoadWithFilter(r io.Reader, maxPendingWrites int, keyFilter func([
 		}
 
 		for _, kv := range list.Kv {
-			if !keyFilter(kv.Key) {
+			result, err := keyFilter(kv.Key)
+			if err != nil {
+				return err
+			}
+			if !result {
 				continue
 			}
 
