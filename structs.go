@@ -72,8 +72,8 @@ type header struct {
 
 const (
 	// Maximum possible size of the header. The maximum size of header struct will be 18 but the
-	// maximum size of varint encoded header will be 21.
-	maxHeaderSize = 21
+	// maximum size of varint encoded header will be 22.
+	maxHeaderSize = 22
 )
 
 // Encode encodes the header into []byte. The provided []byte should be atleast 5 bytes. The
