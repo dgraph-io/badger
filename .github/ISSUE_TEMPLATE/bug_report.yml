@@ -10,7 +10,7 @@ body:
         If you suspect this could be a bug, please follow this template.
   - type: textarea
     attributes:
-      label: What version of Ristretto are you using?
+      label: What version of Badger are you using?
       description: Copy and paste the tag or commit hash used in your application's go.mod file.
       placeholder: |
         Paste here.
