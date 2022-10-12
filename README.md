@@ -60,10 +60,12 @@ This will retrieve the library.
 
 #### Installing Badger Command Line Tool
 
-Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI, run
+Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI, 
+retrieve the repository and checkout the desired version.  Then run
 
 ```sh
-$ go install github.com/dgraph-io/badger/v3@latest
+$ cd badger
+$ go install .
 ```
 This will install the badger command line utility into your $GOBIN path. 
 
