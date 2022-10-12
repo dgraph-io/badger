@@ -19,10 +19,7 @@ HAS_JEMALLOC = $(shell test -f /usr/local/lib/libjemalloc.a && echo "jemalloc")
 JEMALLOC_URL = "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
 
 
-.PHONY: all badger
-
-install: jemalloc
-	@go install
+.PHONY: all test jemalloc
 
 test:
 	@echo "Running Badger tests..."
