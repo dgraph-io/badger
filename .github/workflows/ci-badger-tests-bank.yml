@@ -33,6 +33,4 @@ jobs:
         run: |
           #!/bin/bash
           mkdir bank && cd bank
-          badger bank test --dir=.
-
-
+          badger bank test --dir=. -d=20m
