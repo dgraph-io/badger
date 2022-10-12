@@ -9,10 +9,6 @@ go version
 # export packages because the test will run in a sub process.
 export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v3/")
 
-if [[ ! -z "$TEAMCITY_VERSION" ]]; then
-  export GOFLAGS="-json"
-fi
-
 function InstallJemalloc() {
   pushd .
   if [ ! -f /usr/local/lib/libjemalloc.a ]; then
