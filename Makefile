@@ -21,11 +21,11 @@ JEMALLOC_URL = "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jem
 
 .PHONY: all test jemalloc deps
 
-test: jemalloc deps
+test: jemalloc
 	@echo "Running Badger tests..."
 	@./test.sh
 
-jemalloc: deps
+jemalloc:
 	@if [ -z "$(HAS_JEMALLOC)" ] ; then \
 		mkdir -p /tmp/jemalloc-temp && cd /tmp/jemalloc-temp ; \
 		echo "Downloading jemalloc..." ; \
@@ -42,7 +42,7 @@ jemalloc: deps
 		fi \
 	fi
 
-deps:
+deps_linux:
 	@echo "Installing dependencies..."
 	@sudo apt-get update
 	@sudo apt-get -y upgrade
@@ -53,3 +53,6 @@ deps:
     	lsb-release \
     	build-essential \
     	protobuf-compiler \
+
+deps_darwin:
+	@echo "To do..."
