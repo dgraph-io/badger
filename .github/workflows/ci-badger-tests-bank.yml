@@ -1,0 +1,38 @@
+name: ci-badger-tests
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  schedule:
+    - cron: "30 * * * *"
+jobs:
+  badger-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Get Go Version
+        run: |
+          #!/bin/bash
+          DEFAULT_VERSION="1.18"
+          GOVERSION=$({ [ -f .go-version ] && cat .go-version; } || echo $DEFAULT_VERSION)
+          echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GOVERSION }}
+      - name: Install Dependencies
+        run: make dependency
+      - name: Install jemalloc
+        run: make jemalloc
+      - name: Install Badger
+        run: cd badger && go install --race --tags=jemalloc .
+      - name: Run Badger Bank Test
+        run: |
+          #!/bin/bash
+          mkdir bank && cd bank
+          badger bank test --dir=.
+
+
