@@ -9,7 +9,7 @@ on:
   schedule:
     - cron: "30 * * * *"
 jobs:
-  ristretto-tests:
+  badger-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
