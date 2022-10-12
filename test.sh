@@ -81,7 +81,7 @@ stream() {
     return 1
   fi
   echo "==> DONE stream test"
-  popd badger
+  popd
   return 0
 }
 
