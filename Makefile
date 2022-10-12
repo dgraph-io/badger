@@ -53,6 +53,3 @@ dependency:
     	lsb-release \
     	build-essential \
     	protobuf-compiler \
-
-dependency_darwin:
-	@echo "To do..."
