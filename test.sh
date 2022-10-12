@@ -113,4 +113,7 @@ export -f stream
 export -f manual
 export -f root
 
-parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+# parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+root
+stream
+manual
