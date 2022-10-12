@@ -9,13 +9,12 @@ go version
 # export packages because the test will run in a sub process.
 export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v3/")
 
+tags="-tags=jemalloc"
+
 # Ensure that we can compile the binary.
 pushd badger
 go build -v $tags .
 popd
-
-# tags=""
-InstallJemalloc
 
 # Run the memory intensive tests first.
 manual() {
