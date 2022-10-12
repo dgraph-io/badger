@@ -19,7 +19,7 @@ HAS_JEMALLOC = $(shell test -f /usr/local/lib/libjemalloc.a && echo "jemalloc")
 JEMALLOC_URL = "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
 
 
-.PHONY: all test jemalloc deps
+.PHONY: all test jemalloc dependency
 
 test: jemalloc
 	@echo "Running Badger tests..."
@@ -42,7 +42,7 @@ jemalloc:
 		fi \
 	fi
 
-deps_linux:
+dependency:
 	@echo "Installing dependencies..."
 	@sudo apt-get update
 	@sudo apt-get -y upgrade
@@ -54,5 +54,5 @@ deps_linux:
     	build-essential \
     	protobuf-compiler \
 
-deps_darwin:
+dependency_darwin:
 	@echo "To do..."
