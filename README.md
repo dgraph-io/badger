@@ -210,3 +210,4 @@ If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUT
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for filing bugs or feature requests.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
+- 
