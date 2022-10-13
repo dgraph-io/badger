@@ -27,6 +27,8 @@ jobs:
         run: make dependency
       - name: Run Badger Tests
         run: make test
+      - name: Install Goveralls
+        run: go install github.com/mattn/goveralls@latest
       - name: Send Coverage Results
         env:
           COVERALLS_TOKEN: ${{ secrets.COVERALLSIO_TOKEN }}
