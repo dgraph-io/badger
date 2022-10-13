@@ -4,7 +4,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v3)](https://goreportcard.com/report/github.com/dgraph-io/badger/v3) 
 [![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
 [![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
+<<<<<<< HEAD
 [![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
+=======
+[![ci-badger-tests-bank](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml)
+>>>>>>> 4794f86 (update badge in readme)
 [![ci-golang-lint](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml)
 
 
