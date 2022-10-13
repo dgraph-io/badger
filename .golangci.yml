@@ -8,7 +8,7 @@ linters-settings:
 linters:
   disable-all: true
   enable:
-    - errcheck
+#   - errcheck
     - ineffassign
     - gas
     - gofmt
