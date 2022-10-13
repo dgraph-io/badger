@@ -9,42 +9,12 @@ go version
 # export packages because the test will run in a sub process.
 export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v3/")
 
-if [[ ! -z "$TEAMCITY_VERSION" ]]; then
-  export GOFLAGS="-json"
-fi
-
-function InstallJemalloc() {
-  pushd .
-  if [ ! -f /usr/local/lib/libjemalloc.a ]; then
-		USER_ID=`id -u`
-    	JEMALLOC_URL="https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
-
-		mkdir -p /tmp/jemalloc-temp && cd /tmp/jemalloc-temp ;
-		echo "Downloading jemalloc" ;
-		curl -s -L ${JEMALLOC_URL} -o jemalloc.tar.bz2 ;
-		tar xjf ./jemalloc.tar.bz2 ;
-		cd jemalloc-5.2.1 ;
-		./configure --with-jemalloc-prefix='je_' ;
-		make ;
-		if [ "$USER_ID" -eq "0" ]; then
-			make install ;
-		else
-			echo "==== Need sudo access to install jemalloc" ;
-			sudo make install ;
-		fi
-	fi
-  popd
-}
-
 tags="-tags=jemalloc"
 
 # Ensure that we can compile the binary.
 pushd badger
 go build -v $tags .
 popd
-
-# tags=""
-InstallJemalloc
 
 # Run the memory intensive tests first.
 manual() {
@@ -110,6 +80,7 @@ stream() {
     return 1
   fi
   echo "==> DONE stream test"
+  popd
   return 0
 }
 
@@ -117,4 +88,10 @@ export -f stream
 export -f manual
 export -f root
 
-parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+# parallel tests currently not working
+# parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+
+# run tests in sequence
+root
+stream
+manual
