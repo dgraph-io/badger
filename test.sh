@@ -61,7 +61,8 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -timeout=25m . -v -race -parallel 16
+  go test $tags -v -race -parallel=16 -timeout=25m -covermode=atomic -coverprofile=cover_tmp.out .
+  cat cover_tmp.out >> cover.out
   echo "==> DONE root level tests"
 }
 
@@ -90,6 +91,8 @@ export -f root
 
 # parallel tests currently not working
 # parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+
+touch cover.out
 
 # run tests in sequence
 root
