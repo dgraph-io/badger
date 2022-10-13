@@ -1,4 +1,11 @@
-# BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v3.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v3) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger) [![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge) [![Build Status](https://teamcity.dgraph.io/guestAuth/app/rest/builds/buildType:(id:Badger_UnitTests)/statusIcon.svg)](https://teamcity.dgraph.io/viewLog.html?buildTypeId=Badger_UnitTests&buildId=lastFinished&guest=1) ![Appveyor](https://ci.appveyor.com/api/projects/status/github/dgraph-io/badger?branch=master&svg=true) [![Coverage Status](https://coveralls.io/repos/github/dgraph-io/badger/badge.svg?branch=master)](https://coveralls.io/github/dgraph-io/badger?branch=master)
+# BadgerDB 
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v3.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v3) 
+[![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v3)](https://goreportcard.com/report/github.com/dgraph-io/badger) 
+[![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
+[![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
+[![ci-badger-tests-bank](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml)
+
 
 ![Badger mascot](images/diggy-shadow.png)
 
