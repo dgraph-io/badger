@@ -5,6 +5,7 @@
 [![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
 [![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
 [![ci-badger-tests-bank](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests-bank.yml)
+[![ci-golang-lint](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml)
 
 
 ![Badger mascot](images/diggy-shadow.png)
