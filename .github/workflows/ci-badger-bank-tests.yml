@@ -1,13 +1,13 @@
-name: ci-badger-tests-bank
+name: ci-badger-bank-tests
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
   schedule:
-    - cron: "30 * * * *"
+    - cron: "*/30 * * * *"
 jobs:
   badger-bank:
     runs-on: ubuntu-latest

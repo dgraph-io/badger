@@ -1,13 +1,13 @@
-name: ci-badger-lint
+name: ci-golang-lint
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/30 * * * *"
 jobs:
   go-lint:
     name: lint
