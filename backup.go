@@ -78,8 +78,7 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			var valCopy []byte
 			if !item.IsDeletedOrExpired() {
 				// No need to copy value, if item is deleted or expired.
-				var err error
-				err = item.Value(func(val []byte) error {
+				err := item.Value(func(val []byte) error {
 					valCopy = a.Copy(val)
 					return nil
 				})

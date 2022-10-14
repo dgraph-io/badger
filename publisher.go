@@ -27,13 +27,13 @@ import (
 )
 
 type subscriber struct {
-	id uint64
+	id        uint64
 	matches   []pb.Match
 	sendCh    chan *pb.KVList
 	subCloser *z.Closer
 	// this will be atomic pointer which will be used to
 	// track whether the subscriber is active or not
-	active    *uint64
+	active *uint64
 }
 
 type publisher struct {
@@ -126,8 +126,8 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) subscriber {
 	p.nextID++
 	active := uint64(1)
 	s := subscriber{
-		active: &active,
-		id: id,
+		active:    &active,
+		id:        id,
 		matches:   matches,
 		sendCh:    ch,
 		subCloser: c,

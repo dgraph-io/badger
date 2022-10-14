@@ -301,7 +301,6 @@ func (b *Builder) finishBlock() {
 	if b.blockChan != nil {
 		b.blockChan <- b.curBlock
 	}
-	return
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
