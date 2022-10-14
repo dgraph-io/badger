@@ -1,0 +1,44 @@
+name: ci-badger-bank-nightly
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "* 3,9,15,21 * * *"
+jobs:
+  badger-bank:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Get Go Version
+        run: cat .go-version >> $GITHUB_ENV
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GOVERSION }}
+      - name: Install Dependencies
+        run: make dependency
+      - name: Install jemalloc
+        run: make jemalloc
+      - name: Install Badger
+        run: cd badger && go install --race --tags=jemalloc .
+      - name: Run Badger Bank Test
+        run: |
+          #!/bin/bash -x
+          set -o pipefail
+          badger bank test --dir=. --encryption-key "badgerkey16bytes" -d=4h 2>&1 | tee badgerbanktest.log | grep -v 'Moved $5'
+          if [ $? -ne 0 ]; then
+            if grep -qi 'data race' badgerbanktest.log; then
+              echo "Detected data race via grep..."
+              cat badgerbanktest.log | grep -v 'Moved $5'
+            else
+              echo "No data race detected via grep. Assuming txn violation..."
+              tail -1000 badgerbanktest.log
+              badger bank disect --dir=. --decryption-key "badgerkey16bytes"
+            fi
+            exit 1
+          fi
+          echo 'Bank test finished with no issues.'
