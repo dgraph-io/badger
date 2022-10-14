@@ -1,4 +1,4 @@
-name: ci-badger-bank-nightly
+name: ci-badger-bank-tests-nightly
 on:
   push:
     branches:
