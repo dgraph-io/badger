@@ -16,12 +16,6 @@ linters:
     - gosimple
     - govet
     - lll
-    - varcheck
+#   - varcheck
 #   - unused
-
-issues:
-  exclude-rules:
-    - linters:
-        - gosec
-      text: "G404: "
-      
+#   - gosec
