@@ -31,7 +31,7 @@ jobs:
           set -o pipefail
           # get 16 random bytes from /dev/urandom
           hexdump -vn16 -e'4/4 "%08X" 1 "\n"' /dev/urandom > badgerkey16bytes
-          badger bank test --dir=. --encryption-key "badgerkey16bytes" -d=1m 2>&1 | tee badgerbanktest.log | grep -v 'Moved $5'
+          badger bank test --dir=. --encryption-key "badgerkey16bytes" -d=4h 2>&1 | tee badgerbanktest.log | grep -v 'Moved $5'
           if [ $? -ne 0 ]; then
             if grep -qi 'data race' badgerbanktest.log; then
               echo "Detected data race via grep..."
