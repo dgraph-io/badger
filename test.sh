@@ -103,14 +103,8 @@ write_coverage() {
   
 }
 
-export -f stream
-export -f manual
-export -f root
-export -f write_coverage
-
 # parallel tests currently not working
 # parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
-
 # run tests in sequence
 root
 stream
