@@ -3,21 +3,21 @@ run:
 
 linters-settings:
   lll:
-    line-length: 100
+    line-length: 120
 
 linters:
   disable-all: true
   enable:
 #   - errcheck
-    - ineffassign
+#   - ineffassign
     - gas
     - gofmt
-    - golint
+#   - golint
     - gosimple
     - govet
     - lll
     - varcheck
-    - unused
+#   - unused
 
 issues:
   exclude-rules:
