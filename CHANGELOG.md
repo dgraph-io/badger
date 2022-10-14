@@ -3,6 +3,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.2103.3] - 2022-10-14
+
+### Remarks
+
+  - This is a minor patch release that fixes arm64 related issues.  The issues in the `z` package in Ristretto were resolved in Ristretto v0.1.1.
+
+### Fixed
+
+  -  fix(arm64): bump ristretto v0.1.0 --> v0.1.1 (#1806)
+
 ## [3.2103.2] - 2021-10-07
 
 ### Fixed
