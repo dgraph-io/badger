@@ -4,6 +4,15 @@ set -eo pipefail
 
 go version
 
+# Check if Github Actions is running
+if [ $CI = "true" ]; then
+  # Enable code coverage
+  # export because tests run in a subprocess
+  export covermode="-covermode=atomic"
+  export coverprofile="-coverprofile=cover_tmp.out"
+  echo "mode: atomic" >> cover.out
+fi
+
 # Run `go list` BEFORE setting GOFLAGS so that the output is in the right
 # format for grep.
 # export packages because the test will run in a sub process.
@@ -11,7 +20,7 @@ export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v3/")
 
 tags="-tags=jemalloc"
 
-# Ensure that we can compile the binary.
+# Compile the Badger binary
 pushd badger
 go build -v $tags .
 popd
@@ -23,7 +32,7 @@ manual() {
   set -e
   for pkg in $packages; do
     echo "===> Testing $pkg"
-    go test $tags -timeout=25m -race $pkg -parallel 16
+    go test $tags -timeout=25m $covermode $coverprofile -race -parallel 16 $pkg && write_coverage
   done
   echo "==> DONE package tests"
 
@@ -31,10 +40,10 @@ manual() {
   # Run the special Truncate test.
   rm -rf p
   set -e
-  go test $tags $timeout -run='TestTruncateVlogNoClose$' --manual=true
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' --manual=true && write_coverage
   truncate --size=4096 p/000000.vlog
-  go test $tags $timeout -run='TestTruncateVlogNoClose2$' --manual=true
-  go test $tags $timeout -run='TestTruncateVlogNoClose3$' --manual=true
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' --manual=true && write_coverage
   rm -rf p
 
   # TODO(ibrahim): Let's make these tests have Manual prefix.
@@ -43,14 +52,14 @@ manual() {
   # TestValueGCManaged
   # TestDropPrefix
   # TestDropAllManaged
-  go test $tags $timeout -run='TestBigKeyValuePairs$' --manual=true
-  go test $tags $timeout -run='TestPushValueLogLimit' --manual=true
-  go test $tags $timeout -run='TestKeyCount' --manual=true
-  go test $tags $timeout -run='TestIteratePrefix' --manual=true
-  go test $tags $timeout -run='TestIterateParallel' --manual=true
-  go test $tags $timeout -run='TestBigStream' --manual=true
-  go test $tags $timeout -run='TestGoroutineLeak' --manual=true
-  go test $tags $timeout -run='TestGetMore' --manual=true
+  go test $tags $timeout $covermode $coverprofile -run='TestBigKeyValuePairs$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestPushValueLogLimit' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestKeyCount' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestIteratePrefix' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestIterateParallel' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestBigStream' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestGoroutineLeak' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestGetMore' --manual=true && write_coverage
 
   echo "==> DONE manual tests"
 }
@@ -61,7 +70,7 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -timeout=25m . -v -race -parallel 16
+  go test $tags -v -race -parallel=16 -timeout=25m $covermode $coverprofile . && write_coverage
   echo "==> DONE root level tests"
 }
 
@@ -84,13 +93,18 @@ stream() {
   return 0
 }
 
-export -f stream
-export -f manual
-export -f root
+write_coverage() {
+  if [ $CI = "true" ]; then
+    if [ -f cover_tmp.out ]; then
+      sed -i '1d' cover_tmp.out
+      cat cover_tmp.out >> cover.out && rm cover_tmp.out
+    fi
+  fi
+  
+}
 
 # parallel tests currently not working
 # parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
-
 # run tests in sequence
 root
 stream
