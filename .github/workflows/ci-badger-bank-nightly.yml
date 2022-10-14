@@ -3,11 +3,8 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   schedule:
-    - cron: "* 3,9,15,21 * * *"
+    - cron: "0 3 * * *"
 jobs:
   badger-bank:
     runs-on: ubuntu-latest
