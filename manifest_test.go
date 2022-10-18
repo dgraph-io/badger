@@ -253,9 +253,6 @@ func TestConcurrentManifestCompaction(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	// set this low so rewrites will happen more often
-	deletionsThreshold := 1
-
 	// overwrite the sync function to make this race condition easily reproducible
 	syncFunc = func(f *os.File) error {
 		// effectively making the Sync() take around 1s makes this reproduce every time
@@ -263,7 +260,7 @@ func TestConcurrentManifestCompaction(t *testing.T) {
 		return f.Sync()
 	}
 
-	mf, _, err := helpOpenOrCreateManifestFile(dir, false, 0, deletionsThreshold)
+	mf, _, err := helpOpenOrCreateManifestFile(dir, false, 0)
 	require.NoError(t, err)
 
 	cs := &pb.ManifestChangeSet{}
