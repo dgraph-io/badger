@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - main
+      - release/v3.2103
   pull_request:
     branches:
       - main
+      - release/v3.2103
   schedule:
     - cron: "*/30 * * * *"
 jobs:
