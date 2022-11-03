@@ -1,4 +1,12 @@
-# BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v3.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v3) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger) [![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge) [![Build Status](https://teamcity.dgraph.io/guestAuth/app/rest/builds/buildType:(id:Badger_UnitTests)/statusIcon.svg)](https://teamcity.dgraph.io/viewLog.html?buildTypeId=Badger_UnitTests&buildId=lastFinished&guest=1) ![Appveyor](https://ci.appveyor.com/api/projects/status/github/dgraph-io/badger?branch=master&svg=true) [![Coverage Status](https://coveralls.io/repos/github/dgraph-io/badger/badge.svg?branch=master)](https://coveralls.io/github/dgraph-io/badger?branch=master)
+# BadgerDB 
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v3.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v3) 
+[![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v3)](https://goreportcard.com/report/github.com/dgraph-io/badger/v3) 
+[![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
+[![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
+[![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
+[![ci-golang-lint](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml)
+
 
 ![Badger mascot](images/diggy-shadow.png)
 
@@ -7,9 +15,7 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
-**Use [Discuss Issues](https://discuss.dgraph.io/c/issues/badger/37) for reporting issues about this repository.**
-
-## Project Status [March 24, 2020]
+## Project Status
 
 Badger is stable and is being used to serve data sets worth hundreds of
 terabytes. Badger supports concurrent ACID transactions with serializable
@@ -27,7 +33,9 @@ with v1.0 is v1.6.0.
 Badger v2.0 was released in Nov 2019 with a new storage format which won't
 be compatible with all of the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
 
-The [Changelog] is kept fairly up-to-date.
+Badger v3.0 was released in January 2021.  This release improves compaction performance.
+
+Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
@@ -51,7 +59,7 @@ For more details on our version naming schema please read [Choosing a version](#
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.12 or above. Badger v2 needs go modules. Run the following command to retrieve the library.
+To start using Badger, install Go 1.12 or above. Badger v3 needs go modules. From your project, run the following command
 
 ```sh
 $ go get github.com/dgraph-io/badger/v3
@@ -60,13 +68,14 @@ This will retrieve the library.
 
 #### Installing Badger Command Line Tool
 
-Download and extract the latest Badger DB release from https://github.com/dgraph-io/badger/releases and then run the following commands.
+Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI, 
+retrieve the repository and checkout the desired version.  Then run
 
 ```sh
-$ cd badger-<version>/badger
-$ go install
+$ cd badger
+$ go install .
 ```
-This will install the badger command line utility into your $GOBIN path.
+This will install the badger command line utility into your $GOBIN path. 
 
 #### Choosing a version
 
@@ -86,9 +95,12 @@ Following these rules:
  version is the same, therefore the data format on disk is compatible.
 - v1.6.0 and v2.0.0 are data incompatible as their major version implies, so files created with
  v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
+ - v2.x.x and v3.x.x are data incompatible as their major version implies, so files created with
+ v2.x.x will need to be converted into the new format before they can be used by v3.0.0.
+
 
 For a longer explanation on the reasons behind using a new versioning naming schema, you can read
-[VERSIONING.md](VERSIONING.md).
+[VERSIONING](VERSIONING.md).
 
 ## Badger Documentation
 
@@ -99,9 +111,9 @@ Badger Documentation is available at https://dgraph.io/docs/badger
 ### Blog Posts
 1. [Introducing Badger: A fast key-value store written natively in
 Go](https://open.dgraph.io/post/badger/)
-2. [Make Badger crash resilient with ALICE](https://blog.dgraph.io/post/alice/)
-3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://blog.dgraph.io/post/badger-lmdb-boltdb/)
-4. [Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
+2. [Make Badger crash resilient with ALICE](https://open.dgraph.io/post/alice/)
+3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://open.dgraph.io/post/badger-lmdb-boltdb/)
+4. [Concurrent ACID Transactions in Badger](https://open.dgraph.io/post/badger-txn/)
 
 ## Design
 Badger was written with these design goals in mind:
@@ -167,6 +179,7 @@ Below is a list of known projects that use Badger:
 * [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
@@ -189,15 +202,23 @@ Below is a list of known projects that use Badger:
 * [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
 * [Pyroscope](https://github.com/pyroscope-io/pyroscope) - Open source confinuous profiling platform built with BadgerDB
 * [Veri](https://github.com/bgokden/veri) - A distributed feature store optimized for Search and Recommendation tasks.
+* [bIter](https://github.com/MikkelHJuul/bIter) - A library and Iterator interface for working with the `badger.Iterator`, simplifying from-to, and prefix mechanics.
+* [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
+* [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
+* [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
+* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on the raft protocol.
+* [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
+* [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
+* [Opacity](https://github.com/opacity/storage-node) - Backend implementation for the Opacity storage project
+* [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
 ## Contributing
 
-If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUTING.md).
+If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING.md).
 
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
-- Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.
+- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for filing bugs or feature requests.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
-
