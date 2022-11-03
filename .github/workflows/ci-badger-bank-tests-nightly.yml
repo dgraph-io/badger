@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - release/v3.2103
   schedule:
     - cron: "0 3 * * *"
 jobs:
