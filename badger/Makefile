@@ -24,3 +24,4 @@ all: badger
 badger: 
 # 	build badger binary
 	@go build -a --tags=jemalloc -o badger-$(GOOS)-$(GOARCH) .
+	
