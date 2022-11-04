@@ -17,11 +17,10 @@
 GOOS          ?= $(shell go env GOOS)
 GOARCH        ?= $(shell go env GOARCH)
 
-.PHONY: test badger
+.PHONY: badger
 
 all: badger
 
 badger: 
 # 	build badger binary
-	@go build -a --tags=jemalloc -o badger-$(GOOS)-$(GOARCH) .
-	
+	@go build --tags=jemalloc -o badger-$(GOOS)-$(GOARCH) .
