@@ -23,7 +23,7 @@ JEMALLOC_URL = "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jem
 
 badger: jemalloc
 	@echo "Compiling Badger binary..."
-	@(MAKE) -C badger badger
+	@$(MAKE) -C badger badger
 	@echo "Badger binary located in badger directory."
 
 test: jemalloc

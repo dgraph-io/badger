@@ -33,7 +33,7 @@ jobs:
       - name: Generate SHA for Linux Build
         run: cd badger && sha256sum badger-linux-amd64 | cut -c-64 > badger-checksum-linux-amd64.sha256
       - name: Tar Archive for Linux Build
-        run: cd badger && tar -zcvf badger-linux-amd64.tar.gz badger
+        run: cd badger && tar -zcvf badger-linux-amd64.tar.gz badger-linux-amd64
       - name: Upload Badger Binary Build Artifacts
         uses: actions/upload-artifact@v3
         with:
