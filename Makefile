@@ -19,7 +19,12 @@ HAS_JEMALLOC = $(shell test -f /usr/local/lib/libjemalloc.a && echo "jemalloc")
 JEMALLOC_URL = "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
 
 
-.PHONY: all test jemalloc dependency
+.PHONY: all badger test jemalloc dependency
+
+badger: jemalloc
+	@echo "Compiling Badger binary..."
+	@$(MAKE) -C badger badger
+	@echo "Badger binary located in badger directory."
 
 test: jemalloc
 	@echo "Running Badger tests..."
