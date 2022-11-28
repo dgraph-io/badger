@@ -760,6 +760,11 @@ func (txn *Txn) ReadTs() uint64 {
 	return txn.readTs
 }
 
+// Discarded returns the discarded value of the transaction.
+func (txn *Txn) Discarded() bool {
+	return txn.discarded
+}
+
 // NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
 // providing serializable snapshot isolation, avoiding write skews. Badger achieves this by tracking
 // the keys read and at Commit time, ensuring that these read keys weren't concurrently modified by

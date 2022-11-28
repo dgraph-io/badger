@@ -866,7 +866,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		return nil, ErrTxnTooBig
 	}
 
-	// We can only service one request because we need each txn to be stored in a contigous section.
+	// We can only service one request because we need each txn to be stored in a contiguous section.
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
 	req.reset()
@@ -2236,7 +2236,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	defer outDB.Close()
 	writer := outDB.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
-		y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+		return y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 
 	// Stream contents of DB to the output DB.

@@ -7,6 +7,8 @@ Below is a list of known projects that use Badger:
 
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
+* [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
+* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
 * [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
@@ -50,5 +52,6 @@ Below is a list of known projects that use Badger:
 * [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 * [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
+* [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
 
 If you are using Badger in a project please send a pull request to add it to the list.

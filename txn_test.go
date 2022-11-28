@@ -952,3 +952,15 @@ func TestConflict(t *testing.T) {
 		runTest(t, testAndSetItr)
 	})
 }
+
+func TestTxnGetters(t *testing.T) {
+	t.Run("TxnDiscarded", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			txn := db.NewTransaction(true)
+			require.Equal(t, false, txn.Discarded())
+
+			txn.Discard()
+			require.Equal(t, true, txn.Discarded())
+		})
+	})
+}
