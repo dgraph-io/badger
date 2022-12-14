@@ -2,12 +2,7 @@
 # Machine Setup
 sudo apt-get update
 sudo apt-get -y upgrade
-sudo apt-get -y install \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release \
-    build-essential #Libc Packages
+sudo apt-get -y install build-essential #Libc packages
 # Install & Setup GH Actions Runner
 mkdir actions-runner && cd actions-runner
 if [ "$(uname -m)" = "aarch64" ]; then
@@ -31,7 +26,7 @@ else
     exit 1
 fi
 # Create the runner and start the configuration experience
-./config.sh --url https://github.com/dgraph-io/dgraph --token $TOKEN
+./config.sh --url https://github.com/dgraph-io/badger --token $TOKEN
 # Start GH Actions
 sudo ./svc.sh install
 sudo ./svc.sh start
