@@ -858,7 +858,7 @@ func (t *Table) decompress(b *block) error {
 		return errors.New("Unsupported compression type")
 	}
 
-	if b.freeMe == true {
+	if b.freeMe {
 		z.Free(src)
 		b.freeMe = false
 	}

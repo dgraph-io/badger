@@ -1,4 +1,5 @@
-/*
+## What is Badger?
+
 Package badger implements an embeddable, simple and fast key-value database,
 written in pure Go. It is designed to be highly performant for both reads and
 writes simultaneously. Badger uses Multi-Version Concurrency Control (MVCC), and
@@ -10,8 +11,7 @@ hence reducing both write amplification and the size of the LSM tree. This
 allows LSM tree to be served entirely from RAM, while the values are served
 from SSD.
 
-
-Usage
+## Usage
 
 Badger has the following main types: DB, Txn, Item and Iterator. DB contains
 keys that are associated with values. It must be opened with the appropriate
@@ -24,5 +24,3 @@ key-value pairs using an Iterator (which are returned as Item type values as
 well). Read-write transactions can also update and delete keys from the DB.
 
 See the examples for more usage details.
-*/
-package badger

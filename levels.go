@@ -999,20 +999,14 @@ func containsPrefix(table *table.Table, prefix []byte) bool {
 		// In table iterator's Seek, we assume that key has version in last 8 bytes. We set
 		// version=0 (ts=math.MaxUint64), so that we don't skip the key prefixed with prefix.
 		ti.Seek(y.KeyWithTs(prefix, math.MaxUint64))
-		if bytes.HasPrefix(ti.Key(), prefix) {
-			return true
-		}
-		return false
+		return bytes.HasPrefix(ti.Key(), prefix)
 	}
 
 	if bytes.Compare(prefix, smallValue) > 0 &&
 		bytes.Compare(prefix, largeValue) < 0 {
 		// There may be a case when table contains [0x0000,...., 0xffff]. If we are searching for
 		// k=0x0011, we should not directly infer that k is present. It may not be present.
-		if !isPresent() {
-			return false
-		}
-		return true
+		return isPresent()
 	}
 
 	return false
