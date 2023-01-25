@@ -971,7 +971,7 @@ func BenchmarkReadWrite(b *testing.B) {
 
 				db, err := Open(getTestOptions(dir))
 				y.Check(err)
-
+				defer db.Close()
 				vl := &db.vlog
 				b.ResetTimer()
 

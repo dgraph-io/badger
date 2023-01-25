@@ -25,8 +25,8 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
+	"github.com/klauspost/compress/s2"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v3/fb"
@@ -513,9 +513,9 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		sz := snappy.MaxEncodedLen(len(data))
+		sz := s2.MaxEncodedLen(len(data))
 		dst := b.alloc.Allocate(sz)
-		return snappy.Encode(dst, data), nil
+		return s2.EncodeSnappy(dst, data), nil
 	case options.ZSTD:
 		sz := y.ZSTDCompressBound(len(data))
 		dst := b.alloc.Allocate(sz)
