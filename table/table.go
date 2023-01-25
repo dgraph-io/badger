@@ -32,7 +32,8 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/snappy"
+	"github.com/klauspost/compress/snappy"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v3/fb"
@@ -848,6 +849,11 @@ func (t *Table) decompress(b *block) error {
 		}
 	case options.ZSTD:
 		sz := int(float64(t.opt.BlockSize) * 1.2)
+		// Get frame content size from header.
+		var hdr zstd.Header
+		if err := hdr.Decode(b.data); err == nil && hdr.HasFCS && hdr.FrameContentSize < uint64(t.opt.BlockSize*2) {
+			sz = int(hdr.FrameContentSize)
+		}
 		dst = z.Calloc(sz, "Table.Decompress")
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {

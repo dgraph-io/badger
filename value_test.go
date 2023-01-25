@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v3/y"
-	humanize "github.com/dustin/go-humanize"
+	"github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
 )
 
@@ -977,6 +977,7 @@ func BenchmarkReadWrite(b *testing.B) {
 				opts := getTestOptions(dir)
 				opts.ValueThreshold = 0
 				db, err := Open(opts)
+				defer db.Close()
 				y.Check(err)
 
 				vl := &db.vlog
