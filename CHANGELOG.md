@@ -3,6 +3,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.2103.5] - 2022-12-15
+
+We release Badger CLI tool binaries for amd64 and now arm64. This release does not involve any core code changes to Badger. We added a CD job for building Badger for arm64.
+
+## [3.2103.4] - 2022-11-04
+
+This patches an issue that could lead to manifest corruption. Fix was merged in (#1756). Addresses this issue on Discuss and this issue on Badger. We also bring the release branch to parity with main by updating the CI/CD jobs, Readme, Codeowners, PR and issue templates, etc.
+
+### Fixed
+  - fix(manifest): fix manifest corruption due to race condition in concurrent compactions (#1756)
+
+### Chores
+  - Add CI/CD jobs to release branch
+  - Add PR and Issue templates to release branch
+  - Update Codeowners in release branch
+  - Update Readme in release branch
+
+## [3.2103.3] - 2022-10-15
+
+This is a minor patch release that fixes arm64 related issues. The issues in the `z` package in Ristretto were resolved in Ristretto v0.1.1.
+
+### Fixed
+  - fix(arm64): bump ristretto v0.1.0 --> v0.1.1 (#1806)
+
+## [3.2103.2] - 2021-10-07
+
+### Fixed
+  - fix(compact): close vlog after the compaction at L0 has been completed (#1752)
+  - fix(builder): put the upper limit on reallocation (#1748)
+  - deps: Bump github.com/google/flatbuffers to v1.12.1 (#1746)
+  - fix(levels): Avoid a deadlock when acquiring read locks in levels (#1744)
+  - fix(pubsub): avoid deadlock in publisher and subscriber (#1749) (#1751)
+
 ## [3.2103.1] - 2021-07-08
 
 ### Fixed
