@@ -4,10 +4,12 @@ on:
     branches:
       - main
       - release/v3.2103
+      - release/v4.0
   pull_request:
     branches:
       - main
       - release/v3.2103
+      - release/v4.0
   schedule:
     - cron: "*/30 * * * *"
 jobs:
