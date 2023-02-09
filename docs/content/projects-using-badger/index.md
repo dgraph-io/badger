@@ -53,10 +53,4 @@ Below is a list of known projects that use Badger:
 * [smallstep/certificates](https://github.com/smallstep/certificates) - Step-ca is an online certificate authority for secure, automated certificate management.
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 
-
-
-
-
-
-
 If you are using Badger in a project please send a pull request to add it to the list.
