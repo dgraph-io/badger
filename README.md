@@ -42,19 +42,22 @@ For more details on our version naming schema please read [Choosing a version](#
 [Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
 
 ## Table of Contents
- * [Getting Started](#getting-started)
-    + [Installing](#installing)
+- [BadgerDB](#badgerdb)
+  - [Project Status](#project-status)
+  - [Table of Contents](#table-of-contents)
+  - [Getting Started](#getting-started)
+    - [Installing](#installing)
       - [Installing Badger Command Line Tool](#installing-badger-command-line-tool)
       - [Choosing a version](#choosing-a-version)
-  * [Badger Documentation](#badger-documentation)
-  * [Resources](#resources)
-    + [Blog Posts](#blog-posts)
-  * [Design](#design)
-    + [Comparisons](#comparisons)
-    + [Benchmarks](#benchmarks)
-  * [Projects Using Badger](#projects-using-badger)
-  * [Contributing](#contributing)
-  * [Contact](#contact)
+  - [Badger Documentation](#badger-documentation)
+  - [Resources](#resources)
+    - [Blog Posts](#blog-posts)
+  - [Design](#design)
+    - [Comparisons](#comparisons)
+    - [Benchmarks](#benchmarks)
+  - [Projects Using Badger](#projects-using-badger)
+  - [Contributing](#contributing)
+  - [Contact](#contact)
 
 ## Getting Started
 
@@ -176,7 +179,6 @@ Below is a list of known projects that use Badger:
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
-* [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
@@ -211,6 +213,9 @@ Below is a list of known projects that use Badger:
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 * [Opacity](https://github.com/opacity/storage-node) - Backend implementation for the Opacity storage project
 * [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
+* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
+* [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
+* [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
@@ -219,6 +224,6 @@ If you are using Badger in a project please send a pull request to add it to the
 If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING.md).
 
 ## Contact
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for filing bugs or feature requests.
+- Please use [Github issues](https://github.com/dgraph-io/badger/issues) for filing bugs.
+- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, discussions, and feature requests.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
