@@ -476,7 +476,8 @@ func (opt Options) WithBaseTableSize(val int64) Options {
 //
 // LevelSizeMultiplier sets the ratio between the maximum sizes of contiguous levels in the LSM.
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
-//  triggered.
+//
+//	triggered.
 //
 // The default value of LevelSizeMultiplier is 10.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
@@ -514,7 +515,7 @@ func (opt Options) WithValueThreshold(val int64) Options {
 // and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
 // [ValueThreshold, Options.maxValueThreshold]
 //
-// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
+// # Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
 //
 // The default value of VLogPercentile is 0.0.
 func (opt Options) WithVLogPercentile(t float64) Options {
@@ -652,8 +653,7 @@ func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 // block will be compressed using the specified algorithm.  This option doesn't affect existing
 // tables. Only the newly created tables will be compressed.
 //
-// The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
-// snappy. Compression is enabled by default.
+// The default compression algorithm used is snappy. Compression is enabled by default.
 func (opt Options) WithCompression(cType options.CompressionType) Options {
 	opt.Compression = cType
 	return opt
