@@ -104,7 +104,7 @@ func TestManifestMagic(t *testing.T) {
 }
 
 func TestManifestVersion(t *testing.T) {
-	helpTestManifestFileCorruption(t, 4, "unsupported version")
+	helpTestManifestFileCorruption(t, 6, "unsupported version")
 }
 
 func TestManifestChecksum(t *testing.T) {
@@ -215,7 +215,7 @@ func TestManifestRewrite(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 	deletionsThreshold := 10
-	mf, m, err := helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
+	mf, m, err := helpOpenOrCreateManifestFile(dir, false, 0, deletionsThreshold)
 	defer func() {
 		if mf != nil {
 			mf.close()
@@ -241,7 +241,7 @@ func TestManifestRewrite(t *testing.T) {
 	err = mf.close()
 	require.NoError(t, err)
 	mf = nil
-	mf, m, err = helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
+	mf, m, err = helpOpenOrCreateManifestFile(dir, false, 0, deletionsThreshold)
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]TableManifest{
 		uint64(deletionsThreshold * 3): {Level: 0},
@@ -260,7 +260,7 @@ func TestConcurrentManifestCompaction(t *testing.T) {
 		return f.Sync()
 	}
 
-	mf, _, err := helpOpenOrCreateManifestFile(dir, false, 0)
+	mf, _, err := helpOpenOrCreateManifestFile(dir, false, 0, 0)
 	require.NoError(t, err)
 
 	cs := &pb.ManifestChangeSet{}
