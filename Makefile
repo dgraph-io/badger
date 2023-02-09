@@ -50,7 +50,6 @@ jemalloc:
 dependency:
 	@echo "Installing dependencies..."
 	@sudo apt-get update
-	@sudo apt-get -y upgrade
 	@sudo apt-get -y install \
     	ca-certificates \
     	curl \
