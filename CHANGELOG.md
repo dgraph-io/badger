@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.2103.5] - 2022-12-15
+
+We release Badger CLI tool binaries for amd64 and now arm64. This release does not involve any core code changes to Badger. We add a CD job for building Badger for arm64.
+
+## [3.2103.4] - 2022-11-04
+
+### Fixed
+  - fix(manifest): fix manifest corruption due to race condition in concurrent compactions (#1756)
+
+### Chores
+  - We bring the release branch to parity with main by updating the CI/CD jobs, Readme, Codeowners, PR and issue templates, etc.
+
 ## [3.2103.3] - 2022-10-14
 
 ### Remarks

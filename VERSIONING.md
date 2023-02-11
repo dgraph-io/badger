@@ -43,5 +43,5 @@ For more background on our decision to adopt Serialization Versioning, read the 
 [Semantic Versioning, Go Modules, and Databases][blog] and the original proposal on
 [this comment on Dgraph's Discuss forum][discuss].
 
-[blog]: https://blog.dgraph.io/post/serialization-versioning/
+[blog]: https://open.dgraph.io/post/serialization-versioning/
 [discuss]: https://discuss.dgraph.io/t/go-modules-on-badger-and-dgraph/4662/7

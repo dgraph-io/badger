@@ -131,3 +131,12 @@ Badger does not directly use CGO but it relies on https://github.com/DataDog/zst
 zstd compression and the library requires `gcc/cgo`. You can build badger without cgo by running
 `CGO_ENABLED=0 go build`. This will build badger without the support for ZSTD compression algorithm.
 
+As of Badger versions [v2.2007.4](https://github.com/dgraph-io/badger/releases/tag/v2.2007.4) and
+[v3.2103.1](https://github.com/dgraph-io/badger/releases/tag/v3.2103.1) the DataDog ZSTD library
+was replaced by pure Golang version and CGO is no longer required. The new library is
+[backwards compatible in nearly all cases](https://discuss.dgraph.io/t/use-pure-go-zstd-implementation/8670/10):
+
+	> Yes they are compatible both ways. The only exception is 0 bytes of input which will give
+	> 0 bytes output with the Go zstd. But you already have the zstd.WithZeroFrames(true) which
+	> will wrap 0 bytes in a header so it can be fed to DD zstd. This will of course only be relevant
+	> when downgrading.
