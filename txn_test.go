@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestTxnSimple(t *testing.T) {

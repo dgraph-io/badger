@@ -21,12 +21,13 @@ import (
 	"fmt"
 	"sync"
 
+	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 )
 
 // StreamWriter is used to write data coming from multiple streams. The streams must not have any

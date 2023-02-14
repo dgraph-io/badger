@@ -24,10 +24,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
+
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
 )
 
 const batchSize = 16 << 20 // 16 MB

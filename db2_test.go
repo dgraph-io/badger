@@ -34,13 +34,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v3/options"
+	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTruncateVlogWithClose(t *testing.T) {

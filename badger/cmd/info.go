@@ -27,14 +27,14 @@ import (
 	"strings"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/spf13/cobra"
 )
 
 type flagOptions struct {

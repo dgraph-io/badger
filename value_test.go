@@ -28,9 +28,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v3/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 func TestDynamicValueThreshold(t *testing.T) {

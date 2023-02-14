@@ -30,13 +30,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pkg/errors"
 	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/pkg/errors"
 )
 
 type levelsController struct {

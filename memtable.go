@@ -34,11 +34,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/pkg/errors"
 )
 
 // memTable structure stores a skiplist and a corresponding WAL. Writes to memTable are written

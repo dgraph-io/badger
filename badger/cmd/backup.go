@@ -21,8 +21,9 @@ import (
 	"math"
 	"os"
 
-	"github.com/dgraph-io/badger/v3"
 	"github.com/spf13/cobra"
+
+	"github.com/dgraph-io/badger/v3"
 )
 
 var bo = struct {
