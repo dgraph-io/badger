@@ -30,9 +30,10 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/pkg/errors"
 )
 
 var (

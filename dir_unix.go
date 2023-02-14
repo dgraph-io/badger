@@ -25,8 +25,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dgraph-io/badger/v3/y"
 	"golang.org/x/sys/unix"
+
+	"github.com/dgraph-io/badger/v3/y"
 )
 
 // directoryLockGuard holds a lock on a directory and a pid file inside.  The pid file isn't part

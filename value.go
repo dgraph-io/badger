@@ -32,10 +32,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/v3/y"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 	otrace "go.opencensus.io/trace"
+
+	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of

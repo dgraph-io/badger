@@ -30,10 +30,11 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash"
+	"github.com/stretchr/testify/require"
+
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto"
-	"github.com/stretchr/testify/require"
 )
 
 func key(prefix string, i int) string {

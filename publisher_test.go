@@ -18,12 +18,12 @@ package badger
 import (
 	"context"
 	"fmt"
-	"github.com/pkg/errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v3/pb"

@@ -31,6 +31,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
+
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/skl"
@@ -38,8 +41,6 @@ import (
 	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 )
 
 var (

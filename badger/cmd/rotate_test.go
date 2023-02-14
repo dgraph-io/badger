@@ -22,9 +22,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dgraph-io/badger/v3"
 	"github.com/dgraph-io/badger/v3/y"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRotate(t *testing.T) {

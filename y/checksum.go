@@ -19,10 +19,10 @@ package y
 import (
 	"hash/crc32"
 
-	"github.com/dgraph-io/badger/v3/pb"
-
 	"github.com/cespare/xxhash"
 	"github.com/pkg/errors"
+
+	"github.com/dgraph-io/badger/v3/pb"
 )
 
 // ErrChecksumMismatch is returned at checksum mismatch.
