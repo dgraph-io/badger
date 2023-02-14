@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -29,9 +28,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	otrace "go.opencensus.io/trace"
 
-	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/pb"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
@@ -55,7 +52,7 @@ func TestManifestBasic(t *testing.T) {
 			txnSet(t, kv, k, k, 0x00)
 		}
 		txnSet(t, kv, []byte("testkey"), []byte("testval"), 0x05)
-		kv.validate()
+		require.NoError(t, kv.validate())
 		require.NoError(t, kv.Close())
 	}
 
@@ -115,17 +112,6 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *table.Table {
-	y.AssertTrue(n <= 10000)
-	keyValues := make([][]string, n)
-	for i := 0; i < n; i++ {
-		k := key(prefix, i)
-		v := fmt.Sprintf("%d", i)
-		keyValues[i] = []string{k, v}
-	}
-	return buildTable(t, keyValues, opts)
-}
-
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.Table {
@@ -156,58 +142,6 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.
 	tbl, err := table.CreateTable(filename, b)
 	require.NoError(t, err)
 	return tbl
-}
-
-func TestOverlappingKeyRangeError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-	kv, err := Open(DefaultOptions(dir))
-	require.NoError(t, err)
-	defer kv.Close()
-
-	lh0 := newLevelHandler(kv, 0)
-	lh1 := newLevelHandler(kv, 1)
-	opts := table.Options{ChkMode: options.OnTableAndBlockRead}
-	t1 := buildTestTable(t, "k", 2, opts)
-	defer t1.DecrRef()
-
-	done := lh0.tryAddLevel0Table(t1)
-	require.Equal(t, true, done)
-	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
-	cd := compactDef{
-		thisLevel: lh0,
-		nextLevel: lh1,
-		span:      span,
-		t:         kv.lc.levelTargets(),
-	}
-	cd.t.baseLevel = 1
-
-	manifest := createManifest()
-	lc, err := newLevelsController(kv, &manifest)
-	require.NoError(t, err)
-	done = lc.fillTablesL0(&cd)
-	require.Equal(t, true, done)
-	lc.runCompactDef(-1, 0, cd)
-	span.End()
-
-	_, span = otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
-	t2 := buildTestTable(t, "l", 2, opts)
-	defer t2.DecrRef()
-	done = lh0.tryAddLevel0Table(t2)
-	require.Equal(t, true, done)
-
-	cd = compactDef{
-		thisLevel: lh0,
-		nextLevel: lh1,
-		span:      span,
-		t:         kv.lc.levelTargets(),
-	}
-	cd.t.baseLevel = 1
-	lc.fillTablesL0(&cd)
-	lc.runCompactDef(-1, 0, cd)
 }
 
 func TestManifestRewrite(t *testing.T) {

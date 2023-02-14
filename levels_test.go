@@ -131,7 +131,7 @@ func TestCheckOverlap(t *testing.T) {
 }
 
 func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
-	db.View(func(txn *Txn) error {
+	require.NoError(t, db.View(func(txn *Txn) error {
 		opt := DefaultIteratorOptions
 		opt.AllVersions = true
 		opt.InternalAccess = true
@@ -157,8 +157,7 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 		}
 		require.Equal(t, len(expected), i, "keys examined should be equal to keys expected")
 		return nil
-	})
-
+	}))
 }
 
 func TestCompaction(t *testing.T) {
@@ -783,7 +782,7 @@ func TestL1Stall(t *testing.T) {
 		go func() {
 			tab := createEmptyTable(db)
 			require.NoError(t, db.lc.addLevel0Table(tab))
-			tab.DecrRef()
+			require.NoError(t, tab.DecrRef())
 			done <- true
 		}()
 		time.Sleep(time.Second)
@@ -792,7 +791,7 @@ func TestL1Stall(t *testing.T) {
 		// Drop two tables from Level 0 so that addLevel0Table can make progress. Earlier table
 		// count was 4 which is equal to L0 stall count.
 		toDrop := db.lc.levels[0].tables[:2]
-		decrRefs(toDrop)
+		require.NoError(t, decrRefs(toDrop))
 		db.lc.levels[0].tables = db.lc.levels[0].tables[2:]
 		db.lc.levels[0].Unlock()
 
@@ -849,7 +848,7 @@ func TestL0Stall(t *testing.T) {
 		go func() {
 			tab := createEmptyTable(db)
 			require.NoError(t, db.lc.addLevel0Table(tab))
-			tab.DecrRef()
+			require.NoError(t, tab.DecrRef())
 			done <- true
 		}()
 		// Let it stall for a second.
@@ -1024,7 +1023,7 @@ func TestKeyVersions(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
 				writer := db.newWriteBatch(false)
 				for i := 0; i < 10; i++ {
-					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
 				require.Equal(t, 2, len(db.Ranges(nil, 10000)))
@@ -1034,7 +1033,7 @@ func TestKeyVersions(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
 				writer := db.newWriteBatch(false)
 				for i := 0; i < 100000; i++ {
-					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
 				require.Equal(t, 11, len(db.Ranges(nil, 10000)))
@@ -1044,7 +1043,7 @@ func TestKeyVersions(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
 				writer := db.newWriteBatch(false)
 				for i := 0; i < 10000; i++ {
-					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
 				require.Equal(t, 1, len(db.Ranges([]byte("a"), 10000)))
@@ -1151,7 +1150,7 @@ func TestTableContainsPrefix(t *testing.T) {
 	}
 
 	tbl := buildTable([]string{"key1", "key3", "key31", "key32", "key4"})
-	defer tbl.DecrRef()
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
 
 	require.True(t, containsPrefix(tbl, []byte("key")))
 	require.True(t, containsPrefix(tbl, []byte("key1")))

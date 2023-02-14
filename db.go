@@ -49,10 +49,6 @@ var (
 	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces.
 )
 
-const (
-	maxNumSplits = 128
-)
-
 type closers struct {
 	updateSize  *z.Closer
 	compactors  *z.Closer
@@ -1872,7 +1868,10 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	}
 
 	c := z.NewCloser(1)
-	s := db.pub.newSubscriber(c, matches)
+	s, err := db.pub.newSubscriber(c, matches)
+	if err != nil {
+		return y.Wrapf(err, "while creating a new subscriber")
+	}
 	slurp := func(batch *pb.KVList) error {
 		for {
 			select {
@@ -1926,11 +1925,6 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	}
 }
 
-// shouldEncrypt returns bool, which tells whether to encrypt or not.
-func (db *DB) shouldEncrypt() bool {
-	return len(db.opt.EncryptionKey) > 0
-}
-
 func (db *DB) syncDir(dir string) error {
 	if db.opt.InMemory {
 		return nil
@@ -1971,7 +1965,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	defer outDB.Close()
 	writer := outDB.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
-		y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+		return y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 
 	// Stream contents of DB to the output DB.

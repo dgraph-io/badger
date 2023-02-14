@@ -65,20 +65,20 @@ func TestTrieDelete(t *testing.T) {
 
 	t.Logf("Num nodes: %d", numNodes(trie.root))
 
-	trie.Delete([]byte("hello"), 4)
+	require.NoError(t, trie.Delete([]byte("hello"), 4))
 	t.Logf("Num nodes: %d", numNodes(trie.root))
 
 	require.Equal(t, map[uint64]struct{}{5: {}, 1: {}, 3: {}}, trie.Get([]byte("hello")))
 
-	trie.Delete(nil, 5)
+	require.NoError(t, trie.Delete(nil, 5))
 	t.Logf("Num nodes: %d", numNodes(trie.root))
 	require.Equal(t, map[uint64]struct{}{1: {}, 3: {}}, trie.Get([]byte("hello")))
 
-	trie.Delete([]byte("hello"), 1)
-	trie.Delete([]byte("hello"), 3)
-	trie.Delete([]byte("hello"), 4)
-	trie.Delete([]byte("hello"), 5)
-	trie.Delete([]byte("hello"), 6)
+	require.NoError(t, trie.Delete([]byte("hello"), 1))
+	require.NoError(t, trie.Delete([]byte("hello"), 3))
+	require.NoError(t, trie.Delete([]byte("hello"), 4))
+	require.NoError(t, trie.Delete([]byte("hello"), 5))
+	require.NoError(t, trie.Delete([]byte("hello"), 6))
 
 	require.Equal(t, 1, numNodes(trie.root))
 	t.Logf("Num nodes: %d", numNodes(trie.root))

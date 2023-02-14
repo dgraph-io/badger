@@ -148,8 +148,6 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	return mt, y.Wrapf(err, "while updating skiplist")
 }
 
-var errExpectingNewFile = errors.New("Expecting to create a new file, but found an existing file")
-
 func (db *DB) newMemTable() (*memTable, error) {
 	mt, err := db.openMemTable(db.nextMemFid, os.O_CREATE|os.O_RDWR)
 	if err == z.NewFile {

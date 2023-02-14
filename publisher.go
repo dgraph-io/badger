@@ -117,7 +117,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 	}
 }
 
-func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) subscriber {
+func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (subscriber, error) {
 	p.Lock()
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
@@ -134,9 +134,11 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) subscriber {
 	}
 	p.subscribers[id] = s
 	for _, m := range matches {
-		p.indexer.AddMatch(m, id)
+		if err := p.indexer.AddMatch(m, id); err != nil {
+			return subscriber{}, err
+		}
 	}
-	return s
+	return s, nil
 }
 
 // cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB.
@@ -145,7 +147,7 @@ func (p *publisher) cleanSubscribers() {
 	defer p.Unlock()
 	for id, s := range p.subscribers {
 		for _, m := range s.matches {
-			p.indexer.DeleteMatch(m, id)
+			_ = p.indexer.DeleteMatch(m, id)
 		}
 		delete(p.subscribers, id)
 		s.subCloser.SignalAndWait()
@@ -157,7 +159,7 @@ func (p *publisher) deleteSubscriber(id uint64) {
 	defer p.Unlock()
 	if s, ok := p.subscribers[id]; ok {
 		for _, m := range s.matches {
-			p.indexer.DeleteMatch(m, id)
+			_ = p.indexer.DeleteMatch(m, id)
 		}
 	}
 	delete(p.subscribers, id)

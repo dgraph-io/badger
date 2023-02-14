@@ -67,7 +67,7 @@ func flatten(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if fo.compressionType < 0 || fo.compressionType > 2 {
+	if fo.compressionType > 2 {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}

@@ -112,10 +112,10 @@ func TestPublisherOrdering(t *testing.T) {
 		}()
 		subWg.Wait()
 		for i := 0; i < 5; i++ {
-			db.Update(func(txn *Txn) error {
+			require.NoError(t, db.Update(func(txn *Txn) error {
 				e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
 				return txn.SetEntry(e)
-			})
+			}))
 		}
 		wg.Wait()
 		for i := 0; i < 5; i++ {
@@ -154,12 +154,12 @@ func TestMultiplePrefix(t *testing.T) {
 			}
 		}()
 		subWg.Wait()
-		db.Update(func(txn *Txn) error {
+		require.NoError(t, db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
-		})
-		db.Update(func(txn *Txn) error {
+		}))
+		require.NoError(t, db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte("hello"), []byte("badger")))
-		})
+		}))
 		wg.Wait()
 	})
 }
