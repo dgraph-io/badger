@@ -809,7 +809,7 @@ func (t *Table) decompress(b *block) error {
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = z.Calloc(sz, "Table.Decompress")
 		} else {
-			dst = z.Calloc(len(b.data) * 4, "Table.Decompress") // Take a guess.
+			dst = z.Calloc(len(b.data)*4, "Table.Decompress") // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {

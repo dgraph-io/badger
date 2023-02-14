@@ -514,7 +514,7 @@ func (opt Options) WithValueThreshold(val int64) Options {
 // and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
 // [ValueThreshold, Options.maxValueThreshold]
 //
-// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
+// # Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
 //
 // The default value of VLogPercentile is 0.0.
 func (opt Options) WithVLogPercentile(t float64) Options {

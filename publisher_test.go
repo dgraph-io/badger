@@ -40,7 +40,6 @@ func TestPublisherDeadlock(t *testing.T) {
 		var firstUpdate sync.WaitGroup
 		firstUpdate.Add(1)
 
-
 		var subDone sync.WaitGroup
 		subDone.Add(1)
 		go func() {
@@ -61,7 +60,7 @@ func TestPublisherDeadlock(t *testing.T) {
 				return txn.SetEntry(e)
 			})
 			require.NoError(t, err)
-		} ()
+		}()
 
 		firstUpdate.Wait()
 		req := int64(0)
