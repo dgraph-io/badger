@@ -1,5 +1,6 @@
 run:
-  tests: false
+  skip-dirs:
+  skip-files:
 
 linters-settings:
   lll:
@@ -8,14 +9,13 @@ linters-settings:
 linters:
   disable-all: true
   enable:
-#   - errcheck
-#   - ineffassign
-#   - gas
+  #  - errcheck
+  #  - ineffassign
+  #  - gas
     - gofmt
-#   - golint
-    - gosimple
-    - govet
-    - lll
-#   - varcheck
-#   - unused
-#   - gosec
+  #  - gosimple
+  #  - govet
+  #  - lll
+  #  - unused
+  #  - staticcheck
+    - goimports
