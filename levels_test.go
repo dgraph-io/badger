@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -40,7 +41,15 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		BloomFalsePositive: db.opt.BloomFalsePositive,
 		ChkMode:            options.NoVerification,
 	}
-	b := table.NewTableBuilder(opts)
+	createAndOpenWithOptions(db, td, level, &opts)
+}
+
+func createAndOpenWithOptions(db *DB, td []keyValVersion, level int, opts *table.Options) {
+	if opts == nil {
+		bopts := buildTableOptions(db)
+		opts = &bopts
+	}
+	b := table.NewTableBuilder(*opts)
 	defer b.Close()
 
 	// Add all keys and versions to the table.
@@ -49,13 +58,21 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
 		b.Add(key, val, 0)
 	}
-	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
-	tab, err := table.CreateTable(fname, b)
+	fileID := db.lc.reserveFileID()
+	var tab *table.Table
+	var err error
+	if db.opt.InMemory {
+		data := b.Finish()
+		tab, err = table.OpenInMemoryTable(data, fileID, opts)
+	} else {
+		fname := table.NewFilename(fileID, db.opt.Dir)
+		tab, err = table.CreateTable(fname, b)
+	}
 	if err != nil {
 		panic(err)
 	}
 	if err := db.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+		newCreateChange(tab.ID(), level, tab.KeyID(), tab.CompressionType()),
 	}); err != nil {
 		panic(err)
 	}
@@ -1219,5 +1236,87 @@ func TestStaleDataCleanup(t *testing.T) {
 
 		require.Zero(t, lh.getTotalStaleSize())
 
+	})
+}
+
+func TestStreamWithFullCopy(t *testing.T) {
+	dbopts := DefaultOptions("")
+	dbopts.managedTxns = true
+	dbopts.MaxLevels = 7
+	dbopts.NumVersionsToKeep = math.MaxInt32
+
+	encKey := make([]byte, 24)
+	_, err := rand.Read(encKey)
+	require.NoError(t, err)
+
+	test := func(db *DB, outOpts Options) {
+		l4 := []keyValVersion{{"a", "1", 3, bitDelete}, {"d", "4", 3, 0}}
+		l5 := []keyValVersion{{"b", "2", 2, 0}}
+		l6 := []keyValVersion{{"a", "1", 2, 0}, {"c", "3", 1, 0}}
+		createAndOpenWithOptions(db, l4, 4, nil)
+		createAndOpenWithOptions(db, l5, 5, nil)
+		createAndOpenWithOptions(db, l6, 6, nil)
+
+		if !outOpts.InMemory {
+			dir, err := ioutil.TempDir("", "badger-test")
+			require.NoError(t, err)
+			defer removeDir(dir)
+			outOpts.Dir = dir
+			outOpts.ValueDir = dir
+		}
+
+		require.NoError(t, db.StreamDB(outOpts))
+		out, err := Open(outOpts)
+		require.NoError(t, err)
+		defer func() {
+			require.NoError(t, out.Close())
+		}()
+		err = out.View(func(txn *Txn) error {
+			// Key "a" should not be there because we deleted it at higher version.
+			_, err := txn.Get([]byte("a"))
+			require.Error(t, err)
+			require.Equal(t, err, ErrKeyNotFound)
+			_, err = txn.Get([]byte("b"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("c"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("d"))
+			require.NoError(t, err)
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	t.Run("without encryption", func(t *testing.T) {
+		opts := dbopts
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(db, opts)
+		})
+	})
+	t.Run("with encryption", func(t *testing.T) {
+		opts := dbopts
+		opts.IndexCacheSize = 1 << 20
+		opts.BlockCacheSize = 1 << 20
+		// Set it to zero so that we have more than one data keys.
+		opts.EncryptionKey = encKey
+		opts.EncryptionKeyRotationDuration = 0
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(db, opts)
+			require.Greater(t, len(db.registry.dataKeys), 1)
+		})
+	})
+	t.Run("stream from in-memory to persistent", func(t *testing.T) {
+		opts := dbopts
+		opts.IndexCacheSize = 1 << 20
+		opts.BlockCacheSize = 1 << 20
+		opts.InMemory = true
+		// Set it to zero so that we have more than one data keys.
+		opts.EncryptionKey = encKey
+		opts.EncryptionKeyRotationDuration = 0
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			outOpts := opts
+			outOpts.InMemory = false
+			test(db, outOpts)
+			require.Greater(t, len(db.registry.dataKeys), 1)
+		})
 	})
 }
