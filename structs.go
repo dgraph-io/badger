@@ -174,6 +174,7 @@ func (e *Entry) skipVlogAndSetThreshold(threshold int64) bool {
 	return int64(len(e.Value)) < e.valThreshold
 }
 
+//nolint:unused
 func (e Entry) print(prefix string) {
 	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d",
 		prefix, e.Key, e.meta, e.UserMeta, e.offset, len(e.Value))

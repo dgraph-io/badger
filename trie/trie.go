@@ -69,7 +69,7 @@ func parseIgnoreBytes(ig string) ([]bool, error) {
 		if len(r) == 0 || len(r) > 2 {
 			return out, fmt.Errorf("Invalid range: %s", each)
 		}
-		start, end := -1, -1
+		start, end := -1, -1 //nolint:ineffassign
 		if len(r) == 2 {
 			idx, err := strconv.Atoi(strings.TrimSpace(r[1]))
 			if err != nil {

@@ -181,7 +181,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	defer func() {
 		// The outList variable changes. So, we need to evaluate the variable in the defer. DO NOT
 		// call `defer outList.Release()`.
-		outList.Release()
+		_ = outList.Release()
 	}()
 
 	iterate := func(kr keyRange) error {
@@ -295,7 +295,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	now := time.Now()
 
 	sendBatch := func(batch *z.Buffer) error {
-		defer batch.Release()
+		defer func() { _ = batch.Release() }()
 		sz := uint64(batch.LenNoPadding())
 		if sz == 0 {
 			return nil
@@ -432,7 +432,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	defer func() {
 		// If due to some error, we have buffers left in kvChan, we should release them.
 		for buf := range st.kvChan {
-			buf.Release()
+			_ = buf.Release()
 		}
 	}()
 

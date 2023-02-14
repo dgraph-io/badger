@@ -610,7 +610,7 @@ func TestGetMore(t *testing.T) {
 			}
 			require.NoError(t, txn.Commit())
 		}
-		db.validate()
+		require.NoError(t, db.validate())
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				// Display some progress. Right now, it's not very fast with no caching.
@@ -643,7 +643,7 @@ func TestExistsMore(t *testing.T) {
 			}
 			require.NoError(t, txn.Commit())
 		}
-		db.validate()
+		require.NoError(t, db.validate())
 
 		for i := 0; i < n; i++ {
 			if (i % 1000) == 0 {
@@ -673,7 +673,7 @@ func TestExistsMore(t *testing.T) {
 			}
 			require.NoError(t, txn.Commit())
 		}
-		db.validate()
+		require.NoError(t, db.validate())
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				// Display some progress. Right now, it's not very fast with no caching.
@@ -1231,7 +1231,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 		opts.PrefetchValues = false
 
 		// Verify that there are 4 versions, and record 3rd version (2nd from top in iteration)
-		db.View(func(txn *Txn) error {
+		require.NoError(t, db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			defer it.Close()
 			var count int
@@ -1245,7 +1245,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 			}
 			require.Equal(t, 4, count)
 			return nil
-		})
+		}))
 
 		// Set new version and discard older ones.
 		err := db.Update(func(txn *Txn) error {
@@ -1255,7 +1255,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 
 		// Verify that there are only 2 versions left, and versions
 		// below ts have been deleted.
-		db.View(func(txn *Txn) error {
+		require.NoError(t, db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			defer it.Close()
 			var count int
@@ -1269,7 +1269,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 			}
 			require.Equal(t, 1, count)
 			return nil
-		})
+		}))
 	})
 }
 
@@ -1478,7 +1478,7 @@ func TestGetSetDeadlock(t *testing.T) {
 	timeout, done := time.After(10*time.Second), make(chan bool)
 
 	go func() {
-		db.Update(func(txn *Txn) error {
+		require.NoError(t, db.Update(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
 			err = item.Value(nil) // This take a RLock on file
@@ -1488,7 +1488,7 @@ func TestGetSetDeadlock(t *testing.T) {
 			require.NoError(t, txn.SetEntry(NewEntry(key, val)))
 			require.NoError(t, txn.SetEntry(NewEntry([]byte("key2"), val)))
 			return nil
-		})
+		}))
 		done <- true
 	}()
 
@@ -1818,9 +1818,9 @@ func TestMinReadTs(t *testing.T) {
 		db.orc.readMark.Done(uint64(20)) // Because we called readTs.
 
 		for i := 0; i < 10; i++ {
-			db.View(func(txn *Txn) error {
+			require.NoError(t, db.View(func(txn *Txn) error {
 				return nil
-			})
+			}))
 		}
 		time.Sleep(time.Millisecond)
 		require.Equal(t, uint64(20), db.orc.readMark.DoneUntil())
@@ -2089,7 +2089,7 @@ func TestVerifyChecksum(t *testing.T) {
 			st := 0
 
 			buf := z.NewBuffer(10<<20, "test")
-			defer buf.Release()
+			defer func() { require.NoError(t, buf.Release()) }()
 			for i := 0; i < 1000; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(i))
@@ -2153,12 +2153,12 @@ func TestWriteInemory(t *testing.T) {
 			item, err := txn.Get([]byte(fmt.Sprintf("key%d", j)))
 			require.NoError(t, err)
 			expected := []byte(fmt.Sprintf("val%d", j))
-			item.Value(func(val []byte) error {
+			require.NoError(t, item.Value(func(val []byte) error {
 				require.Equal(t, expected, val,
 					"Invalid value for key %q. expected: %q, actual: %q",
 					item.Key(), expected, val)
 				return nil
-			})
+			}))
 		}
 		return nil
 	})
@@ -2242,7 +2242,7 @@ func TestOpenDBReadOnly(t *testing.T) {
 	var count int
 	read := func() {
 		count = 0
-		db.View(func(txn *Txn) error {
+		require.NoError(t, db.View(func(txn *Txn) error {
 			it := txn.NewIterator(DefaultIteratorOptions)
 			defer it.Close()
 			for it.Rewind(); it.Valid(); it.Next() {
@@ -2254,7 +2254,7 @@ func TestOpenDBReadOnly(t *testing.T) {
 				count++
 			}
 			return nil
-		})
+		}))
 	}
 	read()
 	require.Equal(t, 10, count)

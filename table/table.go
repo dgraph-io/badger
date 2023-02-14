@@ -379,7 +379,7 @@ func (t *Table) initBiggestAndSmallest() error {
 			checksum := &pb.Checksum{}
 			readPos -= checksumLen
 			buf = t.readNoFail(readPos, checksumLen)
-			proto.Unmarshal(buf, checksum)
+			_ = proto.Unmarshal(buf, checksum)
 			fmt.Fprintf(&debugBuf, "checksum: %+v ", checksum)
 
 			// Read index size from the footer.
@@ -828,7 +828,7 @@ func (t *Table) decompress(b *block) error {
 		return errors.New("Unsupported compression type")
 	}
 
-	if b.freeMe == true {
+	if b.freeMe {
 		z.Free(src)
 		b.freeMe = false
 	}

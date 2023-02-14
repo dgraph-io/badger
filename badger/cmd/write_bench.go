@@ -314,7 +314,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	c.SignalAndWait()
-	fmt.Printf(db.LevelsToString())
+	fmt.Println(db.LevelsToString())
 	return err
 }
 
@@ -401,7 +401,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 				humanize.IBytes(uint64(z.NumAllocBytes())))
 
 			if count%10 == 0 {
-				fmt.Printf(db.LevelsToString())
+				fmt.Println(db.LevelsToString())
 			}
 		}
 	}

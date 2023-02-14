@@ -34,7 +34,7 @@ func BenchmarkBuffer(b *testing.B) {
 		b.Run(fmt.Sprintf("page-size-%d", pageSize), func(b *testing.B) {
 			pageBuffer := NewPageBuffer(pageSize)
 			for i := 0; i < b.N; i++ {
-				pageBuffer.Write(btw[:])
+				_, _ = pageBuffer.Write(btw[:])
 			}
 		})
 	})

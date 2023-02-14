@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -53,7 +54,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 			}
 			b := new(request)
 			b.Entries = []*Entry{e1}
-			log.write([]*request{b})
+			require.NoError(t, log.write([]*request{b}))
 		}
 		t.Logf("value threshold is %d \n", log.db.valueThreshold())
 	}
@@ -69,7 +70,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 			}
 			b := new(request)
 			b.Entries = []*Entry{e1}
-			log.write([]*request{b})
+			require.NoError(t, log.write([]*request{b}))
 		}
 		t.Logf("value threshold is %d \n", log.db.valueThreshold())
 	}
@@ -104,7 +105,7 @@ func TestValueBasic(t *testing.T) {
 	b := new(request)
 	b.Entries = []*Entry{e1, e2}
 
-	log.write([]*request{b})
+	require.NoError(t, log.write([]*request{b}))
 	require.Len(t, b.Ptrs, 2)
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
@@ -192,7 +193,7 @@ func TestValueGCManaged(t *testing.T) {
 	}
 
 	db.SetDiscardTs(math.MaxUint32)
-	db.Flatten(3)
+	require.NoError(t, db.Flatten(3))
 
 	for i := 0; i < 100; i++ {
 		// Try at max 100 times to GC even a single value log file.
@@ -241,7 +242,7 @@ func TestValueGC(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf)
+	require.NoError(t, kv.vlog.rewrite(lf))
 	for i := 45; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 
@@ -299,7 +300,7 @@ func TestValueGC2(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf)
+	require.NoError(t, kv.vlog.rewrite(lf))
 	for i := 0; i < 5; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 		require.NoError(t, kv.View(func(txn *Txn) error {
@@ -397,7 +398,7 @@ func TestValueGC3(t *testing.T) {
 	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
-	kv.vlog.rewrite(logFile)
+	require.NoError(t, kv.vlog.rewrite(logFile))
 	it.Next()
 	require.True(t, it.Valid())
 	item = it.Item()
@@ -452,8 +453,8 @@ func TestValueGC4(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf0)
-	kv.vlog.rewrite(lf1)
+	require.NoError(t, kv.vlog.rewrite(lf0))
+	require.NoError(t, kv.vlog.rewrite(lf1))
 
 	require.NoError(t, kv.Close())
 
@@ -812,6 +813,7 @@ func TestPenultimateMemCorruption(t *testing.T) {
 	require.Zero(t, len(db0.imm))
 	db0.imm = append(db0.imm, db0.mt)
 	db0.mt, err = db0.newMemTable()
+	require.NoError(t, err)
 
 	h.writeRange(3, 7) // 00002.mem
 
@@ -826,7 +828,7 @@ func TestPenultimateMemCorruption(t *testing.T) {
 		if i == 1 {
 			// This should corrupt the last entry in the first memtable (that is entry number 2)
 			wal := db0.imm[0].wal
-			wal.Fd.WriteAt([]byte{0}, int64(wal.writeAt-1))
+			_, err = wal.Fd.WriteAt([]byte{0}, int64(wal.writeAt-1))
 			require.NoError(t, err)
 			// We have corrupted the file. We can remove it. If we don't remove
 			// the imm here, the db.close in defer will crash since db0.mt !=
@@ -943,7 +945,9 @@ func TestBug578(t *testing.T) {
 
 		// Run value log GC a few times.
 		for i := 0; i < 5; i++ {
-			db.RunValueLogGC(0.5)
+			if err := db.RunValueLogGC(0.5); err != nil && !errors.Is(ErrNoRewrite, err) {
+				require.NoError(t, err)
+			}
 		}
 		h.readRange(0, 10)
 	}
@@ -980,12 +984,12 @@ func BenchmarkReadWrite(b *testing.B) {
 
 					var ptrs []valuePointer
 
-					vl.write([]*request{bl})
+					_ = vl.write([]*request{bl})
 					ptrs = append(ptrs, bl.Ptrs...)
 
 					f := rand.Float32()
 					if f < rw {
-						vl.write([]*request{bl})
+						_ = vl.write([]*request{bl})
 
 					} else {
 						ln := len(ptrs)
@@ -1233,10 +1237,11 @@ func TestValueLogMeta(t *testing.T) {
 	require.Equal(t, 1, len(fids))
 
 	// vlog entries must not have txn meta.
-	db.vlog.filesMap[fids[0]].iterate(true, 0, func(e Entry, vp valuePointer) error {
+	_, err = db.vlog.filesMap[fids[0]].iterate(true, 0, func(e Entry, vp valuePointer) error {
 		require.Zero(t, e.meta&(bitTxn|bitFinTxn))
 		return nil
 	})
+	require.NoError(t, err)
 
 	// Entries in LSM tree must have txn bit of meta set
 	txn = db.NewTransaction(false)
@@ -1264,6 +1269,7 @@ func TestFirstVlogFile(t *testing.T) {
 
 	opt := DefaultOptions(dir)
 	db, err := Open(opt)
+	require.NoError(t, err)
 	defer db.Close()
 
 	fids := db.vlog.sortedFids()

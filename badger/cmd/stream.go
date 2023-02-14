@@ -85,7 +85,7 @@ func stream(cmd *cobra.Command, args []string) error {
 		WithEncryptionKey(encKey)
 
 	// Options for output DB.
-	if so.compressionType < 0 || so.compressionType > 2 {
+	if so.compressionType > 2 {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
@@ -126,6 +126,7 @@ func stream(cmd *cobra.Command, args []string) error {
 		f, err := os.OpenFile(so.outFile, os.O_RDWR|os.O_CREATE, 0666)
 		y.Check(err)
 		_, err = stream.Backup(f, 0)
+		y.Check(err)
 	}
 	fmt.Println("Done.")
 	return err

@@ -280,7 +280,7 @@ func TestDropReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
-		require.Panics(t, func() { db2.DropAll() })
+		require.Panics(t, func() { _ = db2.DropAll() })
 		require.NoError(t, db2.Close())
 	}
 }
@@ -527,7 +527,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
-		require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
+		require.Panics(t, func() { _ = db2.DropPrefix([]byte("key0")) })
 		require.NoError(t, db2.Close())
 	}
 }
