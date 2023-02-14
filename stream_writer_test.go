@@ -578,3 +578,26 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	require.NoError(t, db.Close())
 
 }
+
+// Test that stream writer does not crashes with large values in managed mode.
+func TestStreamWriterWithLargeValue(t *testing.T) {
+	opts := DefaultOptions("")
+	opts.managedTxns = true
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		buf := z.NewBuffer(10<<20, "test")
+		defer func() { require.NoError(t, buf.Release()) }()
+		val := make([]byte, 10<<20)
+		_, err := rand.Read(val)
+		require.NoError(t, err)
+		KVToBuffer(&pb.KV{
+			Key:     []byte("key"),
+			Value:   val,
+			Version: 1,
+		}, buf)
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	})
+}
