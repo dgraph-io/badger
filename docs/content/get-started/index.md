@@ -5,7 +5,7 @@ aliases = ["/get-started"]
 
 
 ## Installing
-To start using Badger, install Go 1.12 or above. Badger v2 needs go modules. Run the following command to retrieve the library.
+To start using Badger, install Go 1.19 or above. Badger v2 needs go modules. Run the following command to retrieve the library.
 
 ```sh
 $ go get github.com/dgraph-io/badger/v3

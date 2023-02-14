@@ -20,7 +20,7 @@ jobs:
       - name: Get Go Version
         run: |
           #!/bin/bash
-          DEFAULT_VERSION="1.18"
+          DEFAULT_VERSION="1.19"
           GOVERSION=$({ [ -f .go-version ] && cat .go-version; } || echo $DEFAULT_VERSION)
           echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
       - name: Setup Go
