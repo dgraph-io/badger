@@ -755,6 +755,8 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	db.lock.RLock()
+	defer db.lock.RUnlock()
 	for i, entry := range b.Entries {
 		var err error
 		if entry.skipVlogAndSetThreshold(db.valueThreshold()) {
