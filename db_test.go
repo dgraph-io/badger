@@ -1464,7 +1464,7 @@ func TestGetSetDeadlock(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1 << 20))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 
 	val := make([]byte, 1<<19)
 	key := []byte("key1")
@@ -1506,7 +1506,7 @@ func TestWriteDeadlock(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(10 << 20))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 	print := func(count *int) {
 		*count++
 		if *count%100 == 0 {
@@ -1886,7 +1886,7 @@ func ExampleOpen() {
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close()
+	defer func() { y.Check(db.Close()) }()
 
 	err = db.View(func(txn *Txn) error {
 		_, err := txn.Get([]byte("key"))
@@ -1942,7 +1942,7 @@ func ExampleTxn_NewIterator() {
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close()
+	defer func() { y.Check(db.Close()) }()
 
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%09d", i))
@@ -1962,8 +1962,7 @@ func ExampleTxn_NewIterator() {
 		}
 	}
 
-	err = txn.Commit()
-	if err != nil {
+	if err := txn.Commit(); err != nil {
 		panic(err)
 	}
 
@@ -1995,7 +1994,7 @@ func TestSyncForRace(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 
 	closeChan := make(chan struct{})
 	doneChan := make(chan struct{})
@@ -2038,14 +2037,14 @@ func TestSyncForRace(t *testing.T) {
 
 func TestForceFlushMemtable(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
-	require.NoError(t, err, "temp dir for badger count not be created")
+	require.NoError(t, err, "temp dir for badger could not be created")
 
 	ops := getTestOptions(dir)
 	ops.ValueLogMaxEntries = 1
 
 	db, err := Open(ops)
 	require.NoError(t, err, "error while openning db")
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 
 	for i := 0; i < 3; i++ {
 		err = db.Update(func(txn *Txn) error {
@@ -2179,7 +2178,7 @@ func TestMinCacheSize(t *testing.T) {
 
 func TestUpdateMaxCost(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
-	require.NoError(t, err, "temp dir for badger count not be created")
+	require.NoError(t, err, "temp dir for badger could not be created")
 	defer os.RemoveAll(dir)
 
 	ops := getTestOptions(dir).
@@ -2286,7 +2285,7 @@ func TestOpenDBReadOnly(t *testing.T) {
 
 func TestBannedPrefixes(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
-	require.NoError(t, err, "temp dir for badger count not be created")
+	require.NoError(t, err, "temp dir for badger could not be created")
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir).WithNamespaceOffset(3)
