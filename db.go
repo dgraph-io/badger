@@ -1623,7 +1623,7 @@ func (db *DB) prepareToDrop() (func(), error) {
 	// write it to db. Then, flush all the pending memtable. So that, we
 	// don't miss any entries.
 	if err := db.blockWrite(); err != nil {
-		return nil, err
+		return func() {}, err
 	}
 	reqs := make([]*request, 0, 10)
 	for {
