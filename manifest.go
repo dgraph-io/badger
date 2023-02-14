@@ -117,7 +117,7 @@ func (m *Manifest) clone(opt Options) Manifest {
 func openOrCreateManifestFile(opt Options) (
 	ret *manifestFile, result Manifest, err error) {
 	if opt.InMemory {
-		return &manifestFile{inMemory: true}, Manifest{}, nil
+		return &manifestFile{inMemory: true, manifest: createManifest()}, Manifest{}, nil
 	}
 	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.ExternalMagicVersion,
 		manifestDeletionsRewriteThreshold, opt)
@@ -203,12 +203,14 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange, opt Option
 	if err != nil {
 		return err
 	}
-
 	// Maybe we could use O_APPEND instead (on certain file systems)
 	mf.appendLock.Lock()
 	defer mf.appendLock.Unlock()
 	if err := applyChangeSet(&mf.manifest, &changes, opt); err != nil {
 		return err
+	}
+	if mf.inMemory {
+		return nil
 	}
 	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
 	if mf.manifest.Deletions > mf.deletionsRewriteThreshold &&

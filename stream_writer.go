@@ -7,6 +7,7 @@ package badger
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -31,13 +32,18 @@ import (
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock  sync.Mutex
-	db         *DB
-	done       func()
-	throttle   *y.Throttle
-	maxVersion uint64
-	writers    map[uint32]*sortedWriter
-	prevLevel  int
+	writeLock       sync.Mutex
+	db              *DB
+	done            func()
+	throttle        *y.Throttle
+	maxVersion      uint64
+	writers         map[uint32]*sortedWriter
+	prevLevel       int
+	senderPrevLevel int
+	keyId           map[uint64]*pb.DataKey // map stores reader's keyId to data key.
+	// Writer might receive tables first, and then receive keys. If true, that means we have
+	// started processing keys.
+	processingKeys bool
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -51,6 +57,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
+		keyId:    make(map[uint64]*pb.DataKey),
 	}
 }
 
@@ -153,8 +160,64 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		if _, ok := closedStreams[kv.StreamId]; ok {
 			panic(fmt.Sprintf("write performed on closed stream: %d", kv.StreamId))
 		}
+		switch kv.Kind {
+		case pb.KV_DATA_KEY:
+			sw.writeLock.Lock()
+			defer sw.writeLock.Unlock()
+			y.AssertTrue(len(sw.db.opt.EncryptionKey) > 0)
+			var dk pb.DataKey
+			if err := proto.Unmarshal(kv.Value, &dk); err != nil {
+				return fmt.Errorf("unmarshal failed %s: %w", kv.Value, err)
+			}
+			readerId := dk.KeyId
+			if _, ok := sw.keyId[readerId]; !ok {
+				// Insert the data key to the key registry if not already inserted.
+				id, err := sw.db.registry.AddKey(&dk)
+				if err != nil {
+					return fmt.Errorf("failed to write data key: %w", err)
+				}
+				dk.KeyId = id
+				sw.keyId[readerId] = &dk
+			}
+			return nil
+		case pb.KV_FILE:
+			sw.writeLock.Lock()
+			defer sw.writeLock.Unlock()
+			// All tables should be recieved before any of the keys.
+			if sw.processingKeys {
+				return errors.New("Received pb.KV_FILE after pb.KV_KEY")
+			}
+			var change pb.ManifestChange
+			if err := proto.Unmarshal(kv.Key, &change); err != nil {
+				return fmt.Errorf("unable to unmarshal manifest change: %w", err)
+			}
+			level := int(change.Level)
+			if sw.senderPrevLevel == 0 {
+				// We received the first file, set the sender's and receiver's max levels.
+				sw.senderPrevLevel = level
+				sw.prevLevel = len(sw.db.lc.levels) - 1
+			}
+
+			// This is based on the assumption that the tables from the last
+			// level will be sent first and then the second last level tables.
+			// As long as the kv.Version (which stores the level) is same as
+			// the prevLevel, we know we're processing a last level table.
+			// The last level for this DB can be 8 while the DB that's sending
+			// this could have the last level at 7.
+			if sw.senderPrevLevel != level {
+				// If the previous level and the current level is different, we
+				// must be processing a table from the next last level.
+				sw.senderPrevLevel = level
+				sw.prevLevel--
+			}
+			dk := sw.keyId[change.KeyId]
+			return sw.db.lc.AddTable(&kv, sw.prevLevel, dk, &change)
+		case pb.KV_KEY:
+			// Pass. The following code will handle the keys.
+		}
 
 		sw.writeLock.Lock()
+		sw.processingKeys = true
 		if sw.maxVersion < kv.Version {
 			sw.maxVersion = kv.Version
 		}
@@ -173,6 +236,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 		if len(kv.UserMeta) > 0 {
 			userMeta = kv.UserMeta[0]
 		}
+
 		e := &Entry{
 			Key:       y.KeyWithTs(kv.Key, kv.Version),
 			Value:     y.Copy(kv.Value),
