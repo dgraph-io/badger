@@ -53,5 +53,6 @@ Below is a list of known projects that use Badger:
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 * [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
 * [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
+* [raft-badger](https://github.com/rfyiamcool/raft-badger) - raft-badger implements LogStore and StableStore Interface of hashcorp/raft. it is used to store raft log and metadata of hashcorp/raft.
 
 If you are using Badger in a project please send a pull request to add it to the list.
