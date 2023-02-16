@@ -8,14 +8,20 @@ linters-settings:
   staticcheck:
     checks:
       - all
-      - '-SA1019' # it is okay to use math/rand at times
+      - '-SA1019' # it is okay to use math/rand at times.
+  gosec:
+    excludes: # these are not relevant for us right now
+      - G114
+      - G204
+      - G306
+      - G404
 
 linters:
   disable-all: true
   enable:
     - errcheck
     - ineffassign
-    # - gas
+    - gosec
     - gofmt
     - gosimple
     - govet

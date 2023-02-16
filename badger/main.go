@@ -19,7 +19,7 @@ package main
 import (
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec
 	"runtime"
 
 	"github.com/dustin/go-humanize"
