@@ -26,19 +26,19 @@ import (
 
 func TestXORBlock(t *testing.T) {
 	key := make([]byte, 32)
-	rand.Read(key)
+	_, _ = rand.Read(key)
 
 	var iv []byte
 	{
 		b, err := aes.NewCipher(key)
 		require.NoError(t, err)
 		iv = make([]byte, b.BlockSize())
-		rand.Read(iv)
+		_, _ = rand.Read(iv)
 		t.Logf("Using %d size IV\n", len(iv))
 	}
 
 	src := make([]byte, 1024)
-	rand.Read(src)
+	_, _ = rand.Read(src)
 
 	dst := make([]byte, 1024)
 	err := XORBlock(dst, src, key, iv)

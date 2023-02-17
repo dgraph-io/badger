@@ -42,12 +42,9 @@ func TestGetMergeOperator(t *testing.T) {
 			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 			defer m.Stop()
 
-			err := m.Add(uint64ToBytes(1))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(2))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(3))
-			require.NoError(t, err)
+			require.NoError(t, m.Add(uint64ToBytes(1)))
+			require.NoError(t, m.Add(uint64ToBytes(2)))
+			require.NoError(t, m.Add(uint64ToBytes(3)))
 
 			res, err := m.Get()
 			require.NoError(t, err)
@@ -64,12 +61,12 @@ func TestGetMergeOperator(t *testing.T) {
 			m := db.GetMergeOperator([]byte("fooprefix"), add, 2*time.Millisecond)
 			defer m.Stop()
 
-			require.Nil(t, m.Add([]byte("A")))
-			require.Nil(t, m.Add([]byte("B")))
-			require.Nil(t, m.Add([]byte("C")))
+			require.NoError(t, m.Add([]byte("A")))
+			require.NoError(t, m.Add([]byte("B")))
+			require.NoError(t, m.Add([]byte("C")))
 
 			value, err := m.Get()
-			require.Nil(t, err)
+			require.NoError(t, err)
 			require.Equal(t, "ABC", string(value))
 		})
 	})
@@ -79,12 +76,9 @@ func TestGetMergeOperator(t *testing.T) {
 			m := db.GetMergeOperator(key, add, 500*time.Millisecond)
 			defer m.Stop()
 
-			err := m.Add(uint64ToBytes(1))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(2))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(3))
-			require.NoError(t, err)
+			require.NoError(t, m.Add(uint64ToBytes(1)))
+			require.NoError(t, m.Add(uint64ToBytes(2)))
+			require.NoError(t, m.Add(uint64ToBytes(3)))
 
 			res, err := m.Get()
 			require.NoError(t, err)
@@ -97,25 +91,21 @@ func TestGetMergeOperator(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 
-			err := m.Add(uint64ToBytes(1))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(2))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(3))
-			require.NoError(t, err)
+			require.NoError(t, m.Add(uint64ToBytes(1)))
+			require.NoError(t, m.Add(uint64ToBytes(2)))
+			require.NoError(t, m.Add(uint64ToBytes(3)))
 
 			m.Stop()
 			res, err := m.Get()
 			require.NoError(t, err)
 			require.Equal(t, uint64(6), bytesToUint64(res))
 
-			db.Update(func(txn *Txn) error {
+			require.NoError(t, db.Update(func(txn *Txn) error {
 				return txn.Delete(key)
-			})
+			}))
 
 			m = db.GetMergeOperator(key, add, 200*time.Millisecond)
-			err = m.Add(uint64ToBytes(1))
-			require.NoError(t, err)
+			require.NoError(t, m.Add(uint64ToBytes(1)))
 			m.Stop()
 
 			res, err = m.Get()
@@ -129,12 +119,9 @@ func TestGetMergeOperator(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 1*time.Second)
 
-			err := m.Add(uint64ToBytes(1))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(2))
-			require.NoError(t, err)
-			m.Add(uint64ToBytes(3))
-			require.NoError(t, err)
+			require.NoError(t, m.Add(uint64ToBytes(1)))
+			require.NoError(t, m.Add(uint64ToBytes(2)))
+			require.NoError(t, m.Add(uint64ToBytes(3)))
 
 			m.Stop()
 			res, err := m.Get()

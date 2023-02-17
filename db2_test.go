@@ -883,7 +883,7 @@ func TestMaxVersion(t *testing.T) {
 		rand.Read(k)
 		// Create multiple version of the same key.
 		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: k}, uint64(i))
+			require.NoError(t, wb.SetEntryAt(&Entry{Key: k}, uint64(i)))
 		}
 		require.NoError(t, wb.Flush())
 
@@ -906,7 +906,7 @@ func TestMaxVersion(t *testing.T) {
 
 		// This will create commits from 1 to N.
 		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
+			require.NoError(t, wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i)))
 		}
 		require.NoError(t, wb.Flush())
 
@@ -1001,12 +1001,12 @@ func TestKeyCount(t *testing.T) {
 
 		write := func(kvs *pb.KVList) error {
 			buf := z.NewBuffer(1<<20, "test")
-			defer buf.Release()
+			defer func() { require.NoError(t, buf.Release()) }()
 
 			for _, kv := range kvs.Kv {
 				KVToBuffer(kv, buf)
 			}
-			writer.Write(buf)
+			require.NoError(t, writer.Write(buf))
 			return nil
 		}
 

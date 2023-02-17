@@ -176,7 +176,7 @@ func TestStreamWriter3(t *testing.T) {
 			y.Check2(rand.Read(value))
 			counter := 0
 			buf := z.NewBuffer(10<<20, "test")
-			defer buf.Release()
+			defer func() { require.NoError(t, buf.Release()) }()
 			for i := 0; i < noOfKeys; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(counter))
@@ -273,7 +273,7 @@ func TestStreamWriter4(t *testing.T) {
 		}
 
 		buf := z.NewBuffer(10<<20, "test")
-		defer buf.Release()
+		defer func() { require.NoError(t, buf.Release()) }()
 		KVToBuffer(&pb.KV{
 			Key:     []byte("key-1"),
 			Value:   []byte("value-1"),
@@ -298,7 +298,7 @@ func TestStreamWriter5(t *testing.T) {
 		copy(right[1:], []byte("break"))
 
 		buf := z.NewBuffer(10<<20, "test")
-		defer buf.Release()
+		defer func() { require.NoError(t, buf.Release()) }()
 		KVToBuffer(&pb.KV{
 			Key:     left,
 			Value:   []byte("val"),
@@ -337,7 +337,7 @@ func TestStreamWriter6(t *testing.T) {
 		// Setting keycount below 32 would cause this test to fail.
 		keyCount := 40
 		buf := z.NewBuffer(10<<20, "test")
-		defer buf.Release()
+		defer func() { require.NoError(t, buf.Release()) }()
 		for i := range str {
 			for j := 0; j < keyCount; j++ {
 				ver++
@@ -378,7 +378,7 @@ func TestStreamWriterCancel(t *testing.T) {
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
 		buf := z.NewBuffer(10<<20, "test")
-		defer buf.Release()
+		defer func() { require.NoError(t, buf.Release()) }()
 		for i := range str {
 			kv := &pb.KV{
 				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.BaseTableSize)),
@@ -412,7 +412,7 @@ func TestStreamDone(t *testing.T) {
 		rand.Read(val[:])
 		for i := 0; i < 10; i++ {
 			buf := z.NewBuffer(10<<20, "test")
-			defer buf.Release()
+			defer func() { require.NoError(t, buf.Release()) }()
 			kv1 := &pb.KV{
 				Key:      []byte(fmt.Sprintf("%d", i)),
 				Value:    val[:],
@@ -453,7 +453,7 @@ func TestSendOnClosedStream(t *testing.T) {
 	var val [10]byte
 	rand.Read(val[:])
 	buf := z.NewBuffer(10<<20, "test")
-	defer buf.Release()
+	defer func() { require.NoError(t, buf.Release()) }()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
 		Value:    val[:],
@@ -476,7 +476,7 @@ func TestSendOnClosedStream(t *testing.T) {
 	}()
 	// Send once stream is closed.
 	buf1 := z.NewBuffer(10<<20, "test")
-	defer buf1.Release()
+	defer func() { require.NoError(t, buf1.Release()) }()
 	kv1 = &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 2)),
 		Value:    val[:],
@@ -484,7 +484,7 @@ func TestSendOnClosedStream(t *testing.T) {
 		StreamId: uint32(1),
 	}
 	KVToBuffer(kv1, buf1)
-	sw.Write(buf1)
+	require.NoError(t, sw.Write(buf1))
 }
 
 func TestSendOnClosedStream2(t *testing.T) {
@@ -503,7 +503,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 	var val [10]byte
 	rand.Read(val[:])
 	buf := z.NewBuffer(10<<20, "test")
-	defer buf.Release()
+	defer func() { require.NoError(t, buf.Release()) }()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
 		Value:    val[:],
@@ -550,7 +550,7 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	value := []byte("myvalue")
 
 	buf := z.NewBuffer(10<<20, "test")
-	defer buf.Release()
+	defer func() { require.NoError(t, buf.Release()) }()
 	KVToBuffer(&pb.KV{
 		Key:     key,
 		Value:   value,

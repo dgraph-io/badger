@@ -147,7 +147,7 @@ func TestIterateSinceTs(t *testing.T) {
 		iopt := DefaultIteratorOptions
 		iopt.SinceTs = sinceTs
 
-		db.View(func(txn *Txn) error {
+		require.NoError(t, db.View(func(txn *Txn) error {
 			it := txn.NewIterator(iopt)
 			defer it.Close()
 
@@ -156,7 +156,7 @@ func TestIterateSinceTs(t *testing.T) {
 				require.GreaterOrEqual(t, i.Version(), sinceTs)
 			}
 			return nil
-		})
+		}))
 
 	})
 }

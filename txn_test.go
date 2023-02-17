@@ -50,7 +50,7 @@ func TestTxnSimple(t *testing.T) {
 			return nil
 		}))
 
-		require.Panics(t, func() { txn.CommitAt(100, nil) })
+		require.Panics(t, func() { _ = txn.CommitAt(100, nil) })
 		require.NoError(t, txn.Commit())
 	})
 }
@@ -368,7 +368,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 
 		// b4 (del)
 		txn = db.NewTransaction(true)
-		txn.Delete(kb)
+		require.NoError(t, txn.Delete(kb))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(4), db.orc.readTs())
 
@@ -452,7 +452,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 
 		// b4 (del)
 		txn = db.NewTransaction(true)
-		txn.Delete(kb)
+		require.NoError(t, txn.Delete(kb))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(4), db.orc.readTs())
 
@@ -750,7 +750,7 @@ func TestManagedDB(t *testing.T) {
 		}
 
 		require.Panics(t, func() {
-			db.Update(func(tx *Txn) error { return nil })
+			_ = db.Update(func(tx *Txn) error { return nil })
 		})
 
 		err = db.View(func(tx *Txn) error { return nil })
@@ -821,7 +821,8 @@ func TestManagedDB(t *testing.T) {
 		// Write data to same key, causing a conflict
 		txn = db.NewTransactionAt(10, true)
 		txnb := db.NewTransactionAt(10, true)
-		txnb.Get(key(0))
+		_, err := txnb.Get(key(0))
+		require.NoError(t, err)
 		require.NoError(t, txn.SetEntry(NewEntry(key(0), val(0))))
 		require.NoError(t, txnb.SetEntry(NewEntry(key(0), val(1))))
 		require.NoError(t, txn.CommitAt(11, nil))

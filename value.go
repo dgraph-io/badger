@@ -55,7 +55,7 @@ const (
 	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 
-	mi int64 = 1 << 20
+	mi int64 = 1 << 20 //nolint:unused
 
 	// size of vlog header.
 	// +----------------+------------------+
@@ -66,7 +66,6 @@ const (
 
 var errStop = errors.New("Stop iteration")
 var errTruncate = errors.New("Do truncate")
-var errDeleteVlogFile = errors.New("Delete vlog file")
 
 type logEntry func(e Entry, vp valuePointer) error
 
@@ -251,7 +250,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			}
 			wb = append(wb, ne)
 			size += es
-		} else {
+		} else { //nolint:staticcheck
 			// It might be possible that the entry read from LSM Tree points to
 			// an older vlog file.  This can happen in the following situation.
 			// Assume DB is opened with
@@ -819,8 +818,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
 		// Increase the file size if we cannot accommodate this entry.
+		// [Aman] Should this be >= or just >? Doesn't make sense to extend the file if it big enough already.
 		if int(endOffset) >= len(curlf.Data) {
-			curlf.Truncate(int64(endOffset))
+			if err := curlf.Truncate(int64(endOffset)); err != nil {
+				return err
+			}
 		}
 
 		start := int(endOffset - n)
@@ -1054,12 +1056,6 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 		return true
 	}
 	return false
-}
-
-type reason struct {
-	total   float64
-	discard float64
-	count   int
 }
 
 func (vlog *valueLog) doRunGC(lf *logFile) error {

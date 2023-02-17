@@ -84,7 +84,6 @@ type Builder struct {
 	uncompressedSize uint32
 
 	lenOffsets    uint32
-	estimatedSize uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
 	opts          *Options
 	maxVersion    uint64
@@ -291,7 +290,6 @@ func (b *Builder) finishBlock() {
 	if b.blockChan != nil {
 		b.blockChan <- b.curBlock
 	}
-	return
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {

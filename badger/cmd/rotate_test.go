@@ -108,9 +108,9 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 	db, err := badger.Open(opts)
 	require.NoError(t, err)
 
-	db.Update(func(txn *badger.Txn) error {
+	require.NoError(t, db.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte("foo"), []byte("bar"))
-	})
+	}))
 
 	require.NoError(t, db.Close())
 
@@ -140,7 +140,7 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 	db, err = badger.Open(opts)
 	require.NoError(t, err)
 
-	db.View(func(txn *badger.Txn) error {
+	require.NoError(t, db.View(func(txn *badger.Txn) error {
 		iopt := badger.DefaultIteratorOptions
 		it := txn.NewIterator(iopt)
 		defer it.Close()
@@ -150,6 +150,6 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 		}
 		require.Equal(t, 1, count)
 		return nil
-	})
+	}))
 	require.NoError(t, db.Close())
 }
