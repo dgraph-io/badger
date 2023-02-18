@@ -80,8 +80,8 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	alloc            *z.Allocator
 	curBlock         *bblock
-	compressedSize   uint32
-	uncompressedSize uint32
+	compressedSize   atomic.Uint32
+	uncompressedSize atomic.Uint32
 
 	lenOffsets    uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
@@ -184,7 +184,7 @@ func (b *Builder) handleBlock() {
 		// blockBuf was allocated on allocator. So, we don't need to copy it over.
 		item.data = blockBuf
 		item.end = len(blockBuf)
-		atomic.AddUint32(&b.compressedSize, uint32(len(blockBuf)))
+		b.compressedSize.Add(uint32(len(blockBuf)))
 	}
 }
 
@@ -275,7 +275,7 @@ func (b *Builder) finishBlock() {
 	b.append(y.U32ToBytes(uint32(len(checksum))))
 
 	b.blockList = append(b.blockList, b.curBlock)
-	atomic.AddUint32(&b.uncompressedSize, uint32(b.curBlock.end))
+	b.uncompressedSize.Add(uint32(b.curBlock.end))
 
 	// Add length of baseKey (rounded to next multiple of 4 because of alignment).
 	// Add another 40 Bytes, these additional 40 bytes consists of
@@ -358,9 +358,9 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity() bool {
 	// If encryption/compression is enabled then use the compresssed size.
-	sumBlockSizes := atomic.LoadUint32(&b.compressedSize)
+	sumBlockSizes := b.compressedSize.Load()
 	if b.opts.Compression == options.None && b.opts.DataKey == nil {
-		sumBlockSizes = b.uncompressedSize
+		sumBlockSizes = b.uncompressedSize.Load()
 	}
 	blocksSize := sumBlockSizes + // actual length of current buffer
 		uint32(len(b.curBlock.entryOffsets)*4) + // all entry offsets size
@@ -547,7 +547,7 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
-	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize)
+	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize.Load())
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	fb.TableIndexAddStaleDataSize(builder, uint32(b.staleDataSize))

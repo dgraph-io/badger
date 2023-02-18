@@ -363,15 +363,15 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 }
 
 func (vlog *valueLog) incrIteratorCount() {
-	atomic.AddInt32(&vlog.numActiveIterators, 1)
+	vlog.numActiveIterators.Add(1)
 }
 
 func (vlog *valueLog) iteratorCount() int {
-	return int(atomic.LoadInt32(&vlog.numActiveIterators))
+	return int(vlog.numActiveIterators.Load())
 }
 
 func (vlog *valueLog) decrIteratorCount() error {
-	num := atomic.AddInt32(&vlog.numActiveIterators, -1)
+	num := vlog.numActiveIterators.Add(-1)
 	if num != 0 {
 		return nil
 	}
@@ -438,7 +438,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 }
 
 func (db *DB) valueThreshold() int64 {
-	return atomic.LoadInt64(&db.threshold.valueThreshold)
+	return db.threshold.valueThreshold.Load()
 }
 
 type valueLog struct {
@@ -450,10 +450,10 @@ type valueLog struct {
 	maxFid           uint32
 	filesToBeDeleted []uint32
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
-	numActiveIterators int32
+	numActiveIterators atomic.Int32
 
 	db                *DB
-	writableLogOffset uint32 // read by read, written by write. Must access via atomics.
+	writableLogOffset atomic.Uint32 // read by read, written by write
 	numEntriesWritten uint32
 	opt               Options
 
@@ -527,7 +527,7 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
-	atomic.StoreUint32(&vlog.writableLogOffset, vlogHeaderSize)
+	vlog.writableLogOffset.Store(vlogHeaderSize)
 	vlog.numEntriesWritten = 0
 	vlog.filesLock.Unlock()
 
@@ -586,7 +586,7 @@ func (vlog *valueLog) open(db *DB) error {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 		// We shouldn't delete the maxFid file.
-		if lf.size == vlogHeaderSize && fid != vlog.maxFid {
+		if lf.size.Load() == vlogHeaderSize && fid != vlog.maxFid {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
 				return y.Wrapf(err, "while trying to delete empty file: %s", lf.path)
@@ -673,7 +673,7 @@ type request struct {
 	Ptrs []valuePointer
 	Wg   sync.WaitGroup
 	Err  error
-	ref  int32
+	ref  atomic.Int32
 }
 
 func (req *request) reset() {
@@ -681,15 +681,15 @@ func (req *request) reset() {
 	req.Ptrs = req.Ptrs[:0]
 	req.Wg = sync.WaitGroup{}
 	req.Err = nil
-	req.ref = 0
+	req.ref.Store(0)
 }
 
 func (req *request) IncrRef() {
-	atomic.AddInt32(&req.ref, 1)
+	req.ref.Add(1)
 }
 
 func (req *request) DecrRef() {
-	nRef := atomic.AddInt32(&req.ref, -1)
+	nRef := req.ref.Add(-1)
 	if nRef > 0 {
 		return
 	}
@@ -747,7 +747,7 @@ func (vlog *valueLog) sync() error {
 }
 
 func (vlog *valueLog) woffset() uint32 {
-	return atomic.LoadUint32(&vlog.writableLogOffset)
+	return vlog.writableLogOffset.Load()
 }
 
 // validateWrites will check whether the given requests can fit into 4GB vlog file.
@@ -815,7 +815,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 
 		n := uint32(buf.Len())
-		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
+		endOffset := vlog.writableLogOffset.Add(n)
 		// Increase the file size if we cannot accommodate this entry.
 		// [Aman] Should this be >= or just >? Doesn't make sense to extend the file if it big enough already.
 		if int(endOffset) >= len(curlf.Data) {
@@ -827,7 +827,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		start := int(endOffset - n)
 		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
 
-		atomic.StoreUint32(&curlf.size, endOffset)
+		curlf.size.Store(endOffset)
 		return nil
 	}
 
@@ -1026,8 +1026,7 @@ LOOP:
 			discard, thr, fi.Name())
 		return nil
 	}
-	maxFid := atomic.LoadUint32(&vlog.maxFid)
-	if fid < maxFid {
+	if fid < vlog.maxFid {
 		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
@@ -1109,7 +1108,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 type vlogThreshold struct {
 	logger         Logger
 	percentile     float64
-	valueThreshold int64
+	valueThreshold atomic.Int64
 	valueCh        chan []int64
 	clearCh        chan bool
 	closer         *z.Closer
@@ -1138,19 +1137,20 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 		}
 		return bounds
 	}
-	return &vlogThreshold{
-		logger:         opt.Logger,
-		percentile:     opt.VLogPercentile,
-		valueThreshold: opt.ValueThreshold,
-		valueCh:        make(chan []int64, 1000),
-		clearCh:        make(chan bool, 1),
-		closer:         z.NewCloser(1),
-		vlMetrics:      z.NewHistogramData(getBounds()),
+	lt := &vlogThreshold{
+		logger:     opt.Logger,
+		percentile: opt.VLogPercentile,
+		valueCh:    make(chan []int64, 1000),
+		clearCh:    make(chan bool, 1),
+		closer:     z.NewCloser(1),
+		vlMetrics:  z.NewHistogramData(getBounds()),
 	}
+	lt.valueThreshold.Store(opt.ValueThreshold)
+	return lt
 }
 
 func (v *vlogThreshold) Clear(opt Options) {
-	atomic.StoreInt64(&v.valueThreshold, opt.ValueThreshold)
+	v.valueThreshold.Store(opt.ValueThreshold)
 	v.clearCh <- true
 }
 
@@ -1176,11 +1176,11 @@ func (v *vlogThreshold) listenForValueThresholdUpdate() {
 			// in range of Options.VlogPercentile will make it to the LSM tree and rest to the
 			// value log file.
 			p := int64(v.vlMetrics.Percentile(v.percentile))
-			if atomic.LoadInt64(&v.valueThreshold) != p {
+			if v.valueThreshold.Load() != p {
 				if v.logger != nil {
 					v.logger.Infof("updating value of threshold to: %d", p)
 				}
-				atomic.StoreInt64(&v.valueThreshold, p)
+				v.valueThreshold.Store(p)
 			}
 		case <-v.clearCh:
 			v.vlMetrics.Clear()

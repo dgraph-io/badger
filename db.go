@@ -112,8 +112,8 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
-	blockWrites int32
-	isClosed    uint32
+	blockWrites atomic.Int32
+	isClosed    atomic.Uint32
 
 	orc              *oracle
 	bannedNamespaces *lockedKeys
@@ -531,16 +531,16 @@ func (db *DB) Close() error {
 // IsClosed denotes if the badger DB is closed or not. A DB instance should not
 // be used after closing it.
 func (db *DB) IsClosed() bool {
-	return atomic.LoadUint32(&db.isClosed) == 1
+	return db.isClosed.Load() == 1
 }
 
 func (db *DB) close() (err error) {
 	defer db.allocPool.Release()
 
 	db.opt.Debugf("Closing database")
-	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs.Load()))
 
-	atomic.StoreInt32(&db.blockWrites, 1)
+	db.blockWrites.Store(1)
 
 	if !db.opt.InMemory {
 		// Stop value GC first.
@@ -626,7 +626,7 @@ func (db *DB) close() (err error) {
 	db.blockCache.Close()
 	db.indexCache.Close()
 
-	atomic.StoreUint32(&db.isClosed, 1)
+	db.isClosed.Store(1)
 	db.threshold.close()
 
 	if db.opt.InMemory {
@@ -851,7 +851,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
-	if atomic.LoadInt32(&db.blockWrites) == 1 {
+	if db.blockWrites.Load() == 1 {
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
@@ -1604,7 +1604,7 @@ func (db *DB) Flatten(workers int) error {
 
 func (db *DB) blockWrite() error {
 	// Stop accepting new writes.
-	if !atomic.CompareAndSwapInt32(&db.blockWrites, 0, 1) {
+	if !db.blockWrites.CompareAndSwap(0, 1) {
 		return ErrBlockedWrites
 	}
 
@@ -1619,7 +1619,7 @@ func (db *DB) unblockWrite() {
 	go db.doWrites(db.closers.writes)
 
 	// Resume writes.
-	atomic.StoreInt32(&db.blockWrites, 0)
+	db.blockWrites.Store(0)
 }
 
 func (db *DB) prepareToDrop() (func(), error) {
@@ -1709,7 +1709,7 @@ func (db *DB) dropAll() (func(), error) {
 	if err != nil {
 		return resume, err
 	}
-	db.lc.nextFileID = 1
+	db.lc.nextFileID.Store(1)
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
 	db.indexCache.Clear()
@@ -1906,7 +1906,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 			return err
 		case <-ctx.Done():
 			c.Done()
-			atomic.StoreUint64(s.active, 0)
+			s.active.Store(0)
 			drain()
 			db.pub.deleteSubscriber(s.id)
 			// Delete the subscriber to avoid further updates.
@@ -1915,7 +1915,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
-				atomic.StoreUint64(s.active, 0)
+				s.active.Store(0)
 				drain()
 				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(s.id)

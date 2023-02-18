@@ -102,7 +102,7 @@ type Table struct {
 
 	_index *fb.TableIndex // Nil if encryption is enabled. Use fetchIndex to access.
 	_cheap *cheapIndex
-	ref    int32 // For file garbage collection. Atomic.
+	ref    atomic.Int32 // For file garbage collection
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
@@ -155,12 +155,12 @@ func (t *Table) CompressionType() options.CompressionType {
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
 func (t *Table) IncrRef() {
-	atomic.AddInt32(&t.ref, 1)
+	t.ref.Add(1)
 }
 
 // DecrRef decrements the refcount and possibly deletes the table
 func (t *Table) DecrRef() error {
-	newRef := atomic.AddInt32(&t.ref, -1)
+	newRef := t.ref.Add(-1)
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
@@ -191,10 +191,10 @@ type block struct {
 	entryOffsets      []uint32 // used to binary search an entry in the block.
 	chkLen            int      // checksum length.
 	freeMe            bool     // used to determine if the blocked should be reused.
-	ref               int32
+	ref               atomic.Int32
 }
 
-var NumBlocks int32
+var NumBlocks atomic.Int32
 
 // incrRef increments the ref of a block and return a bool indicating if the
 // increment was successful. A true value indicates that the block can be used.
@@ -203,7 +203,7 @@ func (b *block) incrRef() bool {
 		// We can't blindly add 1 to ref. We need to check whether it has
 		// reached zero first, because if it did, then we should absolutely not
 		// use this block.
-		ref := atomic.LoadInt32(&b.ref)
+		ref := b.ref.Load()
 		// The ref would not be equal to 0 unless the existing
 		// block get evicted before this line. If the ref is zero, it means that
 		// the block is already added the the blockPool and cannot be used
@@ -216,7 +216,7 @@ func (b *block) incrRef() bool {
 		// Increment the ref only if it is not zero and has not changed between
 		// the time we read it and we're updating it.
 		//
-		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+		if b.ref.CompareAndSwap(ref, ref+1) {
 			return true
 		}
 	}
@@ -232,21 +232,21 @@ func (b *block) decrRef() {
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if atomic.AddInt32(&b.ref, -1) == 0 {
+	if b.ref.Add(-1) == 0 {
 		if b.freeMe {
 			z.Free(b.data)
 		}
-		atomic.AddInt32(&NumBlocks, -1)
+		NumBlocks.Add(-1)
 		// blockPool.Put(&b.data)
 	}
-	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
+	y.AssertTrue(b.ref.Load() >= 0)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
-func (b block) verifyCheckSum() error {
+func (b *block) verifyCheckSum() error {
 	cs := &pb.Checksum{}
 	if err := proto.Unmarshal(b.checksum, cs); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
@@ -297,13 +297,14 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	}
 	t := &Table{
 		MmapFile:   mf,
-		ref:        1, // Caller is given one reference.
 		id:         id,
 		opt:        &opts,
 		IsInmemory: false,
 		tableSize:  int(fileInfo.Size()),
 		CreatedAt:  fileInfo.ModTime(),
 	}
+	// Caller is given one reference.
+	t.ref.Store(1)
 
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, y.Wrapf(err, "failed to initialize table")
@@ -328,12 +329,13 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	}
 	t := &Table{
 		MmapFile:   mf,
-		ref:        1, // Caller is given one reference.
 		opt:        opt,
 		tableSize:  len(data),
 		IsInmemory: true,
 		id:         id, // It is important that each table gets a unique ID.
 	}
+	// Caller is given one reference.
+	t.ref.Store(1)
 
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, err
@@ -554,12 +556,10 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 
 	var ko fb.BlockOffset
 	y.AssertTrue(t.offsets(&ko, idx))
-	blk := &block{
-		offset: int(ko.Offset()),
-		ref:    1,
-	}
+	blk := &block{offset: int(ko.Offset())}
+	blk.ref.Store(1)
 	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
-	atomic.AddInt32(&NumBlocks, 1)
+	NumBlocks.Add(1)
 
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {

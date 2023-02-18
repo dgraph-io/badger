@@ -69,7 +69,7 @@ var (
 	numAccounts     int
 	numPrevious     int
 	duration        string
-	stopAll         int32
+	stopAll         atomic.Int32
 	checkStream     bool
 	checkSubscriber bool
 	verbose         bool
@@ -241,7 +241,7 @@ func seekTotal(txn *badger.Txn) ([]account, error) {
 	if total != expected {
 		log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
 			expected, total)
-		atomic.AddInt32(&stopAll, 1)
+		stopAll.Add(1)
 		return accounts, errFailure
 	}
 	return accounts, nil
@@ -419,7 +419,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	// startTs := time.Now()
 	endTs := time.Now().Add(dur)
-	var total, errors, reads uint64
+	var total, errors, reads atomic.Uint64
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -429,15 +429,15 @@ func runTest(cmd *cobra.Command, args []string) error {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			if atomic.LoadInt32(&stopAll) > 0 {
+			if stopAll.Load() > 0 {
 				// Do not proceed.
 				return
 			}
 			// log.Printf("[%6s] Total: %d. Errors: %d Reads: %d.\n",
 			// 	time.Since(startTs).Round(time.Second).String(),
-			// 	atomic.LoadUint64(&total),
-			// 	atomic.LoadUint64(&errors),
-			// 	atomic.LoadUint64(&reads))
+			// 	total.Load(),
+			// 	errors.Load(),
+			// 	reads.Load())
 			if time.Now().After(endTs) {
 				return
 			}
@@ -454,7 +454,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 			defer ticker.Stop()
 
 			for range ticker.C {
-				if atomic.LoadInt32(&stopAll) > 0 {
+				if stopAll.Load() > 0 {
 					// Do not proceed.
 					return
 				}
@@ -467,11 +467,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 					continue
 				}
 				err := moveMoney(db, from, to)
-				atomic.AddUint64(&total, 1)
+				total.Add(1)
 				if err == nil && verbose {
 					log.Printf("Moved $5. %d -> %d\n", from, to)
 				} else {
-					atomic.AddUint64(&errors, 1)
+					errors.Add(1)
 				}
 			}
 		}()
@@ -489,7 +489,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				log.Printf("Received stream\n")
 
 				// Do not proceed.
-				if atomic.LoadInt32(&stopAll) > 0 || time.Now().After(endTs) {
+				if stopAll.Load() > 0 || time.Now().After(endTs) {
 					return
 				}
 
@@ -533,7 +533,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			if atomic.LoadInt32(&stopAll) > 0 {
+			if stopAll.Load() > 0 {
 				// Do not proceed.
 				return
 			}
@@ -546,7 +546,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				if err != nil {
 					log.Printf("Error while calculating total: %v", err)
 				} else {
-					atomic.AddUint64(&reads, 1)
+					reads.Add(1)
 				}
 				return nil
 			}))
@@ -586,13 +586,13 @@ func runTest(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				log.Printf("Error while calculating subscriber DB total: %v", err)
 			} else {
-				atomic.AddUint64(&reads, 1)
+				reads.Add(1)
 			}
 			return nil
 		}))
 	}
 
-	if atomic.LoadInt32(&stopAll) == 0 {
+	if stopAll.Load() == 0 {
 		log.Println("Test OK")
 		return nil
 	}

@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"math/rand"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -92,7 +91,7 @@ func (s *levelHandler) validate() error {
 
 // reserveFileID reserves a unique file id.
 func (s *levelsController) reserveFileID() uint64 {
-	id := atomic.AddUint64(&s.nextFileID, 1)
+	id := s.nextFileID.Add(1)
 	return id - 1
 }
 

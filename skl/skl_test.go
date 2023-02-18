@@ -209,7 +209,7 @@ func TestOneKey(t *testing.T) {
 		}(i)
 	}
 	// We expect that at least some write made it such that some read returns a value.
-	var sawValue int32
+	var sawValue atomic.Int32
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
@@ -218,14 +218,14 @@ func TestOneKey(t *testing.T) {
 			if p.Value == nil {
 				return
 			}
-			atomic.AddInt32(&sawValue, 1)
+			sawValue.Add(1)
 			v, err := strconv.Atoi(string(p.Value))
 			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n, fmt.Sprintf("invalid value %d", v))
 		}()
 	}
 	wg.Wait()
-	require.True(t, sawValue > 0)
+	require.True(t, sawValue.Load() > 0)
 	require.EqualValues(t, 1, length(l))
 }
 
