@@ -652,7 +652,7 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs, 0)
 	}
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
 	tbl, err := CreateTable(filename, builder)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
@@ -754,7 +754,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	require.NoError(b, err)
 
 	for i := 0; i < m; i++ {
-		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
 		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		opts.BlockCache = cache
 		builder := NewTableBuilder(opts)
@@ -848,7 +848,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	opts.BlockCache = cache
 	builder := NewTableBuilder(opts)
 	defer builder.Close()
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
