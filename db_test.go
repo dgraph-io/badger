@@ -2236,10 +2236,10 @@ func TestOpenDBReadOnly(t *testing.T) {
 	db, err = Open(ops)
 	if runtime.GOOS == "windows" {
 		require.Equal(t, err, ErrWindowsNotSupported)
-	} else {
-		require.NoError(t, err)
-		require.NoError(t, db.Close())
+		return
 	}
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 
 	var count int
 	read := func() {
@@ -2287,12 +2287,13 @@ func TestOpenDBReadOnly(t *testing.T) {
 	db, err = Open(ops)
 	if runtime.GOOS == "windows" {
 		require.Equal(t, err, ErrWindowsNotSupported)
-	} else {
-		require.NoError(t, err)
-		read()
-		require.Equal(t, 20, count)
-		require.NoError(t, db.Close())
+		return
 	}
+	require.NoError(t, err)
+	read()
+	require.Equal(t, 20, count)
+	require.NoError(t, db.Close())
+
 }
 
 func TestBannedPrefixes(t *testing.T) {

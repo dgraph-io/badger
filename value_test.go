@@ -727,10 +727,11 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 	_, err = Open(opts)
 	if runtime.GOOS == "windows" {
 		require.Equal(t, err, ErrWindowsNotSupported)
-	} else {
-		require.Error(t, err)
-		require.Regexp(t, "Log truncate required", err.Error())
+		return
 	}
+	require.Error(t, err)
+	require.Regexp(t, "Log truncate required", err.Error())
+
 }
 
 func TestValueLogTrigger(t *testing.T) {
