@@ -17,7 +17,7 @@
 package cmd
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 	"time"
 
@@ -79,5 +79,5 @@ func getKey(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ioutil.ReadAll(fp)
+	return io.ReadAll(fp)
 }

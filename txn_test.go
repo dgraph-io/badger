@@ -18,8 +18,8 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -733,7 +733,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 }
 
 func TestManagedDB(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -847,7 +847,7 @@ func TestManagedDB(t *testing.T) {
 }
 
 func TestArmV7Issue311Fix(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
+	dir, err := os.MkdirTemp("", "")
 	require.NoError(t, err)
 
 	defer removeDir(dir)

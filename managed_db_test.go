@@ -2,9 +2,9 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -58,7 +58,7 @@ func numKeysManaged(db *DB, readTs uint64) int {
 }
 
 func TestDropAllManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -103,7 +103,7 @@ func TestDropAllManaged(t *testing.T) {
 }
 
 func TestDropAll(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -167,7 +167,7 @@ func TestDropAllTwice(t *testing.T) {
 		require.NoError(t, db.Close())
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 		opts := getTestOptions(dir)
@@ -182,7 +182,7 @@ func TestDropAllTwice(t *testing.T) {
 }
 
 func TestDropAllWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -253,7 +253,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 }
 
 func TestDropReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -286,7 +286,7 @@ func TestDropReadOnly(t *testing.T) {
 }
 
 func TestWriteAfterClose(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -312,7 +312,7 @@ func TestWriteAfterClose(t *testing.T) {
 }
 
 func TestDropAllRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -376,7 +376,7 @@ func TestDropAllRace(t *testing.T) {
 }
 
 func TestDropPrefix(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -428,7 +428,7 @@ func TestDropPrefix(t *testing.T) {
 }
 
 func TestDropPrefixWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -500,7 +500,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 }
 
 func TestDropPrefixReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -533,7 +533,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 }
 
 func TestDropPrefixRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)

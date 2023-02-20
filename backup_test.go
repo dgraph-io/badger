@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ import (
 )
 
 func TestBackupRestore1(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	db, err := Open(getTestOptions(dir))
@@ -72,10 +71,10 @@ func TestBackupRestore1(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use different directory.
-	dir, err = ioutil.TempDir("", "badger-test")
+	dir, err = os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
-	bak, err := ioutil.TempFile(dir, "badgerbak")
+	bak, err := os.CreateTemp(dir, "badgerbak")
 	require.NoError(t, err)
 	_, err = db.Backup(bak, 0)
 	require.NoError(t, err)
@@ -118,7 +117,7 @@ func TestBackupRestore1(t *testing.T) {
 }
 
 func TestBackupRestore2(t *testing.T) {
-	tmpdir, err := ioutil.TempDir("", "badger-test")
+	tmpdir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 
 	defer removeDir(tmpdir)
@@ -306,7 +305,7 @@ func TestBackup(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		tmpdir, err := ioutil.TempDir("", "badger-test")
+		tmpdir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 
 		defer removeDir(tmpdir)
@@ -326,7 +325,7 @@ func TestBackup(t *testing.T) {
 
 func TestBackupRestore3(t *testing.T) {
 	var bb bytes.Buffer
-	tmpdir, err := ioutil.TempDir("", "badger-test")
+	tmpdir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 
 	defer removeDir(tmpdir)
@@ -387,7 +386,7 @@ func TestBackupRestore3(t *testing.T) {
 }
 
 func TestBackupLoadIncremental(t *testing.T) {
-	tmpdir, err := ioutil.TempDir("", "badger-test")
+	tmpdir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 
 	defer removeDir(tmpdir)
@@ -507,7 +506,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 }
 
 func TestBackupBitClear(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -528,11 +527,11 @@ func TestBackupBitClear(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use different directory.
-	dir, err = ioutil.TempDir("", "badger-test")
+	dir, err = os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	bak, err := ioutil.TempFile(dir, "badgerbak")
+	bak, err := os.CreateTemp(dir, "badgerbak")
 	require.NoError(t, err)
 	_, err = db.Backup(bak, 0)
 	require.NoError(t, err)

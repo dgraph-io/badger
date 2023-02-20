@@ -18,7 +18,7 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -150,7 +150,7 @@ func TestFlushPanic(t *testing.T) {
 }
 
 func TestBatchErrDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 

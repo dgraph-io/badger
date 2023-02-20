@@ -18,8 +18,8 @@ package badger
 
 import (
 	"encoding/hex"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -97,7 +97,7 @@ func (s *levelsController) reserveFileID() uint64 {
 }
 
 func getIDMap(dir string) map[uint64]struct{} {
-	fileInfos, err := ioutil.ReadDir(dir)
+	fileInfos, err := os.ReadDir(dir)
 	y.Check(err)
 	idMap := make(map[uint64]struct{})
 	for _, info := range fileInfos {

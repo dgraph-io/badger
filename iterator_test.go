@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -294,7 +293,7 @@ func TestIteratePrefix(t *testing.T) {
 
 // Sanity test to verify the iterator does not crash the db in readonly mode if data does not exist.
 func TestIteratorReadOnlyWithNoData(t *testing.T) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := os.MkdirTemp(".", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -359,7 +358,7 @@ func TestIteratorReadOnlyWithNoData(t *testing.T) {
 //
 // Only my laptop there's a 20% improvement in latency with ~80 files.
 func BenchmarkIteratePrefixSingleKey(b *testing.B) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := os.MkdirTemp(".", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)

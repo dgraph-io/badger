@@ -23,7 +23,6 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"sort"
@@ -473,7 +472,7 @@ func (vlog *valueLog) fpath(fid uint32) string {
 func (vlog *valueLog) populateFilesMap() error {
 	vlog.filesMap = make(map[uint32]*logFile)
 
-	files, err := ioutil.ReadDir(vlog.dirPath)
+	files, err := os.ReadDir(vlog.dirPath)
 	if err != nil {
 		return errFile(err, vlog.dirPath, "Unable to open log dir.")
 	}

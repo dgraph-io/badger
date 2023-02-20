@@ -19,7 +19,6 @@ package badger
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ import (
 )
 
 func TestManifestBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -73,7 +72,7 @@ func TestManifestBasic(t *testing.T) {
 }
 
 func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -163,7 +162,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	// linter, I realized that the runCompactDef function below always returns error.
 	t.Skip()
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	kv, err := Open(DefaultOptions(dir))
@@ -215,7 +214,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 }
 
 func TestManifestRewrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	deletionsThreshold := 10
@@ -253,7 +252,7 @@ func TestManifestRewrite(t *testing.T) {
 }
 
 func TestConcurrentManifestCompaction(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 

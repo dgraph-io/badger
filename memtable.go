@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,7 +58,7 @@ func (db *DB) openMemTables(opt Options) error {
 	if db.opt.InMemory {
 		return nil
 	}
-	files, err := ioutil.ReadDir(db.opt.Dir)
+	files, err := os.ReadDir(db.opt.Dir)
 	if err != nil {
 		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
 	}

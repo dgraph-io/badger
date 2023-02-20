@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -438,7 +437,7 @@ func TestStreamDone(t *testing.T) {
 }
 
 func TestSendOnClosedStream(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, os.RemoveAll(dir))
@@ -488,7 +487,7 @@ func TestSendOnClosedStream(t *testing.T) {
 }
 
 func TestSendOnClosedStream2(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, os.RemoveAll(dir))
@@ -535,7 +534,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 }
 
 func TestStreamWriterEncrypted(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 
 	opts := DefaultOptions(dir)
