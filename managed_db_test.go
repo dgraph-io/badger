@@ -74,7 +74,7 @@ func TestDropAllManaged(t *testing.T) {
 			wg.Add(1)
 			txn := db.NewTransactionAt(math.MaxUint64, true)
 			require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", int(i))), val(true))))
-			require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
+			require.NoError(t, txn.CommitAt(i, func(err error) {
 				require.NoError(t, err)
 				wg.Done()
 			}))
@@ -793,7 +793,7 @@ func TestZeroDiscardStats(t *testing.T) {
 
 			fids := db.vlog.sortedFids()
 			for _, fid := range fids {
-				db.vlog.discardStats.Update(uint32(fid), 1)
+				db.vlog.discardStats.Update(fid, 1)
 			}
 
 			// Ensure we have some valid fids.
@@ -821,7 +821,7 @@ func TestZeroDiscardStats(t *testing.T) {
 			// Fill discard stats. Normally these are filled by compaction.
 			fids := db.vlog.sortedFids()
 			for _, fid := range fids {
-				db.vlog.discardStats.Update(uint32(fid), 1)
+				db.vlog.discardStats.Update(fid, 1)
 			}
 
 			db.vlog.discardStats.Iterate(func(id, val uint64) { require.NotZero(t, val) })

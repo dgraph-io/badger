@@ -316,7 +316,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		8 + // Sum64 in checksum proto
 		4) // checksum length
 	estimatedSize := uint32(b.curBlock.end) + uint32(6 /*header size for entry*/) +
-		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+		uint32(len(key)) + value.EncodedSize() + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
 		// IV is added at the end of the block, while encrypting.

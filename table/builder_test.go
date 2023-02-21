@@ -164,7 +164,7 @@ func BenchmarkBuilder(b *testing.B) {
 
 	val := make([]byte, 32)
 	rand.Read(val)
-	vs := y.ValueStruct{Value: []byte(val)}
+	vs := y.ValueStruct{Value: val}
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 

@@ -388,7 +388,7 @@ func TestBigValues(t *testing.T) {
 					return err
 				}
 				return item.Value(func(val []byte) error {
-					if len(val) == 0 || len(val) != len(data) || !bytes.Equal(val, []byte(data)) {
+					if len(val) == 0 || len(val) != len(data) || !bytes.Equal(val, data) {
 						log.Fatalf("key not found %q", len(key))
 					}
 					return nil
@@ -397,7 +397,7 @@ func TestBigValues(t *testing.T) {
 		}
 
 		for i := 0; i < keyCount; i++ {
-			require.NoError(t, saveByKey(key(i), []byte(data)))
+			require.NoError(t, saveByKey(key(i), data))
 		}
 
 		for i := 0; i < keyCount; i++ {
@@ -858,7 +858,7 @@ func TestMaxVersion(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			// This will create commits from 1 to N.
-			for i := 0; i < int(N); i++ {
+			for i := 0; i < N; i++ {
 				txnSet(t, db, key(i), nil, 0)
 			}
 			ver := db.MaxVersion()

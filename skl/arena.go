@@ -76,7 +76,7 @@ func (s *Arena) putNode(height int) uint32 {
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
-	l := uint32(v.EncodedSize())
+	l := v.EncodedSize()
 	n := s.n.Add(l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",

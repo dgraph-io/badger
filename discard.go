@@ -131,7 +131,7 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 
 	// Could not find the fid. Add the entry.
 	idx = lf.nextEmptySlot
-	lf.set(idx*16, uint64(fid))
+	lf.set(idx*16, fid)
 	lf.set(idx*16+8, uint64(discard))
 
 	// Move to next slot.
@@ -142,7 +142,7 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 	lf.zeroOut()
 
 	sort.Sort(lf)
-	return int64(discard)
+	return discard
 }
 
 func (lf *discardStats) Iterate(f func(fid, stats uint64)) {
