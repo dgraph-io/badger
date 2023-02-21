@@ -19,8 +19,8 @@ package badger
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -71,7 +71,7 @@ func (c *collector) Send(buf *z.Buffer) error {
 var ctxb = context.Background()
 
 func TestStream(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -173,7 +173,7 @@ func TestStream(t *testing.T) {
 }
 
 func TestStreamWithThreadId(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -232,7 +232,7 @@ func TestBigStream(t *testing.T) {
 	}()
 
 	testSize := int(1e6)
-	dir, err := ioutil.TempDir("", "badger-big-test")
+	dir, err := os.MkdirTemp("", "badger-big-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -276,7 +276,7 @@ func TestBigStream(t *testing.T) {
 // There was a bug in the stream writer code which would cause allocators to be
 // freed up twice if the default keyToList was not used. This test verifies that issue.
 func TestStreamCustomKeyToList(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 

@@ -21,10 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -382,7 +382,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	var tmpDb *badger.DB
 	var subscribeDB *badger.DB
 	if checkSubscriber {
-		dir, err := ioutil.TempDir("", "bank_subscribe")
+		dir, err := os.MkdirTemp("", "bank_subscribe")
 		y.Check(err)
 
 		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
@@ -393,7 +393,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 
 	if checkStream {
-		dir, err := ioutil.TempDir("", "bank_stream")
+		dir, err := os.MkdirTemp("", "bank_stream")
 		y.Check(err)
 
 		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))

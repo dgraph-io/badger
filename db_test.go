@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -106,7 +105,7 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 
 // Opens a badger db and runs a a test on it.
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	if opts == nil {
@@ -336,7 +335,7 @@ func TestTxnTooBig(t *testing.T) {
 }
 
 func TestForceCompactL0(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -385,7 +384,7 @@ func TestStreamDB(t *testing.T) {
 		}
 	}
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir).
@@ -407,7 +406,7 @@ func TestStreamDB(t *testing.T) {
 	require.NoError(t, writer.Flush())
 	check(db)
 
-	outDir, err := ioutil.TempDir("", "badger-test")
+	outDir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	outOpt := getTestOptions(outDir)
 	require.NoError(t, db.StreamDB(outOpt))
@@ -448,7 +447,7 @@ func dirSize(path string) (int64, error) {
 // Also with PR #1303, the delete keys are properly cleaned which
 // further reduces disk size.
 func BenchmarkDbGrowth(b *testing.B) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(b, err)
 	defer removeDir(dir)
 
@@ -780,7 +779,7 @@ func TestIterate2Basic(t *testing.T) {
 
 func TestLoad(t *testing.T) {
 	testLoad := func(t *testing.T, opt Options) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 		opt.Dir = dir
@@ -1013,7 +1012,7 @@ func TestIterateParallel(t *testing.T) {
 }
 
 func TestDeleteWithoutSyncWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	kv, err := Open(DefaultOptions(dir))
@@ -1126,7 +1125,7 @@ func TestIteratorPrefetchSize(t *testing.T) {
 }
 
 func TestSetIfAbsentAsync(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	kv, _ := Open(getTestOptions(dir))
@@ -1359,7 +1358,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 	}
 
 	t.Run("Test plain text", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 		opt := getTestOptions(dir)
@@ -1367,7 +1366,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 	})
 
 	t.Run("Test encryption", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 		opt := getTestOptions(dir)
@@ -1432,7 +1431,7 @@ func TestLargeKeys(t *testing.T) {
 		require.NoError(t, db.Close())
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 		opt := DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024)
@@ -1446,7 +1445,7 @@ func TestLargeKeys(t *testing.T) {
 }
 
 func TestCreateDirs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "parent")
+	dir, err := os.MkdirTemp("", "parent")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -1458,7 +1457,7 @@ func TestCreateDirs(t *testing.T) {
 }
 
 func TestGetSetDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	fmt.Println(dir)
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -1501,7 +1500,7 @@ func TestGetSetDeadlock(t *testing.T) {
 }
 
 func TestWriteDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -1680,7 +1679,7 @@ func TestTestSequence2(t *testing.T) {
 func TestReadOnly(t *testing.T) {
 	t.Skipf("TODO: ReadOnly needs truncation, so this fails")
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
@@ -1750,7 +1749,7 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestLSMOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -1878,7 +1877,7 @@ func TestGoroutineLeak(t *testing.T) {
 }
 
 func ExampleOpen() {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	if err != nil {
 		panic(err)
 	}
@@ -1933,7 +1932,7 @@ func ExampleOpen() {
 }
 
 func ExampleTxn_NewIterator() {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	if err != nil {
 		panic(err)
 	}
@@ -1990,7 +1989,7 @@ func ExampleTxn_NewIterator() {
 }
 
 func TestSyncForRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -2038,7 +2037,7 @@ func TestSyncForRace(t *testing.T) {
 }
 
 func TestForceFlushMemtable(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
 
 	ops := getTestOptions(dir)
@@ -2077,7 +2076,7 @@ func TestForceFlushMemtable(t *testing.T) {
 
 func TestVerifyChecksum(t *testing.T) {
 	testVerfiyCheckSum := func(t *testing.T, opt Options) {
-		path, err := ioutil.TempDir("", "badger-test")
+		path, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer os.Remove(path)
 		opt.ValueDir = path
@@ -2179,7 +2178,7 @@ func TestMinCacheSize(t *testing.T) {
 }
 
 func TestUpdateMaxCost(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
 	defer os.RemoveAll(dir)
 
@@ -2209,7 +2208,7 @@ func TestUpdateMaxCost(t *testing.T) {
 }
 
 func TestOpenDBReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -2286,7 +2285,7 @@ func TestOpenDBReadOnly(t *testing.T) {
 }
 
 func TestBannedPrefixes(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
 	defer os.RemoveAll(dir)
 

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -37,7 +36,7 @@ import (
 
 func TestDynamicValueThreshold(t *testing.T) {
 	t.Skip()
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32).WithVLogPercentile(0.99))
@@ -78,7 +77,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 }
 
 func TestValueBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 
@@ -138,7 +137,7 @@ func TestValueBasic(t *testing.T) {
 }
 
 func TestValueGCManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -186,9 +185,11 @@ func TestValueGCManaged(t *testing.T) {
 		}))
 	}
 	wg.Wait()
-	files, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
-	for _, fi := range files {
+	for _, e := range entries {
+		fi, err := e.Info()
+		require.NoError(t, err)
 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.IBytes(uint64(fi.Size())))
 	}
 
@@ -205,7 +206,7 @@ func TestValueGCManaged(t *testing.T) {
 }
 
 func TestValueGC(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -258,7 +259,7 @@ func TestValueGC(t *testing.T) {
 }
 
 func TestValueGC2(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -335,7 +336,7 @@ func TestValueGC2(t *testing.T) {
 }
 
 func TestValueGC3(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -410,7 +411,7 @@ func TestValueGC3(t *testing.T) {
 }
 
 func TestValueGC4(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -484,7 +485,7 @@ func TestValueGC4(t *testing.T) {
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -548,7 +549,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 }
 
 func TestValueChecksums(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -578,7 +579,7 @@ func TestValueChecksums(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf[offset-1]++ // Corrupt last byte
-	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
+	require.NoError(t, os.WriteFile(kv.mtFilePath(1), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
 	kv, err = Open(opts)
@@ -631,7 +632,7 @@ func TestValueChecksums(t *testing.T) {
 
 // TODO: Do we need this test?
 func TestPartialAppendToWAL(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -664,7 +665,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:offset-6]
-	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
+	require.NoError(t, os.WriteFile(kv.mtFilePath(1), buf, 0777))
 
 	// Badger should now start up
 	kv, err = Open(opts)
@@ -693,7 +694,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 }
 
 func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -721,7 +722,7 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:offset-6]
-	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
+	require.NoError(t, os.WriteFile(kv.mtFilePath(1), buf, 0777))
 
 	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
@@ -732,7 +733,7 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 
 func TestValueLogTrigger(t *testing.T) {
 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -769,7 +770,7 @@ func TestValueLogTrigger(t *testing.T) {
 
 // createMemFile creates a new memFile and returns the last valid offset.
 func createMemFile(t *testing.T, entries []*Entry) ([]byte, uint32) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -789,14 +790,14 @@ func createMemFile(t *testing.T, entries []*Entry) ([]byte, uint32) {
 	require.NoError(t, txn.Commit())
 
 	filename := kv.mtFilePath(1)
-	buf, err := ioutil.ReadFile(filename)
+	buf, err := os.ReadFile(filename)
 	require.NoError(t, err)
 	return buf, kv.mt.wal.writeAt
 }
 
 // This test creates two mem files and corrupts the last bit of the first file.
 func TestPenultimateMemCorruption(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
@@ -923,7 +924,7 @@ func (th *testHelper) readRange(from, to int) {
 // older version can end up at a higher level in the LSM tree than a newer
 // version, causing the data to not be returned.
 func TestBug578(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 
@@ -965,7 +966,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for _, vsz := range valueSize {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
-				dir, err := ioutil.TempDir("", "vlog-benchmark")
+				dir, err := os.MkdirTemp("", "vlog-benchmark")
 				y.Check(err)
 				defer removeDir(dir)
 
@@ -1021,7 +1022,7 @@ func BenchmarkReadWrite(b *testing.B) {
 // Regression test for https://github.com/dgraph-io/badger/issues/817
 // This test verifies if fully corrupted memtables are deleted on reopen.
 func TestValueLogTruncate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -1037,8 +1038,8 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Create two mem files with corrupted data. These will be truncated when DB starts next time
-	require.NoError(t, ioutil.WriteFile(db.mtFilePath(2), []byte("foo"), 0664))
-	require.NoError(t, ioutil.WriteFile(db.mtFilePath(3), []byte("foo"), 0664))
+	require.NoError(t, os.WriteFile(db.mtFilePath(2), []byte("foo"), 0664))
+	require.NoError(t, os.WriteFile(db.mtFilePath(3), []byte("foo"), 0664))
 
 	db, err = Open(DefaultOptions(dir))
 	require.NoError(t, err)
@@ -1081,7 +1082,7 @@ func TestValueEntryChecksum(t *testing.T) {
 	k := []byte("KEY")
 	v := []byte(fmt.Sprintf("val%100d", 10))
 	t.Run("ok", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 
@@ -1110,7 +1111,7 @@ func TestValueEntryChecksum(t *testing.T) {
 	})
 	// Regression test for https://github.com/dgraph-io/badger/issues/1049
 	t.Run("Corruption", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 
@@ -1219,7 +1220,7 @@ func TestValidateWrite(t *testing.T) {
 }
 
 func TestValueLogMeta(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)
 
@@ -1263,7 +1264,7 @@ func TestValueLogMeta(t *testing.T) {
 // This tests asserts the condition that vlog fids start from 1.
 // TODO(naman): should this be changed to assert instead?
 func TestFirstVlogFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 

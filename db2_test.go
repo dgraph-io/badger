@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -54,7 +53,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		return m
 	}
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -425,7 +424,7 @@ func TestBigValues(t *testing.T) {
 // tables on level 3 and 3 tables on level 2. Tables on level 2 have overlap with 2, 4, 3 tables on
 // level 3.
 func TestCompactionFilePicking(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -578,7 +577,7 @@ func TestReadSameVlog(t *testing.T) {
 func TestL0GCBug(t *testing.T) {
 	t.Skipf("TestL0GCBug is DISABLED. TODO(ibrahim): Do we need this?")
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -673,7 +672,7 @@ func TestWindowsDataLoss(t *testing.T) {
 		t.Skip("The test is only for Windows.")
 	}
 
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -826,7 +825,7 @@ func TestIsClosed(t *testing.T) {
 		if inMemory {
 			opt.InMemory = true
 		} else {
-			dir, err := ioutil.TempDir("", "badger-test")
+			dir, err := os.MkdirTemp("", "badger-test")
 			require.NoError(t, err)
 			defer removeDir(dir)
 
@@ -867,7 +866,7 @@ func TestMaxVersion(t *testing.T) {
 		})
 	})
 	t.Run("multiple versions", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 
@@ -893,7 +892,7 @@ func TestMaxVersion(t *testing.T) {
 		require.NoError(t, db.Close())
 	})
 	t.Run("Managed mode", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
+		dir, err := os.MkdirTemp("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
 
@@ -919,7 +918,7 @@ func TestMaxVersion(t *testing.T) {
 }
 
 func TestTxnReadTs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
@@ -1017,7 +1016,7 @@ func TestKeyCount(t *testing.T) {
 	}
 
 	N := uint64(10 * 1e6) // 10 million entries
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := DefaultOptions(dir).

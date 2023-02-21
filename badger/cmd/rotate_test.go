@@ -17,7 +17,6 @@
 package cmd
 
 import (
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"testing"
@@ -29,7 +28,7 @@ import (
 )
 
 func TestRotate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -38,7 +37,7 @@ func TestRotate(t *testing.T) {
 	_, err = rand.Read(key)
 	require.NoError(t, err)
 
-	fp, err := ioutil.TempFile("", "*.key")
+	fp, err := os.CreateTemp("", "*.key")
 	require.NoError(t, err)
 	_, err = fp.Write(key)
 	require.NoError(t, err)
@@ -64,7 +63,7 @@ func TestRotate(t *testing.T) {
 	key2 := make([]byte, 32)
 	_, err = rand.Read(key2)
 	require.NoError(t, err)
-	fp2, err := ioutil.TempFile("", "*.key")
+	fp2, err := os.CreateTemp("", "*.key")
 	require.NoError(t, err)
 	_, err = fp2.Write(key2)
 	require.NoError(t, err)
@@ -99,7 +98,7 @@ func TestRotate(t *testing.T) {
 
 // This test shows that rotate tool can be used to enable encryption.
 func TestRotatePlainTextToEncrypted(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -117,7 +116,7 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 	// Create an encryption key.
 	key := make([]byte, 32)
 	y.Check2(rand.Read(key))
-	fp, err := ioutil.TempFile("", "*.key")
+	fp, err := os.CreateTemp("", "*.key")
 	require.NoError(t, err)
 	_, err = fp.Write(key)
 	require.NoError(t, err)

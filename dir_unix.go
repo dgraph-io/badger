@@ -21,7 +21,6 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -72,7 +71,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	if !readOnly {
 		// Yes, we happily overwrite a pre-existing pid file.  We're the
 		// only read-write badger process using this directory.
-		err = ioutil.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
+		err = os.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
 		if err != nil {
 			f.Close()
 			return nil, y.Wrapf(err,
