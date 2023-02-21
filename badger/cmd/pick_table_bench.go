@@ -67,7 +67,9 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
-	defer db.Close()
+	defer func() {
+		y.Check(db.Close())
+	}()
 
 	boundaries := getBoundaries(db)
 	tables := genTables(boundaries)
