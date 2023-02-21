@@ -28,6 +28,7 @@ import (
 	"github.com/dgraph-io/badger/v3/options"
 	"github.com/dgraph-io/badger/v3/table"
 	"github.com/dgraph-io/badger/v3/y"
+
 	"github.com/spf13/cobra"
 )
 
