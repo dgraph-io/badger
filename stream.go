@@ -88,10 +88,10 @@ type Stream struct {
 	db           *DB
 	rangeCh      chan keyRange
 	kvChan       chan *z.Buffer
-	nextStreamId uint32
+	nextStreamId atomic.Uint32
 	doneMarkers  bool
-	scanned      uint64 // used to estimate the ETA for data scan.
-	numProducers int32
+	scanned      atomic.Uint64 // used to estimate the ETA for data scan.
+	numProducers atomic.Int32
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -165,8 +165,8 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
 func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
-	atomic.AddInt32(&st.numProducers, 1)
-	defer atomic.AddInt32(&st.numProducers, -1)
+	st.numProducers.Add(1)
+	defer st.numProducers.Add(-1)
 
 	var txn *Txn
 	if st.readTs > 0 {
@@ -198,14 +198,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		defer itr.Alloc.Release()
 
 		// This unique stream id is used to identify all the keys from this iteration.
-		streamId := atomic.AddUint32(&st.nextStreamId, 1)
+		streamId := st.nextStreamId.Add(1)
 		var scanned int
 
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
 				outList = z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
-				atomic.AddUint64(&st.scanned, uint64(itr.scanned-scanned))
+				st.scanned.Add(uint64(itr.scanned - scanned))
 				scanned = itr.scanned
 			case <-ctx.Done():
 				return ctx.Err()
@@ -347,9 +347,9 @@ outer:
 			// Instead of calculating speed over the entire lifetime, we average the speed over
 			// ticker duration.
 			writeRate.Capture(bytesSent)
-			scanned := atomic.LoadUint64(&st.scanned)
+			scanned := st.scanned.Load()
 			scanRate.Capture(scanned)
-			numProducers := atomic.LoadInt32(&st.numProducers)
+			numProducers := st.numProducers.Load()
 
 			st.db.opt.Infof("%s [%s] Scan (%d): ~%s/%s at %s/sec. Sent: %s at %s/sec."+
 				" jemalloc: %s\n",

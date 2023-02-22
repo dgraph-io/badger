@@ -43,9 +43,9 @@ This command reads data from existing Badger database randomly using multiple go
 }
 
 var (
-	sizeRead    uint64    // will store size read till now
-	entriesRead uint64    // will store entries read till now
-	startTime   time.Time // start time of read benchmarking
+	sizeRead    atomic.Uint64 // will store size read till now
+	entriesRead atomic.Uint64 // will store entries read till now
+	startTime   time.Time     // start time of read benchmarking
 
 	ro = struct {
 		blockCacheSize int64
@@ -91,8 +91,8 @@ func fullScanDB(db *badger.DB) {
 	defer it.Close()
 	for it.Rewind(); it.Valid(); it.Next() {
 		i := it.Item()
-		atomic.AddUint64(&entriesRead, 1)
-		atomic.AddUint64(&sizeRead, uint64(i.EstimatedSize()))
+		entriesRead.Add(1)
+		sizeRead.Add(uint64(i.EstimatedSize()))
 	}
 }
 
@@ -140,8 +140,8 @@ func printStats(c *z.Closer) {
 			return
 		case <-t.C:
 			dur := time.Since(startTime)
-			sz := atomic.LoadUint64(&sizeRead)
-			entries := atomic.LoadUint64(&entriesRead)
+			sz := sizeRead.Load()
+			entries := entriesRead.Load()
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
@@ -160,8 +160,8 @@ func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 			return
 		default:
 			key := keys[r.Int31n(int32(len(keys)))]
-			atomic.AddUint64(&sizeRead, lookupForKey(db, key))
-			atomic.AddUint64(&entriesRead, 1)
+			sizeRead.Add(lookupForKey(db, key))
+			entriesRead.Add(1)
 		}
 	}
 }

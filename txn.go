@@ -262,7 +262,7 @@ type Txn struct {
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
 	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
-	numIterators int32
+	numIterators atomic.Int32
 	discarded    bool
 	doneRead     bool
 	update       bool // update is used to conditionally keep track of reads.
@@ -520,7 +520,7 @@ func (txn *Txn) Discard() {
 	if txn.discarded { // Avoid a re-run.
 		return
 	}
-	if atomic.LoadInt32(&txn.numIterators) > 0 {
+	if txn.numIterators.Load() > 0 {
 		panic("Unclosed iterator at time of Txn.Discard.")
 	}
 	txn.discarded = true

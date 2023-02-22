@@ -329,7 +329,7 @@ func TestDropAllRace(t *testing.T) {
 		defer ticker.Stop()
 
 		i := N + 1 // Writes would happen above N.
-		var errors int32
+		var errors atomic.Int32
 		for {
 			select {
 			case <-ticker.C:
@@ -338,10 +338,10 @@ func TestDropAllRace(t *testing.T) {
 				require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 				if err := txn.CommitAt(uint64(i), func(err error) {
 					if err != nil {
-						atomic.AddInt32(&errors, 1)
+						errors.Add(1)
 					}
 				}); err != nil {
-					atomic.AddInt32(&errors, 1)
+					errors.Add(1)
 				}
 			case <-closer.HasBeenClosed():
 				// The following causes a data race.
@@ -550,7 +550,7 @@ func TestDropPrefixRace(t *testing.T) {
 		defer ticker.Stop()
 
 		i := N + 1 // Writes would happen above N.
-		var errors int32
+		var errors atomic.Int32
 		for {
 			select {
 			case <-ticker.C:
@@ -559,10 +559,10 @@ func TestDropPrefixRace(t *testing.T) {
 				require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 				if err := txn.CommitAt(uint64(i), func(err error) {
 					if err != nil {
-						atomic.AddInt32(&errors, 1)
+						errors.Add(1)
 					}
 				}); err != nil {
-					atomic.AddInt32(&errors, 1)
+					errors.Add(1)
 				}
 			case <-closer.HasBeenClosed():
 				// The following causes a data race.

@@ -35,7 +35,7 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	n   uint32
+	n   atomic.Uint32
 	buf []byte
 }
 
@@ -43,15 +43,13 @@ type Arena struct {
 func newArena(n int64) *Arena {
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
-	out := &Arena{
-		n:   1,
-		buf: make([]byte, n),
-	}
+	out := &Arena{buf: make([]byte, n)}
+	out.n.Store(1)
 	return out
 }
 
 func (s *Arena) size() int64 {
-	return int64(atomic.LoadUint32(&s.n))
+	return int64(s.n.Load())
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
@@ -63,7 +61,7 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	n := atomic.AddUint32(&s.n, l)
+	n := s.n.Add(l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
@@ -79,7 +77,7 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	n := atomic.AddUint32(&s.n, l)
+	n := s.n.Add(l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
@@ -90,7 +88,7 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 
 func (s *Arena) putKey(key []byte) uint32 {
 	l := uint32(len(key))
-	n := atomic.AddUint32(&s.n, l)
+	n := s.n.Add(l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))

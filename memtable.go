@@ -218,8 +218,8 @@ func (mt *memTable) UpdateSkipList() error {
 	if err != nil {
 		return y.Wrapf(err, "while iterating wal: %s", mt.wal.Fd.Name())
 	}
-	if endOff < mt.wal.size && mt.opt.ReadOnly {
-		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size)
+	if endOff < mt.wal.size.Load() && mt.opt.ReadOnly {
+		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size.Load())
 	}
 	return mt.wal.Truncate(int64(endOff))
 }
@@ -268,7 +268,7 @@ type logFile struct {
 	// exclusive ownership to open/close the descriptor, unmap or remove the file.
 	lock     sync.RWMutex
 	fid      uint32
-	size     uint32
+	size     atomic.Uint32
 	dataKey  *pb.DataKey
 	baseIV   []byte
 	registry *KeyRegistry
@@ -283,7 +283,7 @@ func (lf *logFile) Truncate(end int64) error {
 		return nil
 	}
 	y.AssertTrue(!lf.opt.ReadOnly)
-	lf.size = uint32(end)
+	lf.size.Store(uint32(end))
 	return lf.MmapFile.Truncate(end)
 }
 
@@ -395,7 +395,7 @@ func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 	// causing the read to fail with ErrEOF. See issue #585.
 	size := int64(len(lf.Data))
 	valsz := p.Len
-	lfsz := atomic.LoadUint32(&lf.size)
+	lfsz := lf.size.Load()
 	if int64(offset) >= size || int64(offset+valsz) > size ||
 		// Ensure that the read is within the file's actual size. It might be possible that
 		// the offset+valsz length is beyond the file's actual size. This could happen when
@@ -559,14 +559,14 @@ func (lf *logFile) open(path string, flags int, fsize int64) error {
 			os.Remove(path)
 			return err
 		}
-		lf.size = vlogHeaderSize
+		lf.size.Store(vlogHeaderSize)
 
 	} else if ferr != nil {
 		return y.Wrapf(ferr, "while opening file: %s", path)
 	}
-	lf.size = uint32(len(lf.Data))
+	lf.size.Store(uint32(len(lf.Data)))
 
-	if lf.size < vlogHeaderSize {
+	if lf.size.Load() < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
 		// then it must have been corrupted. But no need to handle here. log replayer will truncate
 		// and bootstrap the logfile. So ignoring here.
@@ -577,7 +577,7 @@ func (lf *logFile) open(path string, flags int, fsize int64) error {
 	buf := make([]byte, vlogHeaderSize)
 
 	y.AssertTruef(vlogHeaderSize == copy(buf, lf.Data),
-		"Unable to copy from %s, size %d", path, lf.size)
+		"Unable to copy from %s, size %d", path, lf.size.Load())
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	// retrieve datakey.
 	if dk, err := lf.registry.DataKey(keyID); err != nil {

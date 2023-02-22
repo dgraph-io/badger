@@ -24,7 +24,7 @@ type testSuite struct {
 	sync.Mutex
 	vals map[uint64]uint64
 
-	count uint64 // Not under mutex lock.
+	count atomic.Uint64 // Not under mutex lock.
 }
 
 func encoded(i uint64) []byte {
@@ -39,7 +39,7 @@ func (s *testSuite) write(db *badger.DB) error {
 			// These keys would be overwritten.
 			keyi := uint64(rand.Int63n(maxValue))
 			key := encoded(keyi)
-			vali := atomic.AddUint64(&s.count, 1)
+			vali := s.count.Add(1)
 			val := encoded(vali)
 			val = append(val, suffix...)
 			if err := txn.SetEntry(badger.NewEntry(key, val)); err != nil {
@@ -48,7 +48,7 @@ func (s *testSuite) write(db *badger.DB) error {
 		}
 		for i := 0; i < 20; i++ {
 			// These keys would be new and never overwritten.
-			keyi := atomic.AddUint64(&s.count, 1)
+			keyi := s.count.Add(1)
 			if keyi%1000000 == 0 {
 				log.Printf("Count: %d\n", keyi)
 			}
@@ -63,7 +63,7 @@ func (s *testSuite) write(db *badger.DB) error {
 }
 
 func (s *testSuite) read(db *badger.DB) error {
-	max := int64(atomic.LoadUint64(&s.count))
+	max := int64(s.count.Load())
 	keyi := uint64(rand.Int63n(max))
 	key := encoded(keyi)
 
@@ -138,11 +138,9 @@ func main() {
 		}
 	}()
 
-	s := testSuite{
-		count: uint64(maxValue),
-		vals:  make(map[uint64]uint64),
-	}
-	var numLoops uint64
+	s := testSuite{vals: make(map[uint64]uint64)}
+	s.count.Store(uint64(maxValue))
+	var numLoops atomic.Uint64
 	ticker := time.NewTicker(5 * time.Second)
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -156,7 +154,7 @@ func main() {
 						log.Fatal(err)
 					}
 				}
-				nl := atomic.AddUint64(&numLoops, 1)
+				nl := numLoops.Add(1)
 				select {
 				case <-closer.HasBeenClosed():
 					return

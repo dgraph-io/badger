@@ -40,8 +40,8 @@ import (
 )
 
 type levelsController struct {
-	nextFileID uint64 // Atomic
-	l0stallsMs int64  // Atomic
+	nextFileID atomic.Uint64
+	l0stallsMs atomic.Int64
 
 	// The following are initialized once and const.
 	levels []*levelHandler
@@ -107,7 +107,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	throttle := y.NewThrottle(3)
 
 	start := time.Now()
-	var numOpened int32
+	var numOpened atomic.Int32
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 
@@ -115,7 +115,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		fname := table.NewFilename(fileID, db.opt.Dir)
 		select {
 		case <-tick.C:
-			db.opt.Infof("%d tables out of %d opened in %s\n", atomic.LoadInt32(&numOpened),
+			db.opt.Infof("%d tables out of %d opened in %s\n", numOpened.Load(),
 				len(mf.Tables), time.Since(start).Round(time.Millisecond))
 		default:
 		}
@@ -130,7 +130,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
-				atomic.AddInt32(&numOpened, 1)
+				numOpened.Add(1)
 			}()
 			dk, err := db.registry.DataKey(tf.KeyID)
 			if err != nil {
@@ -168,9 +168,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		closeAllTables(tables)
 		return nil, err
 	}
-	db.opt.Infof("All %d tables opened in %s\n", atomic.LoadInt32(&numOpened),
+	db.opt.Infof("All %d tables opened in %s\n", numOpened.Load(),
 		time.Since(start).Round(time.Millisecond))
-	s.nextFileID = maxFileID + 1
+	s.nextFileID.Store(maxFileID + 1)
 	for i, tbls := range tables {
 		s.levels[i].initTables(tbls)
 	}
@@ -1562,7 +1562,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		if dur > time.Second {
 			s.kv.opt.Infof("L0 was stalled for %s\n", dur.Round(time.Millisecond))
 		}
-		atomic.AddInt64(&s.l0stallsMs, int64(dur.Round(time.Millisecond)))
+		s.l0stallsMs.Add(int64(dur.Round(time.Millisecond)))
 	}
 
 	return nil

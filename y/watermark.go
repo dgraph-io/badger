@@ -60,8 +60,8 @@ type mark struct {
 // Since doneUntil and lastIndex addresses are passed to sync/atomic packages, we ensure that they
 // are 64-bit aligned by putting them at the beginning of the structure.
 type WaterMark struct {
-	doneUntil uint64
-	lastIndex uint64
+	doneUntil atomic.Uint64
+	lastIndex atomic.Uint64
 	Name      string
 	markCh    chan mark
 }
@@ -74,13 +74,13 @@ func (w *WaterMark) Init(closer *z.Closer) {
 
 // Begin sets the last index to the given value.
 func (w *WaterMark) Begin(index uint64) {
-	atomic.StoreUint64(&w.lastIndex, index)
+	w.lastIndex.Store(index)
 	w.markCh <- mark{index: index, done: false}
 }
 
 // BeginMany works like Begin but accepts multiple indices.
 func (w *WaterMark) BeginMany(indices []uint64) {
-	atomic.StoreUint64(&w.lastIndex, indices[len(indices)-1])
+	w.lastIndex.Store(indices[len(indices)-1])
 	w.markCh <- mark{index: 0, indices: indices, done: false}
 }
 
@@ -97,18 +97,18 @@ func (w *WaterMark) DoneMany(indices []uint64) {
 // DoneUntil returns the maximum index that has the property that all indices
 // less than or equal to it are done.
 func (w *WaterMark) DoneUntil() uint64 {
-	return atomic.LoadUint64(&w.doneUntil)
+	return w.doneUntil.Load()
 }
 
 // SetDoneUntil sets the maximum index that has the property that all indices
 // less than or equal to it are done.
 func (w *WaterMark) SetDoneUntil(val uint64) {
-	atomic.StoreUint64(&w.doneUntil, val)
+	w.doneUntil.Store(val)
 }
 
 // LastIndex returns the last index for which Begin has been called.
 func (w *WaterMark) LastIndex() uint64 {
-	return atomic.LoadUint64(&w.lastIndex)
+	return w.lastIndex.Load()
 }
 
 // WaitForMark waits until the given index is marked as done.
@@ -182,7 +182,7 @@ func (w *WaterMark) process(closer *z.Closer) {
 		}
 
 		if until != doneUntil {
-			AssertTrue(atomic.CompareAndSwapUint64(&w.doneUntil, doneUntil, until))
+			AssertTrue(w.doneUntil.CompareAndSwap(doneUntil, until))
 		}
 
 		notifyAndRemove := func(idx uint64, toNotify []chan struct{}) {
@@ -216,7 +216,7 @@ func (w *WaterMark) process(closer *z.Closer) {
 			return
 		case mark := <-w.markCh:
 			if mark.waiter != nil {
-				doneUntil := atomic.LoadUint64(&w.doneUntil)
+				doneUntil := w.doneUntil.Load()
 				if doneUntil >= mark.index {
 					close(mark.waiter)
 				} else {

@@ -33,7 +33,7 @@ type subscriber struct {
 	subCloser *z.Closer
 	// this will be atomic pointer which will be used to
 	// track whether the subscriber is active or not
-	active *uint64
+	active *atomic.Uint64
 }
 
 type publisher struct {
@@ -111,7 +111,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 	}
 
 	for id, kvs := range batchedUpdates {
-		if atomic.LoadUint64(p.subscribers[id].active) == 1 {
+		if p.subscribers[id].active.Load() == 1 {
 			p.subscribers[id].sendCh <- kvs
 		}
 	}
@@ -124,14 +124,14 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (subscriber, 
 	id := p.nextID
 	// Increment next ID.
 	p.nextID++
-	active := uint64(1)
 	s := subscriber{
-		active:    &active,
 		id:        id,
 		matches:   matches,
 		sendCh:    ch,
 		subCloser: c,
 	}
+	s.active.Store(1)
+
 	p.subscribers[id] = s
 	for _, m := range matches {
 		if err := p.indexer.AddMatch(m, id); err != nil {

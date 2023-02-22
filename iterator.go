@@ -23,7 +23,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/v3/table"
@@ -463,24 +462,23 @@ type Iterator struct {
 // Using prefetch is recommended if you're doing a long running iteration, for performance.
 //
 // Multiple Iterators:
-// For a read-only txn, multiple iterators can be running simultaneously.  However, for a read-write
+// For a read-only txn, multiple iterators can be running simultaneously. However, for a read-write
 // txn, iterators have the nuance of being a snapshot of the writes for the transaction at the time
 // iterator was created. If writes are performed after an iterator is created, then that iterator
 // will not be able to see those writes. Only writes performed before an iterator was created can be
 // viewed.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.discarded {
-		panic("Transaction has already been discarded")
+		panic(ErrDiscardedTxn)
 	}
 	if txn.db.IsClosed() {
-		panic(ErrDBClosed.Error())
+		panic(ErrDBClosed)
 	}
 
 	// Keep track of the number of active iterators.
-	atomic.AddInt32(&txn.numIterators, 1)
+	txn.numIterators.Add(1)
 
-	// TODO: If Prefix is set, only pick those memtables which have keys with
-	// the prefix.
+	// TODO: If Prefix is set, only pick those memtables which have keys with the prefix.
 	tables, decr := txn.db.getMemTables()
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
@@ -554,7 +552,7 @@ func (it *Iterator) Close() {
 	}
 	it.closed = true
 	if it.iitr == nil {
-		atomic.AddInt32(&it.txn.numIterators, -1)
+		it.txn.numIterators.Add(-1)
 		return
 	}
 
@@ -573,7 +571,7 @@ func (it *Iterator) Close() {
 
 	// TODO: We could handle this error.
 	_ = it.txn.db.vlog.decrIteratorCount()
-	atomic.AddInt32(&it.txn.numIterators, -1)
+	it.txn.numIterators.Add(-1)
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()

@@ -881,7 +881,7 @@ func TestArmV7Issue311Fix(t *testing.T) {
 // Regression test for https://github.com/dgraph-io/badger/issues/1289
 func TestConflict(t *testing.T) {
 	key := []byte("foo")
-	setCount := uint32(0)
+	var setCount atomic.Uint32
 
 	testAndSet := func(wg *sync.WaitGroup, db *DB) {
 		defer wg.Done()
@@ -895,7 +895,7 @@ func TestConflict(t *testing.T) {
 			require.NoError(t, txn.Set(key, []byte("AA")))
 			txn.CommitWith(func(err error) {
 				if err == nil {
-					require.LessOrEqual(t, uint32(1), atomic.AddUint32(&setCount, 1))
+					require.LessOrEqual(t, uint32(1), setCount.Add(1))
 				} else {
 
 					require.Error(t, err, ErrConflict)
@@ -922,7 +922,7 @@ func TestConflict(t *testing.T) {
 			require.NoError(t, txn.Set(key, []byte("AA")))
 			txn.CommitWith(func(err error) {
 				if err == nil {
-					require.LessOrEqual(t, atomic.AddUint32(&setCount, 1), uint32(1))
+					require.LessOrEqual(t, setCount.Add(1), uint32(1))
 				} else {
 					require.Error(t, err, ErrConflict)
 				}
@@ -936,14 +936,14 @@ func TestConflict(t *testing.T) {
 		for i := 0; i < loop; i++ {
 			var wg sync.WaitGroup
 			wg.Add(numGo)
-			setCount = 0
+			setCount.Store(0)
 			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				for j := 0; j < numGo; j++ {
 					go fn(&wg, db)
 				}
 				wg.Wait()
 			})
-			require.Equal(t, uint32(1), atomic.LoadUint32(&setCount))
+			require.Equal(t, uint32(1), setCount.Load())
 		}
 	}
 	t.Run("TxnGet", func(t *testing.T) {

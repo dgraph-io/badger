@@ -54,7 +54,7 @@ type node struct {
 	// can be atomically loaded and stored:
 	//   value offset: uint32 (bits 0-31)
 	//   value size  : uint16 (bits 32-63)
-	value uint64
+	value atomic.Uint64
 
 	// A byte slice is 24 bytes. We are trying to save space here.
 	keyOffset uint32 // Immutable. No need to lock to access key.
@@ -70,25 +70,25 @@ type node struct {
 	// is deliberately truncated to not include unneeded tower elements.
 	//
 	// All accesses to elements should use CAS operations, with no need to lock.
-	tower [maxHeight]uint32
+	tower [maxHeight]atomic.Uint32
 }
 
 type Skiplist struct {
-	height  int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	height  atomic.Int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head    *node
-	ref     int32
+	ref     atomic.Int32
 	arena   *Arena
 	OnClose func()
 }
 
 // IncrRef increases the refcount
 func (s *Skiplist) IncrRef() {
-	atomic.AddInt32(&s.ref, 1)
+	s.ref.Add(1)
 }
 
 // DecrRef decrements the refcount, deallocating the Skiplist when done using it
 func (s *Skiplist) DecrRef() {
-	newRef := atomic.AddInt32(&s.ref, -1)
+	newRef := s.ref.Add(-1)
 	if newRef > 0 {
 		return
 	}
@@ -111,7 +111,7 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
+	node.value.Store(encodeValue(arena.putVal(v), v.EncodedSize()))
 	return node
 }
 
@@ -129,16 +129,14 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
-	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
-	}
+	s := &Skiplist{head: head, arena: arena}
+	s.height.Store(1)
+	s.ref.Store(1)
+	return s
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {
-	value := atomic.LoadUint64(&s.value)
+	value := s.value.Load()
 	return decodeValue(value)
 }
 
@@ -149,15 +147,15 @@ func (s *node) key(arena *Arena) []byte {
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 	valOffset := arena.putVal(v)
 	value := encodeValue(valOffset, v.EncodedSize())
-	atomic.StoreUint64(&s.value, value)
+	s.value.Store(value)
 }
 
 func (s *node) getNextOffset(h int) uint32 {
-	return atomic.LoadUint32(&s.tower[h])
+	return s.tower[h].Load()
 }
 
 func (s *node) casNextOffset(h int, old, val uint32) bool {
-	return atomic.CompareAndSwapUint32(&s.tower[h], old, val)
+	return s.tower[h].CompareAndSwap(old, val)
 }
 
 // Returns true if key is strictly > n.key.
@@ -279,7 +277,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 }
 
 func (s *Skiplist) getHeight() int32 {
-	return atomic.LoadInt32(&s.height)
+	return s.height.Load()
 }
 
 // Put inserts the key-value pair.
@@ -308,7 +306,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
-		if atomic.CompareAndSwapInt32(&s.height, listHeight, int32(height)) {
+		if s.height.CompareAndSwap(listHeight, int32(height)) {
 			// Successfully increased skiplist.height.
 			break
 		}
@@ -329,7 +327,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 				y.AssertTrue(prev[i] != next[i])
 			}
 			nextOffset := s.arena.getNodeOffset(next[i])
-			x.tower[i] = nextOffset
+			x.tower[i].Store(nextOffset)
 			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
 				// Managed to insert x between prev[i] and next[i]. Go to the next level.
 				break
@@ -431,7 +429,7 @@ func (s *Iterator) Value() y.ValueStruct {
 
 // ValueUint64 returns the uint64 value of the current node.
 func (s *Iterator) ValueUint64() uint64 {
-	return s.n.value
+	return s.n.value.Load()
 }
 
 // Next advances to the next position.

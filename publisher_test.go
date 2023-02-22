@@ -63,7 +63,7 @@ func TestPublisherDeadlock(t *testing.T) {
 		}()
 
 		firstUpdate.Wait()
-		req := int64(0)
+		var req atomic.Int64
 		for i := 1; i < 1110; i++ {
 			time.Sleep(time.Millisecond * 10)
 			go func(i int) {
@@ -72,11 +72,11 @@ func TestPublisherDeadlock(t *testing.T) {
 					return txn.SetEntry(e)
 				})
 				require.NoError(t, err)
-				atomic.AddInt64(&req, 1)
+				req.Add(1)
 			}(i)
 		}
 		for {
-			if atomic.LoadInt64(&req) == 1109 {
+			if req.Load() == 1109 {
 				break
 			}
 			time.Sleep(time.Second)

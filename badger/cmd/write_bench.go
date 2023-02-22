@@ -78,12 +78,12 @@ var (
 		gcDiscardRatio   float64
 	}{}
 
-	sizeWritten    uint64
-	gcSuccess      uint64
+	sizeWritten    atomic.Uint64
+	gcSuccess      atomic.Uint64
 	sstCount       uint32
 	vlogCount      uint32
 	files          []string
-	entriesWritten uint64
+	entriesWritten atomic.Uint64
 )
 
 const (
@@ -161,8 +161,8 @@ func writeRandom(db *badger.DB, num uint64) error {
 			panic(err)
 		}
 
-		atomic.AddUint64(&entriesWritten, 1)
-		atomic.AddUint64(&sizeWritten, es)
+		entriesWritten.Add(1)
+		sizeWritten.Add(es)
 	}
 	return batch.Flush()
 }
@@ -224,8 +224,8 @@ func writeSorted(db *badger.DB, num uint64) error {
 			badger.KVToBuffer(kv, kvBuf)
 
 			sz += es
-			atomic.AddUint64(&entriesWritten, 1)
-			atomic.AddUint64(&sizeWritten, uint64(es))
+			entriesWritten.Add(1)
+			sizeWritten.Add(uint64(es))
 
 			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvBuf
@@ -390,8 +390,8 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			}
 
 			dur := time.Since(startTime)
-			sz := atomic.LoadUint64(&sizeWritten)
-			entries := atomic.LoadUint64(&entriesWritten)
+			sz := sizeWritten.Load()
+			entries := entriesWritten.Load()
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
@@ -423,7 +423,7 @@ func runGC(c *z.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			if err := db.RunValueLogGC(wo.gcDiscardRatio); err == nil {
-				atomic.AddUint64(&gcSuccess, 1)
+				gcSuccess.Add(1)
 			} else {
 				log.Printf("[GC] Failed due to following err %v", err)
 			}
@@ -502,8 +502,8 @@ func printReadStats(c *z.Closer, startTime time.Time) {
 			return
 		case <-t.C:
 			dur := time.Since(startTime)
-			sz := atomic.LoadUint64(&sizeRead)
-			entries := atomic.LoadUint64(&entriesRead)
+			sz := sizeRead.Load()
+			entries := entriesRead.Load()
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[READ] Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
