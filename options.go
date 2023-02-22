@@ -332,7 +332,7 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 			case reflect.Int, reflect.Int64:
 				field.SetInt(flags.GetInt64(name))
 			case reflect.Uint32, reflect.Uint64:
-				field.SetUint(uint64(flags.GetUint64(name)))
+				field.SetUint(flags.GetUint64(name))
 			case reflect.Float64:
 				field.SetFloat(flags.GetFloat64(name))
 			case reflect.String:

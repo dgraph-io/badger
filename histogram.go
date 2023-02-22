@@ -106,7 +106,7 @@ func (histogram *histogramData) Update(value int64) {
 		}
 
 		// Check if the value should be added to the "index" bin
-		if value < int64(histogram.bins[index]) {
+		if value < histogram.bins[index] {
 			histogram.countPerBin[index]++
 			break
 		}

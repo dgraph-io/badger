@@ -116,7 +116,7 @@ func key(account int) []byte {
 func toUint64(val []byte) uint64 {
 	u, err := strconv.ParseUint(string(val), 10, 64)
 	y.Check(err)
-	return uint64(u)
+	return u
 }
 
 func toSlice(bal uint64) []byte {
@@ -217,7 +217,7 @@ func get(txn *badger.Txn, k []byte) (*badger.Item, error) {
 
 // seekTotal retrives the total of all accounts by seeking for each account key.
 func seekTotal(txn *badger.Txn) ([]account, error) {
-	expected := uint64(numAccounts) * uint64(initialBal)
+	expected := uint64(numAccounts) * initialBal
 	var accounts []account
 
 	var total uint64

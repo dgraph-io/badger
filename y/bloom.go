@@ -67,7 +67,7 @@ func appendFilter(buf []byte, keys []uint32, bitsPerKey int) []byte {
 		k = 30
 	}
 
-	nBits := len(keys) * int(bitsPerKey)
+	nBits := len(keys) * bitsPerKey
 	// For small len(keys), we can see a very high false positive rate. Fix it
 	// by enforcing a minimum bloom filter length.
 	if nBits < 64 {

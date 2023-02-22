@@ -178,7 +178,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		}
 	}
 	maxFid := vlog.maxFid
-	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 	vlog.filesLock.RUnlock()
 
 	vlog.opt.Infof("Rewriting fid: %d", f.fid)

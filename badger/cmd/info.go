@@ -166,7 +166,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	defer txn.Discard()
 
 	iopt := badger.DefaultIteratorOptions
-	iopt.Prefix = []byte(prefix)
+	iopt.Prefix = prefix
 	iopt.PrefetchValues = false
 	iopt.AllVersions = opt.keyHistory
 	iopt.InternalAccess = opt.showInternal

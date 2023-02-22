@@ -617,7 +617,7 @@ func TestGetMore(t *testing.T) {
 			}
 			k := data(i)
 			txn := db.NewTransaction(false)
-			_, err := txn.Get([]byte(k))
+			_, err := txn.Get(k)
 			require.Equal(t, ErrKeyNotFound, err, "should not have found k: %q", k)
 			txn.Discard()
 		}
@@ -1763,7 +1763,7 @@ func TestLSMOnly(t *testing.T) {
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
 	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
 	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MemTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	dopts.MemTableSize = LSMOnlyOptions(dir).ValueThreshold
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")
 	require.Contains(t, err.Error(),
@@ -2339,7 +2339,7 @@ func TestBannedPrefixes(t *testing.T) {
 
 	for _, key := range keys {
 		require.NoError(t, db.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry([]byte(key), []byte("value")))
+			return txn.SetEntry(NewEntry(key, []byte("value")))
 		}))
 	}
 	validate()

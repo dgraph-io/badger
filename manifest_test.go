@@ -114,17 +114,6 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *table.Table {
-	y.AssertTrue(n <= 10000)
-	keyValues := make([][]string, n)
-	for i := 0; i < n; i++ {
-		k := key(prefix, i)
-		v := fmt.Sprintf("%d", i)
-		keyValues[i] = []string{k, v}
-	}
-	return buildTable(t, keyValues, opts)
-}
-
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.Table {
@@ -161,6 +150,17 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	// [Aman] This test is not making sense to me right now. When fixing warnings from
 	// linter, I realized that the runCompactDef function below always returns error.
 	t.Skip()
+
+	buildTestTable := func(t *testing.T, prefix string, n int, opts table.Options) *table.Table {
+		y.AssertTrue(n <= 10000)
+		keyValues := make([][]string, n)
+		for i := 0; i < n; i++ {
+			k := key(prefix, i)
+			v := fmt.Sprintf("%d", i)
+			keyValues[i] = []string{k, v}
+		}
+		return buildTable(t, keyValues, opts)
+	}
 
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)

@@ -487,7 +487,7 @@ loop:
 		}
 
 		var vp valuePointer
-		vp.Len = uint32(int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size)
+		vp.Len = uint32(e.hlen + len(e.Key) + len(e.Value) + crc32.Size)
 		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
