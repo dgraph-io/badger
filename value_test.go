@@ -969,8 +969,9 @@ func BenchmarkReadWrite(b *testing.B) {
 				dir, err := os.MkdirTemp("", "vlog-benchmark")
 				y.Check(err)
 				defer removeDir(dir)
-
-				db, err := Open(getTestOptions(dir))
+				opts := getTestOptions(dir)
+				opts.ValueThreshold = 0
+				db, err := Open(opts)
 				y.Check(err)
 
 				vl := &db.vlog

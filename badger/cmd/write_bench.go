@@ -169,7 +169,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 func readTest(db *badger.DB, dur time.Duration) {
 	now := time.Now()
-	keys, err := getSampleKeys(db)
+	keys, err := getSampleKeys(db, ro.sampleSize)
 	if err != nil {
 		panic(err)
 	}
