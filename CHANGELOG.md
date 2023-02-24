@@ -3,6 +3,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [3.3.0] - 2022-02-23
+
+This minor release fixes a bug in the maxHeaderSize parameter that could lead
+to panics. We introduce an external magic number to keep track of external
+dependencies. We bump up the minimum required Go version to 1.19. No changes
+were made to the format of data on disk.
+
+### Fixed
+- fix: update maxHeaderSize #1877
+- feat(externalMagic): Introduce external magic number (#1745) #1852
+- fix(bench): bring in benchmark fixes from main #1863 
+
+### Chores
+- upgrade go to 1.19 #1868 
+- enable linters (gosimple, govet, lll, unused, staticcheck, errcheck, ineffassign, gofmt) #1871 #1870 #1876 
+- remove dependency on io/ioutil #1879 
+- various doc and comment fixes #1857 
+
 ## [3.2103.5] - 2022-12-15
 
 We release Badger CLI tool binaries for amd64 and now arm64. This release does not involve any core code changes to Badger. We add a CD job for building Badger for arm64.
