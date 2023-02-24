@@ -5,7 +5,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [3.3.0] - 2022-02-23
 
-This minor release fixes a bug in the maxHeaderSize parameter that could lead to panics. We introduce an external magic number to keep track of external dependencies. We bump up the minimum required Go version to 1.19. No changes were made to the format of data on disk.
+This minor release fixes a bug in the maxHeaderSize parameter that could lead
+to panics. We introduce an external magic number to keep track of external
+dependencies. We bump up the minimum required Go version to 1.19. No changes
+were made to the format of data on disk.
 
 ### Fixed
 - fix: update maxHeaderSize #1877
