@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/v3/pb"
-	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/badger/v4/y"
 )
 
 const (

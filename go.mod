@@ -1,4 +1,4 @@
-module github.com/dgraph-io/badger/v3
+module github.com/dgraph-io/badger/v4
 
 go 1.19
 
