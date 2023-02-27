@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [4.0.0] - 2022-02-24
+## [4.0.0] - 2023-02-24
 
 This release fixes a bug in the maxHeaderSize parameter that could lead
 to panics. We introduce an external magic number to keep track of external
