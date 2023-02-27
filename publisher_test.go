@@ -26,7 +26,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v4/pb"
 )
 
 // This test will result in deadlock for commits before this.

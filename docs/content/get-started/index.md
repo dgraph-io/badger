@@ -8,7 +8,7 @@ aliases = ["/get-started"]
 To start using Badger, install Go 1.19 or above. Badger v2 needs go modules. Run the following command to retrieve the library.
 
 ```sh
-$ go get github.com/dgraph-io/badger/v3
+$ go get github.com/dgraph-io/badger/v4
 ```
 This will retrieve the library.
 
@@ -60,7 +60,7 @@ package main
 import (
 	"log"
 
-	badger "github.com/dgraph-io/badger/v3"
+	badger "github.com/dgraph-io/badger/v4"
 )
 
 func main() {

@@ -26,10 +26,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dgraph-io/badger/v3"
-	"github.com/dgraph-io/badger/v3/options"
-	"github.com/dgraph-io/badger/v3/table"
-	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
+	"github.com/dgraph-io/badger/v4/table"
+	"github.com/dgraph-io/badger/v4/y"
 )
 
 var pickBenchCmd = &cobra.Command{

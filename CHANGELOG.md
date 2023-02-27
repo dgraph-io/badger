@@ -3,12 +3,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [3.3.0] - 2022-02-23
+## [4.0.0] - 2023-02-24
 
-This minor release fixes a bug in the maxHeaderSize parameter that could lead
+This release fixes a bug in the maxHeaderSize parameter that could lead
 to panics. We introduce an external magic number to keep track of external
 dependencies. We bump up the minimum required Go version to 1.19. No changes
-were made to the format of data on disk.
+were made to the format of data on disk.  This is a major release because
+we are making a switch to SemVer in order to make it easier for the community
+to understand when breaking API and data format changes are made.
 
 ### Fixed
 - fix: update maxHeaderSize #1877
@@ -19,7 +21,8 @@ were made to the format of data on disk.
 - upgrade go to 1.19 #1868 
 - enable linters (gosimple, govet, lll, unused, staticcheck, errcheck, ineffassign, gofmt) #1871 #1870 #1876 
 - remove dependency on io/ioutil #1879 
-- various doc and comment fixes #1857 
+- various doc and comment fixes #1857
+- moving from CalVer to SemVer
 
 ## [3.2103.5] - 2022-12-15
 

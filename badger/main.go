@@ -25,7 +25,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"go.opencensus.io/zpages"
 
-	"github.com/dgraph-io/badger/v3/badger/cmd"
+	"github.com/dgraph-io/badger/v4/badger/cmd"
 	"github.com/dgraph-io/ristretto/z"
 )
 
