@@ -1,10 +1,18 @@
 name: cd-badger
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      releasetag:
+        description: 'releasetag'
+        required: true
+        type: string
 jobs:
   badger-build-amd64:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
+        with:
+          ref: '${{ github.event.inputs.releasetag }}'
       - name: Get Go Version
         run: |
           #!/bin/bash
@@ -17,12 +25,12 @@ jobs:
       - name: Set Badger Release Version
         run: |
           #!/bin/bash
-          GIT_BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-          if [[ "$GIT_BRANCH_NAME" == "release/v"* ]]; 
+          GIT_BRANCH_NAME='${{ github.event.inputs.releasetag }}'
+          if [[ "$GIT_BRANCH_NAME" == "v"* ]]; 
           then
-            echo "this is a release branch"
+            echo "this is a release tag"
           else
-            echo "this is NOT a release branch"
+            echo "this is NOT a release tag"
             exit 1
           fi
           BADGER_RELEASE_VERSION=$(git rev-parse --abbrev-ref HEAD | sed  's/release\///')
@@ -46,6 +54,8 @@ jobs:
     runs-on: [self-hosted, ARM64]
     steps:
       - uses: actions/checkout@v3
+        with:
+          ref: '${{ github.event.inputs.releasetag }}'
       - name: Get Go Version
         run: |
           #!/bin/bash
@@ -58,12 +68,12 @@ jobs:
       - name: Set Badger Release Version
         run: |
           #!/bin/bash
-          GIT_BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-          if [[ "$GIT_BRANCH_NAME" == "release/v"* ]]; 
+          GIT_BRANCH_NAME='${{ github.event.inputs.releasetag }}'
+          if [[ "$GIT_BRANCH_NAME" == "v"* ]]; 
           then
-            echo "this is a release branch"
+            echo "this is a release tag"
           else
-            echo "this is NOT a release branch"
+            echo "this is NOT a release tag"
             exit 1
           fi
           BADGER_RELEASE_VERSION=$(git rev-parse --abbrev-ref HEAD | sed  's/release\///')
