@@ -22,6 +22,7 @@ to understand when breaking API and data format changes are made.
 - enable linters (gosimple, govet, lll, unused, staticcheck, errcheck, ineffassign, gofmt) #1871 #1870 #1876 
 - remove dependency on io/ioutil #1879 
 - various doc and comment fixes #1857
+- moving from CalVer to SemVer
 
 ## [3.2103.5] - 2022-12-15
 
