@@ -32,7 +32,7 @@ manual() {
   set -e
   for pkg in $packages; do
     echo "===> Testing $pkg"
-    go test $tags -timeout=25m $covermode $coverprofile -race -parallel 16 $pkg && write_coverage
+    go test $tags -timeout=25m $covermode $coverprofile -failfast -race -parallel 16 $pkg && write_coverage || return 1
   done
   echo "==> DONE package tests"
 
@@ -40,10 +40,10 @@ manual() {
   # Run the special Truncate test.
   rm -rf p
   set -e
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' -failfast --manual=true && write_coverage || return 1 
   truncate --size=4096 p/000000.vlog
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' -failfast --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' -failfast --manual=true && write_coverage || return 1
   rm -rf p
 
   # TODO(ibrahim): Let's make these tests have Manual prefix.
@@ -52,14 +52,14 @@ manual() {
   # TestValueGCManaged
   # TestDropPrefix
   # TestDropAllManaged
-  go test $tags $timeout $covermode $coverprofile -run='TestBigKeyValuePairs$' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestPushValueLogLimit' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestKeyCount' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestIteratePrefix' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestIterateParallel' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestBigStream' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestGoroutineLeak' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestGetMore' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestBigKeyValuePairs$' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestPushValueLogLimit' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestKeyCount' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestIteratePrefix' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestIterateParallel' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestBigStream' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestGoroutineLeak' --manual=true && write_coverage || return 1
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestGetMore' --manual=true && write_coverage || return 1
 
   echo "==> DONE manual tests"
 }
@@ -69,8 +69,7 @@ root() {
   # go test -timeout=25m -v -race github.com/dgraph-io/badger/v4/...
 
   echo "==> Running root level tests."
-  set -e
-  go test $tags -v -race -parallel=16 -timeout=25m $covermode $coverprofile . && write_coverage
+  go test $tags -v -race -parallel=16 -timeout=25m -failfast $covermode $coverprofile . && write_coverage || return 1
   echo "==> DONE root level tests"
 }
 
@@ -94,8 +93,8 @@ stream() {
 }
 
 write_coverage() {
-  if [ $CI = "true" ]; then
-    if [ -f cover_tmp.out ]; then
+  if [[ $CI = "true" ]]; then
+    if [[ -f cover_tmp.out ]]; then
       sed -i '1d' cover_tmp.out
       cat cover_tmp.out >> cover.out && rm cover_tmp.out
     fi
