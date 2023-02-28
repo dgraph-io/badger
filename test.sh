@@ -32,7 +32,7 @@ manual() {
   set -e
   for pkg in $packages; do
     echo "===> Testing $pkg"
-    go test $tags -timeout=25m $covermode $coverprofile -race -parallel 16 $pkg && write_coverage
+    go test $tags -timeout=25m $covermode $coverprofile -failfast -race -parallel 16 $pkg && write_coverage
   done
   echo "==> DONE package tests"
 
@@ -40,10 +40,10 @@ manual() {
   # Run the special Truncate test.
   rm -rf p
   set -e
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' -failfast --manual=true && write_coverage
   truncate --size=4096 p/000000.vlog
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' -failfast --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' -failfast --manual=true && write_coverage
   rm -rf p
 
   # TODO(ibrahim): Let's make these tests have Manual prefix.
@@ -70,7 +70,7 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -v -race -parallel=16 -timeout=25m $covermode $coverprofile . && write_coverage
+  go test $tags -v -race -parallel=16 -timeout=25m -failfast $covermode $coverprofile . && write_coverage
   echo "==> DONE root level tests"
 }
 
