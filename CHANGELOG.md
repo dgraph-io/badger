@@ -3,7 +3,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.0.1] - 2023-02-28
+
+We issue a follow up release in order to resolve a bug in subscriber.  We also generate updated protobufs for Badger v4.
+
+### Fixed
+  - fix(pb): fix generated protos #1888
+  - fix(publisher): initialize the atomic variable #1889
+
+### Chores
+  - chore(cd): tag based deployments #1887
+  - chore(ci): fail fast when testing #1890
+
 ## [4.0.0] - 2023-02-24
+
+> **Warning**
+> The tag v4.0.0 has been retracted due to a bug in publisher.
+> Use v4.0.1 (see #1889)
 
 This release fixes a bug in the maxHeaderSize parameter that could lead
 to panics. We introduce an external magic number to keep track of external
