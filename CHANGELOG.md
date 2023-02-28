@@ -15,7 +15,7 @@ We issue a follow up release in order to resolve a bug in subscriber.  We also g
   - chore(cd): tag based deployments #1887
   - chore(ci): fail fast when testing #1890
 
-## [4.0.0] - 2023-02-26
+## [4.0.0] - 2023-02-27
 
 > **Warning**
 > The tag v4.0.0 has been retracted due to a bug in publisher.
