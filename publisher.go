@@ -129,6 +129,7 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (subscriber, 
 		matches:   matches,
 		sendCh:    ch,
 		subCloser: c,
+		active:    new(atomic.Uint64),
 	}
 	s.active.Store(1)
 
