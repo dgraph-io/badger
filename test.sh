@@ -52,14 +52,14 @@ manual() {
   # TestValueGCManaged
   # TestDropPrefix
   # TestDropAllManaged
-  go test $tags $timeout $covermode $coverprofile -run='TestBigKeyValuePairs$' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestPushValueLogLimit' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestKeyCount' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestIteratePrefix' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestIterateParallel' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestBigStream' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestGoroutineLeak' --manual=true && write_coverage
-  go test $tags $timeout $covermode $coverprofile -run='TestGetMore' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestBigKeyValuePairs$' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestPushValueLogLimit' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestKeyCount' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestIteratePrefix' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestIterateParallel' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestBigStream' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestGoroutineLeak' --manual=true && write_coverage
+  go test $tags $timeout $covermode $coverprofile -failfast -run='TestGetMore' --manual=true && write_coverage
 
   echo "==> DONE manual tests"
 }
