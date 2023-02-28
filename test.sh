@@ -69,7 +69,7 @@ root() {
   # go test -timeout=25m -v -race github.com/dgraph-io/badger/v4/...
 
   echo "==> Running root level tests."
-  set -e
+  go test $tags -v -race -parallel=16 -timeout=25m $covermode $coverprofile . 
   if [ $? -eq 0 ] 
   then 
     echo "root tests were successful"
