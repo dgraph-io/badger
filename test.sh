@@ -70,7 +70,14 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -v -race -parallel=16 -timeout=25m -failfast $covermode $coverprofile . && write_coverage
+  if [ $? -eq 0 ] 
+  then 
+    echo "root tests were successful"
+    write_coverage
+  else 
+    echo "root tests failed"
+    exit 1
+  fi
   echo "==> DONE root level tests"
 }
 
@@ -94,8 +101,8 @@ stream() {
 }
 
 write_coverage() {
-  if [ $CI = "true" ]; then
-    if [ -f cover_tmp.out ]; then
+  if [[ $CI = "true" ]]; then
+    if [[ -f cover_tmp.out ]]; then
       sed -i '1d' cover_tmp.out
       cat cover_tmp.out >> cover.out && rm cover_tmp.out
     fi
