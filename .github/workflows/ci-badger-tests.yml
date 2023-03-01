@@ -34,4 +34,5 @@ jobs:
       - name: Send Coverage Results
         env:
           COVERALLS_TOKEN: ${{ secrets.COVERALLSIO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: goveralls -coverprofile=cover.out
