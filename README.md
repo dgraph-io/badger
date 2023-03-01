@@ -16,6 +16,7 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
+
 ## Project Status
 
 Badger is stable and is being used to serve data sets worth hundreds of
