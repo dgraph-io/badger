@@ -35,6 +35,7 @@ be compatible with all of the v1.x. Badger v2.0 supports compression, encryption
 
 Badger v3.0 was released in January 2021.  This release improves compaction performance.
 
+
 Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
