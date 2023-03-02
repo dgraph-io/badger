@@ -15,13 +15,10 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
-        with: 
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Get Go Version
         run: |
           #!/bin/bash
-          DEFAULT_VERSION="1.19"
-          GOVERSION=$({ [ -f .go-version ] && cat .go-version; } || echo $DEFAULT_VERSION)
+          GOVERSION=$({ [ -f .go-version ] && cat .go-version; })
           echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
       - name: Setup Go
         uses: actions/setup-go@v3
