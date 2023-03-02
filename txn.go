@@ -162,11 +162,18 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 }
 
 func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
+	// skip newCommitTs when precommit already exists
+	if txn.precommitTs != 0 {
+		return txn.precommitTs, txn.precommitConflict
+	}
+
 	o.Lock()
 	defer o.Unlock()
 
 	if o.hasConflict(txn) {
-		return 0, true
+		txn.precommitTs = 0
+		txn.precommitConflict = true
+		return txn.precommitTs, txn.precommitConflict
 	}
 
 	var ts uint64
@@ -195,7 +202,9 @@ func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
 		})
 	}
 
-	return ts, false
+	txn.precommitTs = ts
+	txn.precommitConflict = false
+	return txn.precommitTs, txn.precommitConflict
 }
 
 func (o *oracle) doneRead(txn *Txn) {
@@ -248,11 +257,13 @@ func (o *oracle) doneCommit(cts uint64) {
 
 // Txn represents a Badger transaction.
 type Txn struct {
-	readTs   uint64
-	commitTs uint64
-	size     int64
-	count    int64
-	db       *DB
+	precommitTs       uint64
+	precommitConflict bool
+	readTs            uint64
+	commitTs          uint64
+	size              int64
+	count             int64
+	db                *DB
 
 	reads []uint64 // contains fingerprints of keys read.
 	// contains fingerprints of keys written. This is used for conflict detection.
@@ -551,6 +562,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			keepTogether = false
 		}
 	}
+
 	for _, e := range txn.pendingWrites {
 		setVersion(e)
 	}
@@ -827,11 +839,15 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	return txn.Commit()
 }
 
-// CanCommit will return true if commit will succeed for Txn.Commit()
-func (txn *Txn) CanCommit() bool {
+// PreCommit will perform prevalidation for Commit and return true if commit the transaction can be committed.
+func (txn *Txn) PreCommit() bool {
 	if txn.db.opt.managedTxns {
 		panic("Cannot use CanCommit with managedDB=true. Use CanCommitAt instead.")
 	}
 
-	return !txn.db.orc.hasConflict(txn)
+	txn.db.orc.writeChLock.Lock()
+	defer txn.db.orc.writeChLock.Unlock()
+	txn.precommitTs, txn.precommitConflict = txn.db.orc.newCommitTs(txn)
+
+	return !txn.precommitConflict
 }

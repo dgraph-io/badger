@@ -88,12 +88,17 @@ func (db *DB) SetDiscardTs(ts uint64) {
 	db.orc.setDiscardTs(ts)
 }
 
-// CanCommitAt will return true if commit will succeed at specified commit timestamp
-func (txn *Txn) CanCommitAt(commitTs uint64) bool {
+// PreCommitAt will perform prevalidation for CommitAt and return true if commit the transaction can be committed.
+func (txn *Txn) PreCommitAt(commitTs uint64) bool {
 	if !txn.db.opt.managedTxns {
 		panic("Cannot use CanCommitAt with managedDB=false. Use CanCommit instead.")
 	}
+
 	txn.commitTs = commitTs
 
-	return !txn.db.orc.hasConflict(txn)
+	txn.db.orc.writeChLock.Lock()
+	defer txn.db.orc.writeChLock.Unlock()
+	txn.precommitTs, txn.precommitConflict = txn.db.orc.newCommitTs(txn)
+
+	return !txn.precommitConflict
 }
