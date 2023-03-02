@@ -827,7 +827,11 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	return txn.Commit()
 }
 
-// CanCommit will return true if commit will succeed
+// CanCommit will return true if commit will succeed for Txn.Commit()
 func (txn *Txn) CanCommit() bool {
+	// Commit will not succeed for Txn.Commit() when transactions are managed.
+	if txn.db.opt.managedTxns {
+		return false
+	}
 	return !txn.db.orc.hasConflict(txn)
 }

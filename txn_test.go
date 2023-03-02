@@ -770,9 +770,9 @@ func TestManagedDB(t *testing.T) {
 			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 		}
 
-		require.Panics(t, func() { _ = txn.CanCommit() })
-		require.True(t, txn.CanCommitAt(3))
+		require.False(t, txn.CanCommit())
 		require.Error(t, txn.Commit())
+		require.True(t, txn.CanCommitAt(3))
 		require.NoError(t, txn.CommitAt(3, nil))
 
 		// Read data at t=2.
