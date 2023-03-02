@@ -91,7 +91,7 @@ func (db *DB) SetDiscardTs(ts uint64) {
 // CanCommitAt will return true if commit will succeed at specified commit timestamp
 func (txn *Txn) CanCommitAt(commitTs uint64) bool {
 	if !txn.db.opt.managedTxns {
-		panic("Cannot use CommitAt with managedDB=false. Use Commit instead.")
+		panic("Cannot use CanCommitAt with managedDB=false. Use CanCommit instead.")
 	}
 	txn.commitTs = commitTs
 
