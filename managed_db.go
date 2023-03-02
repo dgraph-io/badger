@@ -87,3 +87,13 @@ func (db *DB) SetDiscardTs(ts uint64) {
 	}
 	db.orc.setDiscardTs(ts)
 }
+
+// CanCommitAt will return true if commit will succeed at specified commit timestamp
+func (txn *Txn) CanCommitAt(commitTs uint64) bool {
+	if !txn.db.opt.managedTxns {
+		panic("Cannot use CommitAt with managedDB=false. Use Commit instead.")
+	}
+	txn.commitTs = commitTs
+
+	return !txn.db.orc.hasConflict(txn)
+}

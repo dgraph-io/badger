@@ -831,13 +831,3 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 func (txn *Txn) CanCommit() bool {
 	return !txn.db.orc.hasConflict(txn)
 }
-
-// CanCommitAt will return true if commit will succeed at specified commit timestamp
-func (txn *Txn) CanCommitAt(commitTs uint64) bool {
-	if !txn.db.opt.managedTxns {
-		panic("Cannot use CommitAt with managedDB=false. Use Commit instead.")
-	}
-	txn.commitTs = commitTs
-
-	return !txn.db.orc.hasConflict(txn)
-}
