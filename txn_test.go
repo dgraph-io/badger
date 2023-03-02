@@ -50,6 +50,9 @@ func TestTxnSimple(t *testing.T) {
 			return nil
 		}))
 
+		require.Panics(t, func() { _ = txn.CanCommitAt(100) })
+		require.True(t, txn.CanCommit())
+
 		require.Panics(t, func() { _ = txn.CommitAt(100, nil) })
 		require.NoError(t, txn.Commit())
 	})
@@ -107,6 +110,9 @@ func TestTxnCommitAsync(t *testing.T) {
 			err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100))))
 			require.NoError(t, err)
 		}
+
+		require.True(t, txn.CanCommit())
+
 		require.NoError(t, txn.Commit())
 		txn.Discard()
 
@@ -321,8 +327,10 @@ func TestTxnWriteSkew(t *testing.T) {
 		require.Equal(t, 100, sum)
 
 		// Commit both now.
+		require.True(t, txn1.CanCommit())
 		require.NoError(t, txn1.Commit())
-		require.Error(t, txn2.Commit()) // This should fail.
+		require.False(t, txn2.CanCommit()) // This should be false.
+		require.Error(t, txn2.Commit())    // This should fail.
 
 		require.Equal(t, uint64(2), db.orc.readTs())
 	})
@@ -761,6 +769,9 @@ func TestManagedDB(t *testing.T) {
 		for i := 0; i <= 3; i++ {
 			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 		}
+
+		require.Panics(t, func() { _ = txn.CanCommit() })
+		require.True(t, txn.CanCommitAt(3))
 		require.Error(t, txn.Commit())
 		require.NoError(t, txn.CommitAt(3, nil))
 
@@ -793,6 +804,7 @@ func TestManagedDB(t *testing.T) {
 			}
 			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 		}
+		require.True(t, txn.CanCommitAt(7))
 		require.NoError(t, txn.CommitAt(7, nil))
 
 		// Read data at t=9.
@@ -825,6 +837,7 @@ func TestManagedDB(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, txn.SetEntry(NewEntry(key(0), val(0))))
 		require.NoError(t, txnb.SetEntry(NewEntry(key(0), val(1))))
+		require.True(t, txn.CanCommitAt(11))
 		require.NoError(t, txn.CommitAt(11, nil))
 		require.Equal(t, ErrConflict, txnb.CommitAt(11, nil))
 	}
