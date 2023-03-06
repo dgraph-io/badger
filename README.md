@@ -216,6 +216,7 @@ Below is a list of known projects that use Badger:
 * [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
 * [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
 * [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
+* [Loggie](https://github.com/loggie-io/loggie) - A lightweight, cloud-native data transfer agent and aggregator.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
