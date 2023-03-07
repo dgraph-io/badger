@@ -577,3 +577,102 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	require.NoError(t, db.Close())
 
 }
+
+// Test that stream writer does not crashes with large values in managed mode.
+func TestStreamWriterWithLargeValue(t *testing.T) {
+	opts := DefaultOptions("")
+	opts.managedTxns = true
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		buf := z.NewBuffer(10<<20, "test")
+		defer func() { require.NoError(t, buf.Release()) }()
+		val := make([]byte, 10<<20)
+		_, err := rand.Read(val)
+		require.NoError(t, err)
+		KVToBuffer(&pb.KV{
+			Key:     []byte("key"),
+			Value:   val,
+			Version: 1,
+		}, buf)
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	})
+}
+
+func TestStreamWriterIncremental(t *testing.T) {
+	addIncremtal := func(t *testing.T, db *DB, keys [][]byte) {
+		buf := z.NewBuffer(10<<20, "test")
+		defer func() { require.NoError(t, buf.Release()) }()
+		for _, key := range keys {
+			KVToBuffer(&pb.KV{
+				Key:     key,
+				Value:   []byte("val"),
+				Version: 1,
+			}, buf)
+		}
+		// Now do an incremental stream write.
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	}
+
+	t.Run("incremental on non-empty DB", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			buf := z.NewBuffer(10<<20, "test")
+			defer func() { require.NoError(t, buf.Release()) }()
+			KVToBuffer(&pb.KV{
+				Key:     []byte("key-1"),
+				Value:   []byte("val"),
+				Version: 1,
+			}, buf)
+			sw := db.NewStreamWriter()
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+			addIncremtal(t, db, [][]byte{[]byte("key-2")})
+
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			_, err := txn.Get([]byte("key-1"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("key-2"))
+			require.NoError(t, err)
+		})
+	})
+
+	t.Run("incremental on empty DB", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			addIncremtal(t, db, [][]byte{[]byte("key-1")})
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			_, err := txn.Get([]byte("key-1"))
+			require.NoError(t, err)
+		})
+	})
+
+	t.Run("multiple incremental", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			addIncremtal(t, db, [][]byte{[]byte("a1"), []byte("c1")})
+			addIncremtal(t, db, [][]byte{[]byte("a2"), []byte("c2")})
+			addIncremtal(t, db, [][]byte{[]byte("a3"), []byte("c3")})
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+			_, err := txn.Get([]byte("a1"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("c1"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("a2"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("c2"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("a3"))
+			require.NoError(t, err)
+			_, err = txn.Get([]byte("c3"))
+			require.NoError(t, err)
+		})
+	})
+}

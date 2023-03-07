@@ -118,6 +118,7 @@ func stream(cmd *cobra.Command, args []string) error {
 			WithValueDir(so.outDir).
 			WithNumVersionsToKeep(so.numVersions).
 			WithCompression(options.CompressionType(so.compressionType)).
+			WithEncryptionKey(encKey).
 			WithReadOnly(false)
 		err = inDB.StreamDB(outOpt)
 
