@@ -1,6 +1,6 @@
-+++ 
-title = "Projects Using Badger" 
-aliases = ["/project-using-badger"] 
++++
+title = "Projects Using Badger"
+aliases = ["/project-using-badger"]
 +++
 
 Below is a list of known projects that use Badger:
@@ -12,6 +12,7 @@ Below is a list of known projects that use Badger:
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
 * [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
 * [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
+* [smallstep/certificates](https://github.com/smallstep/certificates) - Step-ca is an online certificate authority for secure, automated certificate management.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
 * [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
@@ -34,23 +35,24 @@ Below is a list of known projects that use Badger:
 * [BadgerHold](https://github.com/timshannon/badgerhold) - An embeddable NoSQL store for querying Go types built on Badger
 * [Goblero](https://github.com/didil/goblero) - Pure Go embedded persistent job queue backed by BadgerDB
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
-* [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
+* [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft.
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
-* [Opacity](https://github.com/opacity/storage-node) - Backend implementation for the Opacity storage project
-* [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
-* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
-* [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
-* [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
-* [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
-* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on the raft protocol.
-* [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
+* [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
 * [Pyroscope](https://github.com/pyroscope-io/pyroscope) - Open source confinuous profiling platform built with BadgerDB
-* [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
 * [Veri](https://github.com/bgokden/veri) - A distributed feature store optimized for Search and Recommendation tasks.
 * [bIter](https://github.com/MikkelHJuul/bIter) - A library and Iterator interface for working with the `badger.Iterator`, simplifying from-to, and prefix mechanics.
 * [ld](https://github.com/MikkelHJuul/ld) - (Lean Database) A very simple gRPC-only key-value database, exposing BadgerDB with key-range scanning semantics.
-* [smallstep/certificates](https://github.com/smallstep/certificates) - Step-ca is an online certificate authority for secure, automated certificate management.
+* [Souin](https://github.com/darkweak/Souin) - A RFC compliant HTTP cache with lot of other features based on Badger for the storage. Compatible with all existing reverse-proxies.
+* [Xuperchain](https://github.com/xuperchain/xupercore) - A highly flexible blockchain architecture with great transaction performance.
+* [m2](https://github.com/qichengzx/m2) - A simple http key/value store based on the raft protocol.
+* [chaindb](https://github.com/ChainSafe/chaindb) - A blockchain storage layer used by [Gossamer](https://chainsafe.github.io/gossamer/), a Go client for the [Polkadot Network](https://polkadot.network/).
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
+* [Opacity](https://github.com/opacity/storage-node) - Backend implementation for the Opacity storage project
+* [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
+* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb
+* [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
+* [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
+* [Loggie](https://github.com/loggie-io/loggie) - A lightweight, cloud-native data transfer agent and aggregator.
 
 If you are using Badger in a project please send a pull request to add it to the list.

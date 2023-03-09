@@ -1,7 +1,7 @@
-# BadgerDB 
+# BadgerDB
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v4.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v4) 
-[![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v4)](https://goreportcard.com/report/github.com/dgraph-io/badger/v4) 
+[![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v4.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v4)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v4)](https://goreportcard.com/report/github.com/dgraph-io/badger/v4)
 [![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
 [![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
 [![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
@@ -71,14 +71,14 @@ This will retrieve the library.
 
 #### Installing Badger Command Line Tool
 
-Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI, 
+Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI,
 retrieve the repository and checkout the desired version.  Then run
 
 ```sh
 $ cd badger
 $ go install .
 ```
-This will install the badger command line utility into your $GOBIN path. 
+This will install the badger command line utility into your $GOBIN path.
 
 #### Choosing a version
 
@@ -198,7 +198,7 @@ Below is a list of known projects that use Badger:
 * [BadgerHold](https://github.com/timshannon/badgerhold) - An embeddable NoSQL store for querying Go types built on Badger
 * [Goblero](https://github.com/didil/goblero) - Pure Go embedded persistent job queue backed by BadgerDB
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
-* [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
+* [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft.
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 * [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
@@ -213,7 +213,7 @@ Below is a list of known projects that use Badger:
 * [vxdb](https://github.com/vitalvas/vxdb) - Simple schema-less Key-Value NoSQL database with simplest API interface.
 * [Opacity](https://github.com/opacity/storage-node) - Backend implementation for the Opacity storage project
 * [Vephar](https://github.com/vaccovecrana/vephar) - A minimal key/value store using hashicorp-raft for cluster coordination and Badger for data storage.
-* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb 
+* [gowarcserver](https://github.com/nlnwa/gowarcserver) - Open-source server for warc files. Can be used in conjunction with pywb
 * [flow-go](https://github.com/onflow/flow-go) - A fast, secure, and developer-friendly blockchain built to support the next generation of games, apps and the digital assets that power them.
 * [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
 * [Loggie](https://github.com/loggie-io/loggie) - A lightweight, cloud-native data transfer agent and aggregator.
