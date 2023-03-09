@@ -750,4 +750,51 @@ func TestStreamWriterIncremental(t *testing.T) {
 			require.NoError(t, err)
 		})
 	})
+
+	t.Run("multiple incremental with older data first", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			buf := z.NewBuffer(10<<20, "test")
+			defer func() { require.NoError(t, buf.Release()) }()
+			KVToBuffer(&pb.KV{
+				Key:     []byte("a1"),
+				Value:   []byte("val1"),
+				Version: 11,
+			}, buf)
+			sw := db.NewStreamWriter()
+			require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+			buf = z.NewBuffer(10<<20, "test")
+			defer func() { require.NoError(t, buf.Release()) }()
+			KVToBuffer(&pb.KV{
+				Key:     []byte("a2"),
+				Value:   []byte("val2"),
+				Version: 9,
+			}, buf)
+			sw = db.NewStreamWriter()
+			require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+			// This will move the maxTs to 10 (earlier, without the fix)
+			require.NoError(t, db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("a1"), []byte("val3"))
+			}))
+			// This will move the maxTs to 11 (earliler, without the fix)
+			require.NoError(t, db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("a3"), []byte("val4"))
+			}))
+
+			// And now, the first write with val1 will resurface (without the fix)
+			require.NoError(t, db.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte("a1"))
+				require.NoError(t, err)
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, "val3", string(val))
+				return nil
+			}))
+		})
+	})
 }

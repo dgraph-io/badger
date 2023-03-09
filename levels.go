@@ -1573,8 +1573,8 @@ func (s *levelsController) close() error {
 }
 
 // get searches for a given key in all the levels of the LSM tree. It returns
-// key version <= the expected version (maxVs). If not found, it returns an empty
-// y.ValueStruct.
+// key version <= the expected version (version in key). If not found,
+// it returns an empty y.ValueStruct.
 func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) (
 	y.ValueStruct, error) {
 	if s.kv.IsClosed() {
