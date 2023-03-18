@@ -499,7 +499,8 @@ func (opt Options) WithMaxLevels(val int) Options {
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 1 MB, but LSMOnlyOptions sets it to maxValueThreshold.
+// The default value of ValueThreshold is 1 MB, and LSMOnlyOptions sets it to maxValueThreshold
+// which is set to 1 MB too.
 func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
 	return opt
@@ -580,7 +581,7 @@ func (opt Options) WithNumLevelZeroTables(val int) Options {
 // WithNumLevelZeroTablesStall sets the number of Level 0 tables that once reached causes the DB to
 // stall until compaction succeeds.
 //
-// The default value of NumLevelZeroTablesStall is 10.
+// The default value of NumLevelZeroTablesStall is 15.
 func (opt Options) WithNumLevelZeroTablesStall(val int) Options {
 	opt.NumLevelZeroTablesStall = val
 	return opt
@@ -643,6 +644,8 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 //
 // Key Registry will use this duration to create new keys. If the previous generated
 // key exceed the given duration. Then the key registry will create new key.
+
+// The default value is set to 10 days.
 func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 	opt.EncryptionKeyRotationDuration = d
 	return opt
@@ -688,7 +691,7 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // unnecessary overhead which will affect the read performance. Setting size to
 // zero disables the cache altogether.
 //
-// Default value of BlockCacheSize is zero.
+// Default value of BlockCacheSize is 256 MB.
 func (opt Options) WithBlockCacheSize(size int64) Options {
 	opt.BlockCacheSize = size
 	return opt
