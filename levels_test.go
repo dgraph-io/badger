@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
@@ -1162,6 +1164,85 @@ func TestTableContainsPrefix(t *testing.T) {
 	require.False(t, containsPrefix(tbl, []byte("key2")))
 	require.False(t, containsPrefix(tbl, []byte("key323")))
 	require.False(t, containsPrefix(tbl, []byte("key5")))
+}
+
+func TestFillTableCleanup(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		opts := table.Options{
+			BlockSize:          4 * 1024,
+			BloomFalsePositive: 0.01,
+		}
+		buildStaleTable := func(prefix byte) *table.Table {
+			filename := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+			b := table.NewTableBuilder(opts)
+			defer b.Close()
+			key := make([]byte, 100)
+			val := make([]byte, 500)
+			rand.Read(val)
+
+			copy(key, []byte{prefix})
+			count := uint64(40000)
+			for i := count; i > 0; i-- {
+				var meta byte
+				if i == 0 {
+					meta = bitDiscardEarlierVersions
+				}
+				b.AddStaleKey(y.KeyWithTs(key, i), y.ValueStruct{Meta: meta, Value: val}, 0)
+			}
+			tbl, err := table.CreateTable(filename, b)
+			require.NoError(t, err)
+			return tbl
+		}
+
+		buildLevel := func(level int) {
+			lh := db.lc.levels[level]
+			for i := byte(1); i < 5; i++ {
+				tab := buildStaleTable(i)
+				require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
+					newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+				}))
+				tab.CreatedAt = time.Now().Add(-10 * time.Hour)
+				// Add table to the given level.
+				lh.addTable(tab)
+			}
+			require.NoError(t, db.lc.validate())
+
+			require.NotZero(t, lh.getTotalStaleSize())
+
+		}
+		level := 6
+		buildLevel(level)
+		buildLevel(level - 1)
+
+		db.SetDiscardTs(1 << 30)
+		// Modify the target file size so that we can compact all tables at once.
+		tt := db.lc.levelTargets()
+		tt.fileSz[6] = 1 << 30
+		prio := compactionPriority{level: 6, t: tt}
+
+		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+		defer span.End()
+
+		cd := compactDef{
+			compactorId: 0,
+			span:        span,
+			p:           prio,
+			t:           prio.t,
+			thisLevel:   db.lc.levels[5],
+			nextLevel:   db.lc.levels[6],
+		}
+
+		require.Equal(t, db.lc.fillTables(&cd), true)
+		require.Equal(t, db.lc.fillTables(&cd), false)
+
+		// Reset
+		db.lc.cstatus.delete(cd)
+		require.Equal(t, db.lc.fillTables(&cd), true)
+
+	})
 }
 
 func TestStaleDataCleanup(t *testing.T) {
