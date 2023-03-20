@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cespare/xxhash"
+	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v4/options"
