@@ -84,6 +84,7 @@ func TestPickSortTables(t *testing.T) {
 			opts := table.Options{ChkMode: options.OnTableAndBlockRead}
 			tbl := buildTable(t, [][]string{{mk.small, "some value"},
 				{mk.large, "some value"}}, opts)
+			defer func() { require.NoError(t, tbl.DecrRef()) }()
 			out = append(out, tbl)
 		}
 		return out
