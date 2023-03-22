@@ -143,6 +143,7 @@ func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
 	opts := Options{BlockSize: 4 << 10, Compression: options.ZSTD}
 	tbl := buildTestTable(t, keyPrefix, 1000, opts)
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
 	mf := tbl.MmapFile
 	t.Run("with correct decompression algo", func(t *testing.T) {
 		_, err := OpenTable(mf, opts)
@@ -237,6 +238,7 @@ func TestBloomfilter(t *testing.T) {
 			opts.BloomFalsePositive = 0.01
 		}
 		tab := buildTestTable(t, keyPrefix, keyCount, opts)
+		defer func() { require.NoError(t, tab.DecrRef()) }()
 		require.Equal(t, withBlooms, tab.hasBloomFilter)
 		// Forward iteration
 		it := tab.NewIterator(0)
