@@ -13,7 +13,7 @@ and resolve some CI issues for community PR's.  We resolve high and medium CVE's
 - feat(stream): add support for incremental stream writer (#1722) (#1874)
 
 ### Fixes
-- chore: upgrade xxhash from v1.1.0 to v2.1.2 (#1910)
+- chore: upgrade xxhash from v1.1.0 to v2.1.2 (#1910) (fixes [#1833](https://github.com/dgraph-io/badger/issues/1833))
 
 ### Security
 - chore(deps): bump golang.org/x/net from 0.0.0-20201021035429-f5854403a974 to 0.7.0 (#1885)
