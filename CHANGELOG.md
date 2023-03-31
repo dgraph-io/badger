@@ -6,23 +6,38 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ## [4.1.0] - 2023-03-30
 
 This release adds support for incremental stream writer.  We also do some cleanup in the docs 
-and resolve some CI issues for community PR's.
+and resolve some CI issues for community PR's.  We resolve high and medium CVE's and fix
+[#1833](https://github.com/dgraph-io/badger/issues/1833).
 
 ### Features
 - feat(stream): add support for incremental stream writer (#1722) (#1874)
+
+### Fixes
+- chore: upgrade xxhash from v1.1.0 to v2.1.2 (#1910)
+
+### Security
+- chore(deps): bump golang.org/x/net from 0.0.0-20201021035429-f5854403a974 to 0.7.0 (#1885)
+
+### CVE's
+
+- [CVE-2021-31525](https://github.com/dgraph-io/badger/security/dependabot/7)
+- [CVE-2022-41723](https://github.com/dgraph-io/badger/security/dependabot/4)
+- [CVE-2022-27664](https://github.com/dgraph-io/badger/security/dependabot/5)
+- [CVE-2021-33194](https://github.com/dgraph-io/badger/security/dependabot/9)
+- [CVE-2022-41723](https://github.com/dgraph-io/badger/security/dependabot/13)
+- [CVE-2021-33194](https://github.com/dgraph-io/badger/security/dependabot/16)
+- [CVE-2021-38561](https://github.com/dgraph-io/badger/security/dependabot/8)
 
 ### Chores
 
 - fix(docs): update README (#1915)
 - cleanup sstable file after tests (#1912)
 - chore(ci): add dgraph regression tests (#1908)
-- chore: upgrade xxhash from v1.1.0 to v2.1.2 (#1910)
 - docs: fix the default value in docs (#1909)
 - chore: update URL for unsupported manifest version error (#1905)
 - docs(README): add raft-badger to projects using badger (#1902)
 - sync the docs with README with projects using badger (#1903)
 - fix: update code comments for WithNumCompactors (#1900)
-- chore(deps): bump golang.org/x/net from 0.0.0-20201021035429-f5854403a974 to 0.7.0 (#1885)
 - docs: add loggie to projects using badger (#1882)
 - chore(memtable): refactor code for memtable flush (#1866)
 - resolve coveralls issue for community PR's (#1892, #1894, #1896)
