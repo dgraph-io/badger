@@ -379,7 +379,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 		return Manifest{}, 0,
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
-				"Please see https://github.com/dgraph-io/badger/blob/master/README.md#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
+				"Please see https://dgraph.io/docs/badger/faq/#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
 				" on how to fix this.",
 				version, badgerMagicVersion)
 	}

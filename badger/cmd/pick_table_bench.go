@@ -74,6 +74,13 @@ func pickTableBench(cmd *cobra.Command, args []string) error {
 
 	boundaries := getBoundaries(db)
 	tables := genTables(boundaries)
+	defer func() {
+		for _, tbl := range tables {
+			if err := tbl.DecrRef(); err != nil {
+				panic(err)
+			}
+		}
+	}()
 	handler.init(tables)
 	keys, err = getSampleKeys(db, pickOpts.sampleSize)
 	y.Check(err)

@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cespare/xxhash"
+	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v4/options"
@@ -367,7 +367,6 @@ func TestConcatIteratorOneTable(t *testing.T) {
 		{"k1", "a1"},
 		{"k2", "a2"},
 	}, opts)
-
 	defer func() { require.NoError(t, tbl.DecrRef()) }()
 
 	it := NewConcatIterator([]*Table{tbl}, 0)
@@ -385,10 +384,10 @@ func TestConcatIteratorOneTable(t *testing.T) {
 func TestConcatIterator(t *testing.T) {
 	opts := getTestTableOptions()
 	tbl := buildTestTable(t, "keya", 10000, opts)
-	tbl2 := buildTestTable(t, "keyb", 10000, opts)
-	tbl3 := buildTestTable(t, "keyc", 10000, opts)
 	defer func() { require.NoError(t, tbl.DecrRef()) }()
+	tbl2 := buildTestTable(t, "keyb", 10000, opts)
 	defer func() { require.NoError(t, tbl2.DecrRef()) }()
+	tbl3 := buildTestTable(t, "keyc", 10000, opts)
 	defer func() { require.NoError(t, tbl3.DecrRef()) }()
 
 	{
@@ -464,11 +463,14 @@ func TestMergingIterator(t *testing.T) {
 		{"k4", "a4"},
 		{"k5", "a5"},
 	}, opts)
+	defer func() { require.NoError(t, tbl1.DecrRef()) }()
+
 	tbl2 := buildTable(t, [][]string{
 		{"k2", "b2"},
 		{"k3", "b3"},
 		{"k4", "b4"},
 	}, opts)
+	defer func() { require.NoError(t, tbl2.DecrRef()) }()
 
 	expected := []struct {
 		key   string
@@ -480,8 +482,7 @@ func TestMergingIterator(t *testing.T) {
 		{"k4", "a4"},
 		{"k5", "a5"},
 	}
-	defer func() { require.NoError(t, tbl1.DecrRef()) }()
-	defer func() { require.NoError(t, tbl2.DecrRef()) }()
+
 	it1 := tbl1.NewIterator(0)
 	it2 := NewConcatIterator([]*Table{tbl2}, 0)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
@@ -508,12 +509,15 @@ func TestMergingIteratorReversed(t *testing.T) {
 		{"k4", "a4"},
 		{"k5", "a5"},
 	}, opts)
+	defer func() { require.NoError(t, tbl1.DecrRef()) }()
+
 	tbl2 := buildTable(t, [][]string{
 		{"k1", "b2"},
 		{"k3", "b3"},
 		{"k4", "b4"},
 		{"k5", "b5"},
 	}, opts)
+	defer func() { require.NoError(t, tbl2.DecrRef()) }()
 
 	expected := []struct {
 		key   string
@@ -525,8 +529,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 		{"k2", "a2"},
 		{"k1", "a1"},
 	}
-	defer func() { require.NoError(t, tbl1.DecrRef()) }()
-	defer func() { require.NoError(t, tbl2.DecrRef()) }()
+
 	it1 := tbl1.NewIterator(REVERSED)
 	it2 := NewConcatIterator([]*Table{tbl2}, REVERSED)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, true)
@@ -553,9 +556,8 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 		{"k1", "a1"},
 		{"k2", "a2"},
 	}, opts)
-	t2 := buildTable(t, [][]string{{"l1", "b1"}}, opts)
-
 	defer func() { require.NoError(t, t1.DecrRef()) }()
+	t2 := buildTable(t, [][]string{{"l1", "b1"}}, opts)
 	defer func() { require.NoError(t, t2.DecrRef()) }()
 
 	it1 := NewConcatIterator([]*Table{t1}, 0)
@@ -594,12 +596,12 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 func TestMergingIteratorTakeTwo(t *testing.T) {
 	opts := getTestTableOptions()
 	t1 := buildTable(t, [][]string{{"l1", "b1"}}, opts)
+	defer func() { require.NoError(t, t1.DecrRef()) }()
+
 	t2 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
 	}, opts)
-
-	defer func() { require.NoError(t, t1.DecrRef()) }()
 	defer func() { require.NoError(t, t2.DecrRef()) }()
 
 	it1 := NewConcatIterator([]*Table{t1}, 0)
@@ -681,6 +683,7 @@ func TestTableChecksum(t *testing.T) {
 	opts := getTestTableOptions()
 	opts.ChkMode = options.OnTableAndBlockRead
 	tbl := buildTestTable(t, "k", 10000, opts)
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
 	// Write random bytes at random location.
 	start := rand.Intn(len(tbl.Data) - len(rb))
 	n := copy(tbl.Data[start:], rb)
@@ -691,6 +694,8 @@ func TestTableChecksum(t *testing.T) {
 		_, err := OpenTable(tbl.MmapFile, opts)
 		if strings.Contains(err.Error(), "checksum") {
 			panic("checksum mismatch")
+		} else {
+			require.NoError(t, err)
 		}
 	})
 }
