@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -27,7 +26,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
@@ -1225,12 +1223,10 @@ func TestFillTableCleanup(t *testing.T) {
 		tt := db.lc.levelTargets()
 		tt.fileSz[6] = 1 << 30
 		prio := compactionPriority{level: 6, t: tt}
-		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-		defer span.End()
 
 		cd := compactDef{
 			compactorId: 0,
-			span:        span,
+			span:        nil,
 			p:           prio,
 			t:           prio.t,
 			thisLevel:   db.lc.levels[level-1],
