@@ -816,8 +816,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 		return err
 	}
 
-	db.opt.Debugf("Sending updates to subscribers")
-	db.pub.sendUpdates(reqs)
 	db.opt.Debugf("Writing to memtable")
 	var count int
 	for _, b := range reqs {
@@ -846,6 +844,10 @@ func (db *DB) writeRequests(reqs []*request) error {
 			return y.Wrap(err, "writeRequests")
 		}
 	}
+
+	db.opt.Debugf("Sending updates to subscribers")
+	db.pub.sendUpdates(reqs)
+
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
 	return nil
