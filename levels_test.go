@@ -1201,7 +1201,7 @@ func TestFillTableCleanup(t *testing.T) {
 		buildLevel := func(level int, num_tab int) {
 			lh := db.lc.levels[level]
 			for i := byte(1); i < byte(num_tab); i++ {
-				tab := buildTable(byte(i))
+				tab := buildTable(i)
 				require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
 					newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
 				}))
