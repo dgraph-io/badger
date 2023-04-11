@@ -1164,6 +1164,87 @@ func TestTableContainsPrefix(t *testing.T) {
 	require.False(t, containsPrefix(tbl, []byte("key5")))
 }
 
+// Test that if a compaction fails during fill tables process, its tables are  cleaned up and we are able
+// to do compaction on them again.
+func TestFillTableCleanup(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	// Stop normal compactions from happening. They can take up the entire space causing the test to fail.
+	opt.NumCompactors = 0
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		opts := table.Options{
+			BlockSize:          4 * 1024,
+			BloomFalsePositive: 0.01,
+		}
+		buildTable := func(prefix byte) *table.Table {
+			filename := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+			b := table.NewTableBuilder(opts)
+			defer b.Close()
+			key := make([]byte, 100)
+			val := make([]byte, 500)
+			rand.Read(val)
+
+			copy(key, []byte{prefix})
+			count := uint64(40000)
+			for i := count; i > 0; i-- {
+				var meta byte
+				if i == 0 {
+					meta = bitDiscardEarlierVersions
+				}
+				b.AddStaleKey(y.KeyWithTs(key, i), y.ValueStruct{Meta: meta, Value: val}, 0)
+			}
+			tbl, err := table.CreateTable(filename, b)
+			require.NoError(t, err)
+			return tbl
+		}
+
+		buildLevel := func(level int, num_tab int) {
+			lh := db.lc.levels[level]
+			for i := byte(1); i < byte(num_tab); i++ {
+				tab := buildTable(i)
+				require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
+					newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+				}))
+				tab.CreatedAt = time.Now().Add(-10 * time.Hour)
+				// Add table to the given level.
+				lh.addTable(tab)
+			}
+			require.NoError(t, db.lc.validate())
+
+			require.NotZero(t, lh.getTotalStaleSize())
+		}
+
+		level := 6
+		buildLevel(level-1, 2)
+		buildLevel(level, 2)
+
+		db.SetDiscardTs(1 << 30)
+		// Modify the target file size so that we can compact all tables at once.
+		tt := db.lc.levelTargets()
+		tt.fileSz[6] = 1 << 30
+		prio := compactionPriority{level: 6, t: tt}
+
+		cd := compactDef{
+			compactorId: 0,
+			span:        nil,
+			p:           prio,
+			t:           prio.t,
+			thisLevel:   db.lc.levels[level-1],
+			nextLevel:   db.lc.levels[level],
+		}
+
+		// Fill tables passes first.
+		require.Equal(t, db.lc.fillTables(&cd), true)
+		// Make sure that running compaction again fails, as the tables are being compacted.
+		require.Equal(t, db.lc.fillTables(&cd), false)
+
+		// Reset, to remove compaction being happening
+		db.lc.cstatus.delete(cd)
+		// Test that compaction should be able to run again on these tables.
+		require.Equal(t, db.lc.fillTables(&cd), true)
+	})
+}
+
 func TestStaleDataCleanup(t *testing.T) {
 	opt := DefaultOptions("")
 	opt.managedTxns = true
