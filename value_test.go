@@ -522,7 +522,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(2 * time.Second) // wait for compaction to complete
+	time.Sleep(4 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Lock()
@@ -530,7 +530,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		persistedMap[fid] = val
 	})
-
+	db.vlog.discardStats.Unlock()
 	require.NoError(t, db.Close())
 
 	// Avoid running compactors on reopening badger.
