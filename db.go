@@ -512,7 +512,6 @@ func (db *DB) BlockCacheMetrics() *ristretto.Metrics {
 
 // IndexCacheMetrics returns the metrics for the underlying index cache.
 func (db *DB) IndexCacheMetrics() *ristretto.Metrics {
-	fmt.Println("Is index cache on", db.indexCache != nil)
 	if db.indexCache != nil {
 		return db.indexCache.Metrics
 	}
@@ -576,7 +575,7 @@ func (db *DB) close() (err error) {
 					select {
 					case db.flushChan <- db.mt:
 						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-						db.mt.wal.Close()
+						db.mt.wal.Close(0)
 						db.mt = nil // Will segfault if we try writing!
 						db.opt.Debugf("pushed to flush chan\n")
 						return true
