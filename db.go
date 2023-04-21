@@ -356,6 +356,7 @@ func Open(opt Options) (*DB, error) {
 		// Flush them to disk asap.
 		for _, mt := range db.imm {
 			db.flushChan <- mt
+			mt.wal.Close(0)
 		}
 	}
 	// We do increment nextTxnTs below. So, no need to do it here.
@@ -994,6 +995,7 @@ func (db *DB) ensureRoomForWrite() error {
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
+		db.mt.wal.Close(0)
 		db.mt, err = db.newMemTable()
 		if err != nil {
 			return y.Wrapf(err, "cannot create new mem table")
@@ -1089,7 +1091,6 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 			// lock over DB when pushing to flushChan.
 			// TODO: This logic is dirty AF. Any change and this could easily break.
 			y.AssertTrue(mt == db.imm[0])
-			mt.wal.Close(0)
 			db.imm = db.imm[1:]
 			mt.DecrRef() // Return memory.
 			// unlock
@@ -1759,7 +1760,6 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
 		}
-		memtable.wal.Close(0)
 		memtable.DecrRef()
 	}
 	db.stopCompactions()
