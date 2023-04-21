@@ -1089,6 +1089,7 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 			// lock over DB when pushing to flushChan.
 			// TODO: This logic is dirty AF. Any change and this could easily break.
 			y.AssertTrue(mt == db.imm[0])
+			mt.wal.Close(0)
 			db.imm = db.imm[1:]
 			mt.DecrRef() // Return memory.
 			// unlock
@@ -1687,6 +1688,7 @@ func (db *DB) dropAll() (func(), error) {
 	for _, mt := range db.imm {
 		mt.DecrRef()
 	}
+	// TO-DO: Close all memtables' WAL here?
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable() // Set it up for future writes.
 	if err != nil {
@@ -1757,6 +1759,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
 		}
+		memtable.wal.Close(0)
 		memtable.DecrRef()
 	}
 	db.stopCompactions()
