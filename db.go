@@ -574,8 +574,8 @@ func (db *DB) close() (err error) {
 					y.AssertTrue(db.mt != nil)
 					select {
 					case db.flushChan <- db.mt:
-						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-						db.mt.wal.Close(0)
+						// Flusher will attempt to remove this from s.imm.
+						db.makeMemTableImmutable()
 						db.mt = nil // Will segfault if we try writing!
 						db.opt.Debugf("pushed to flush chan\n")
 						return true
@@ -977,6 +977,13 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 
 var errNoRoom = errors.New("No room for write")
 
+// Appends the active memtable to the list of immutable memtables, and closes
+// its wal since it won't be read or written to again other than on restart.
+func (db *DB) makeMemTableImmutable() {
+	db.imm = append(db.imm, db.mt)
+	db.mt.wal.Close(0)
+}
+
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
 	var err error
@@ -993,7 +1000,7 @@ func (db *DB) ensureRoomForWrite() error {
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
-		db.imm = append(db.imm, db.mt)
+		db.makeMemTableImmutable()
 		db.mt, err = db.newMemTable()
 		if err != nil {
 			return y.Wrapf(err, "cannot create new mem table")
@@ -1687,6 +1694,7 @@ func (db *DB) dropAll() (func(), error) {
 	for _, mt := range db.imm {
 		mt.DecrRef()
 	}
+	// TO-DO: Close all memtables' WAL here?
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable() // Set it up for future writes.
 	if err != nil {
