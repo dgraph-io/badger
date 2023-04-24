@@ -135,6 +135,14 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	// Have a callback set to delete WAL when skiplist reference count goes down to zero. That is,
 	// when it gets flushed to L0.
 	s.OnClose = func() {
+		if (mt.wal.isClosed()) {
+			if err := mt.wal.Fd.Truncate(0); err != nil {
+				db.opt.Errorf("while truncating file: %s, err: %v", filepath, err)
+			}
+			if err := os.Remove(mt.wal.Fd.Name()); err != nil {
+				db.opt.Errorf("while removing file: %s, err: %v", filepath, err)
+			}
+		}
 		if err := mt.wal.Delete(); err != nil {
 			db.opt.Errorf("while deleting file: %s, err: %v", filepath, err)
 		}
@@ -273,6 +281,7 @@ type logFile struct {
 	baseIV   []byte
 	registry *KeyRegistry
 	writeAt  uint32
+	closed 	 bool
 	opt      Options
 }
 
@@ -628,4 +637,17 @@ func (lf *logFile) bootstrap() error {
 	// Zero out the next entry.
 	lf.zeroNextEntry()
 	return nil
+}
+
+func (lf *logFile) Close(maxSz int64) error {
+	err := lf.MmapFile.Close(maxSz)
+	if err != nil {
+		return err
+	}
+	lf.closed = true
+	return nil
+}
+
+func (lf *logFile) isClosed() bool {
+	return lf.closed
 }

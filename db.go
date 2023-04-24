@@ -1694,7 +1694,7 @@ func (db *DB) dropAll() (func(), error) {
 	for _, mt := range db.imm {
 		mt.DecrRef()
 	}
-	// TO-DO: Close all memtables' WAL here?
+
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable() // Set it up for future writes.
 	if err != nil {
