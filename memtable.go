@@ -136,16 +136,19 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	// when it gets flushed to L0.
 	s.OnClose = func() {
 		if mt.wal.isClosed() {
+			// At this point, the wal is unmapped and closed
 			newFd, err := os.OpenFile(filepath, flags, 0666)
 			if err != nil {
 				db.opt.Errorf("while opening file: %s, err: %v", newFd.Name(), err)
 			}
+			mt.wal.Data = nil
 			if err = deleteFile(newFd); err != nil {
 				db.opt.Errorf("while deleting file: %s, err: %v", newFd.Name(), err)
 			}
-		}
-		if err := mt.wal.Delete(); err != nil {
-			db.opt.Errorf("while deleting file: %s, err: %v", filepath, err)
+		} else {
+			if err := mt.wal.Delete(); err != nil {
+				db.opt.Errorf("while deleting file: %s, err: %v", filepath, err)
+			}
 		}
 	}
 
@@ -282,7 +285,7 @@ type logFile struct {
 	baseIV   []byte
 	registry *KeyRegistry
 	writeAt  uint32
-	closed 	 bool
+	closed   bool
 	opt      Options
 }
 
