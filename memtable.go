@@ -135,12 +135,13 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	// Have a callback set to delete WAL when skiplist reference count goes down to zero. That is,
 	// when it gets flushed to L0.
 	s.OnClose = func() {
-		if (mt.wal.isClosed()) {
-			if err := mt.wal.Fd.Truncate(0); err != nil {
-				db.opt.Errorf("while truncating file: %s, err: %v", filepath, err)
+		if mt.wal.isClosed() {
+			newFd, err := os.OpenFile(filepath, flags, 0666)
+			if err != nil {
+				db.opt.Errorf("while opening file: %s, err: %v", newFd.Name(), err)
 			}
-			if err := os.Remove(mt.wal.Fd.Name()); err != nil {
-				db.opt.Errorf("while removing file: %s, err: %v", filepath, err)
+			if err = deleteFile(newFd); err != nil {
+				db.opt.Errorf("while deleting file: %s, err: %v", newFd.Name(), err)
 			}
 		}
 		if err := mt.wal.Delete(); err != nil {
@@ -650,4 +651,15 @@ func (lf *logFile) Close(maxSz int64) error {
 
 func (lf *logFile) isClosed() bool {
 	return lf.closed
+}
+
+func deleteFile(fd *os.File) error {
+	name := fd.Name()
+	if err := fd.Truncate(0); err != nil {
+		return fmt.Errorf("while truncating file: %s, err: %v", name, err)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("while removing file: %s, err: %v", name, err)
+	}
+	return nil
 }
