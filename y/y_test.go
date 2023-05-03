@@ -258,6 +258,28 @@ func TestPagebufferReader4(t *testing.T) {
 	require.Equal(t, n, 0)
 }
 
+// Test when reading into 0 length readBuffer.
+func TestPagebufferReader5(t *testing.T) {
+	b := NewPageBuffer(32)
+	readerWhenEmptyBuffer := b.NewReaderAt(0)
+
+	readBuffer := []byte{} // Intentionally empty readBuffer.
+	n, err := readerWhenEmptyBuffer.Read(readBuffer)
+	require.NoError(t, err, "reading into empty buffer should return no error")
+	require.Equal(t, 0, n, "read into empty readBuffer should return 0 bytes")
+
+	var wb [20]byte
+	rand.Read(wb[:])
+	n, err = b.Write(wb[:])
+	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
+	require.NoError(t, err, "unable to write bytes to buffer")
+
+	readerWhenNonEmptyBuffer := b.NewReaderAt(0)
+	n, err = readerWhenNonEmptyBuffer.Read(readBuffer)
+	require.NoError(t, err, "reading into empty buffer should return no error")
+	require.Equal(t, 0, n, "read into empty readBuffer should return 0 bytes")
+}
+
 func TestSizeVarintForZero(t *testing.T) {
 	siz := sizeVarint(0)
 	require.Equal(t, 1, siz)

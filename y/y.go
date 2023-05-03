@@ -512,7 +512,7 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 		}
 	}
 
-	if read == 0 {
+	if read == 0 && len(p) > 0 {
 		return read, io.EOF
 	}
 
