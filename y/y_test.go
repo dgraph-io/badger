@@ -264,14 +264,14 @@ func TestPagebufferReader5(t *testing.T) {
 	b := NewPageBuffer(32)
 	var wb [20]byte
 	rand.Read(wb[:])
-	n, err = b.Write(wb[:])
+	n, err := b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
 	require.NoError(t, err, "unable to write bytes to buffer")
 
 	reader := b.NewReaderAt(0)
 
 	readBuffer := []byte{} // Intentionally empty readBuffer.
-	n, err := reader.Read(readBuffer)
+	n, err = reader.Read(readBuffer)
 	require.NoError(t, err, "reading into empty buffer should return no error")
 	require.Equal(t, 0, n, "read into empty buffer should return 0 bytes")
 }
