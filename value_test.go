@@ -531,6 +531,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		persistedMap[fid] = val
 	})
 
+	db.vlog.discardStats.Unlock()
 	require.NoError(t, db.Close())
 
 	// Avoid running compactors on reopening badger.
