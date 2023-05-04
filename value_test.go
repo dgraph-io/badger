@@ -522,7 +522,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(4 * time.Second) // wait for compaction to complete
+	time.Sleep(2 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Lock()
@@ -539,7 +539,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	time.Sleep(4 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
+	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
 	db.vlog.discardStats.Lock()
 	statsMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Iterate(func(fid, val uint64) {
