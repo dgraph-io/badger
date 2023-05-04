@@ -265,7 +265,7 @@ func TestPagebufferReader5(t *testing.T) {
 	readerWhenEmptyPageBuffer := b.NewReaderAt(0)
 
 	readBuffer := []byte{} // Intentionally empty readBuffer.
-	n, err := rewaderWhenEmptyPageBuffer.Read(readBuffer)
+	n, err := readerWhenEmptyPageBuffer.Read(readBuffer)
 	require.NoError(t, err, "reading into empty buffer should return no error")
 	require.Equal(t, 0, n, "read into empty buffer should return 0 bytes")
 
