@@ -60,4 +60,4 @@ jobs:
       - name: Send Coverage Results
         env:
           COVERALLS_TOKEN: ${{ secrets.COVERALLSIO_TOKEN }}
-        run: goveralls -coverprofile=cover.o
+        run: goveralls -coverprofile=cover.out
