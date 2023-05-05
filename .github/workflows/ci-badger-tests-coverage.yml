@@ -1,20 +1,16 @@
-name: ci-badger-tests
+name: ci-badger-tests-coverage
 on:
-  push:
+  pull_request_target:
     branches:
       - main
       - 'release/v*'
-  pull_request:
-    branches:
-      - main
-      - 'release/v*'
-  schedule:
-    - cron: "*/30 * * * *"
 jobs:
-  badger-tests:
+  badger-tests-coverage:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3 # checkout merge commit
+        with:
+          ref: "refs/pull/${{ github.event.number }}/merge"
       - name: Get Go Version
         run: |
           #!/bin/bash
