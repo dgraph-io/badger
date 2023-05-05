@@ -14,7 +14,7 @@ jobs:
   badger-tests:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3 # checkout merge commit
+      - uses: actions/checkout@v3
       - name: Get Go Version
         run: |
           #!/bin/bash
