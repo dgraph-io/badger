@@ -56,20 +56,20 @@ var (
 
 // These variables are global and have cumulative values for all kv stores.
 func init() {
-	numReads = expvar.NewInt("badger_v3_disk_reads_total")
-	numWrites = expvar.NewInt("badger_v3_disk_writes_total")
-	numBytesRead = expvar.NewInt("badger_v3_read_bytes")
-	numBytesWritten = expvar.NewInt("badger_v3_written_bytes")
-	numLSMGets = expvar.NewMap("badger_v3_lsm_level_gets_total")
-	numLSMBloomHits = expvar.NewMap("badger_v3_lsm_bloom_hits_total")
-	numGets = expvar.NewInt("badger_v3_gets_total")
-	numPuts = expvar.NewInt("badger_v3_puts_total")
-	numBlockedPuts = expvar.NewInt("badger_v3_blocked_puts_total")
-	numMemtableGets = expvar.NewInt("badger_v3_memtable_gets_total")
-	lsmSize = expvar.NewMap("badger_v3_lsm_size_bytes")
-	vlogSize = expvar.NewMap("badger_v3_vlog_size_bytes")
-	pendingWrites = expvar.NewMap("badger_v3_pending_writes_total")
-	numCompactionTables = expvar.NewInt("badger_v3_compactions_current")
+	numReads = expvar.NewInt("badger_v4_disk_reads_total")
+	numWrites = expvar.NewInt("badger_v4_disk_writes_total")
+	numBytesRead = expvar.NewInt("badger_v4_read_bytes")
+	numBytesWritten = expvar.NewInt("badger_v4_written_bytes")
+	numLSMGets = expvar.NewMap("badger_v4_lsm_level_gets_total")
+	numLSMBloomHits = expvar.NewMap("badger_v4_lsm_bloom_hits_total")
+	numGets = expvar.NewInt("badger_v4_gets_total")
+	numPuts = expvar.NewInt("badger_v4_puts_total")
+	numBlockedPuts = expvar.NewInt("badger_v4_blocked_puts_total")
+	numMemtableGets = expvar.NewInt("badger_v4_memtable_gets_total")
+	lsmSize = expvar.NewMap("badger_v4_lsm_size_bytes")
+	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
+	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
+	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
 }
 
 func NumReadsAdd(enabled bool, val int64) {
