@@ -25,30 +25,30 @@ var (
 	lsmSize *expvar.Map
 	// vlogSize has size of the value log in bytes
 	vlogSize *expvar.Map
-	// pendingWrites tracks the number of pending writes.
+	// pendingWrites tracks the number of pending writes. If no more writes happen, the value will not go to 0
 	pendingWrites *expvar.Map
 
 	// These are cumulative
 
-	// numReads has cumulative number of reads
+	// numReads has cumulative number of reads -> reads from memtable wal. never invoked right now
 	numReads *expvar.Int
-	// numWrites has cumulative number of writes
+	// numWrites has cumulative number of writes -> num writes into vlog
 	numWrites *expvar.Int
-	// numBytesRead has cumulative number of bytes read
+	// numBytesRead has cumulative number of bytes read -> from memtable wal. never invoked right now
 	numBytesRead *expvar.Int
-	// numBytesWritten has cumulative number of bytes written
+	// numBytesWritten has cumulative number of bytes written -> into vlog
 	numBytesWritten *expvar.Int
-	// numLSMGets is number of LMS gets
+	// numLSMGets is number of LSM gets -> get from LSM Tree
 	numLSMGets *expvar.Map
 	// numLSMBloomHits is number of LMS bloom hits
 	numLSMBloomHits *expvar.Map
-	// numGets is number of gets
+	// numGets is number of gets -> Number of get requests made
 	numGets *expvar.Int
-	// numPuts is number of puts
+	// numPuts is number of puts -> Number of puts requests made
 	numPuts *expvar.Int
-	// numBlockedPuts is number of blocked puts
+	// numBlockedPuts is number of blocked puts  -> Not used
 	numBlockedPuts *expvar.Int
-	// numMemtableGets is number of memtable gets
+	// numMemtableGets is number of memtable gets -> Number of get requests made on memtables
 	numMemtableGets *expvar.Int
 	// numCompactionTables is the number of tables being compacted
 	numCompactionTables *expvar.Int
