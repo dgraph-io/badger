@@ -80,7 +80,7 @@ type Stream struct {
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(buf *z.Buffer) error
 
-	// Batch size for the buffers recieved by Send
+	// Batch size for the buffers recieved by Send.
 	BatchSize int
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.

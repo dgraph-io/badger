@@ -118,7 +118,8 @@ type Options struct {
 
 	// Backup happens in batches. We create mutiple batches over ranges on keys in badger.
 	// This is useful to change in case you want to have a lower memory footprint during
-	// badger. Default is 16 MB, reduce this to 1MB if the size of the db is less than 100MB.
+	// badger. Default is 16 MB, reduce this to 1MB if the total memory available to badger
+	// is less than 2GB.
 	BackupBatchSize int
 
 	// Transaction start and commit timestamps are managed by end-user.
