@@ -51,6 +51,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
 	stream.LogPrefix = "DB.Backup"
 	stream.SinceTs = since
+	stream.BatchSize = db.opt.BackupBatchSize
 	return stream.Backup(w, since)
 }
 

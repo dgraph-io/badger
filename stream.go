@@ -80,6 +80,9 @@ type Stream struct {
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(buf *z.Buffer) error
 
+	// Batch size for the buffers recieved by Send
+	BatchSize int
+
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs      uint64
 	readTs       uint64
@@ -175,7 +178,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
-	outList := z.NewBuffer(2*st.db.opt.BackupBatchSize, "Stream.ProduceKVs")
+	outList := z.NewBuffer(2*st.BatchSize, "Stream.ProduceKVs")
 	defer func() {
 		// The outList variable changes. So, we need to evaluate the variable in the defer. DO NOT
 		// call `defer outList.Release()`.
@@ -202,7 +205,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
-				outList = z.NewBuffer(2*st.db.opt.BackupBatchSize, "Stream.ProduceKVs")
+				outList = z.NewBuffer(2*st.BatchSize, "Stream.ProduceKVs")
 				st.scanned.Add(uint64(itr.scanned - scanned))
 				scanned = itr.scanned
 			case <-ctx.Done():
@@ -244,7 +247,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			for _, kv := range list.Kv {
 				kv.StreamId = streamId
 				KVToBuffer(kv, outList)
-				if outList.LenNoPadding() < st.db.opt.BackupBatchSize {
+				if outList.LenNoPadding() < st.BatchSize {
 					continue
 				}
 				if err := sendIt(); err != nil {
