@@ -116,6 +116,11 @@ type Options struct {
 	// with incompatible data format.
 	ExternalMagicVersion uint16
 
+	// Backup happens in batches. We create mutiple batches over ranges on keys in badger.
+	// This is useful to change in case you want to have a lower memory footprint during
+	// badger. Default is 16 MB, reduce this if the size of the db is less than 100MB.
+	BackupBatchSize int
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -187,6 +192,8 @@ func DefaultOptions(path string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
+
+		BackupBatchSize: 16 << 20, // Default is 16MB
 	}
 }
 

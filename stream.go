@@ -31,8 +31,6 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 )
 
-const batchSize = 16 << 20 // 16 MB
-
 // maxStreamSize is the maximum allowed size of a stream batch. This is a soft limit
 // as a single list that is still over the limit will have to be sent as is since it
 // cannot be split further. This limit prevents the framework from creating batches
@@ -177,7 +175,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
-	outList := z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
+	outList := z.NewBuffer(2*st.db.opt.BackupBatchSize, "Stream.ProduceKVs")
 	defer func() {
 		// The outList variable changes. So, we need to evaluate the variable in the defer. DO NOT
 		// call `defer outList.Release()`.
@@ -204,7 +202,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
-				outList = z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
+				outList = z.NewBuffer(2*st.db.opt.BackupBatchSize, "Stream.ProduceKVs")
 				st.scanned.Add(uint64(itr.scanned - scanned))
 				scanned = itr.scanned
 			case <-ctx.Done():
@@ -246,7 +244,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			for _, kv := range list.Kv {
 				kv.StreamId = streamId
 				KVToBuffer(kv, outList)
-				if outList.LenNoPadding() < batchSize {
+				if outList.LenNoPadding() < st.db.opt.BackupBatchSize {
 					continue
 				}
 				if err := sendIt(); err != nil {
