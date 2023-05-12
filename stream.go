@@ -80,7 +80,7 @@ type Stream struct {
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(buf *z.Buffer) error
 
-	// Batch size for the buffers recieved by Send.
+	// Batch size for the buffers recieved by Send. Default is 16MB.
 	BatchSize int
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
@@ -453,6 +453,7 @@ func (db *DB) newStream() *Stream {
 		db:        db,
 		NumGo:     db.opt.NumGoroutines,
 		LogPrefix: "Badger.Stream",
+		BatchSize: 16 << 20,
 	}
 }
 
