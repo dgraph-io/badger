@@ -739,6 +739,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		}
 		// Found the required version of the key, return immediately.
 		if vs.Version == version {
+			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
