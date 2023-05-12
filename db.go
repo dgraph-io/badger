@@ -862,7 +862,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
-	y.NumBytesWrittenAdd(db.opt.MetricsEnabled, int64(size))
+	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, int64(size))
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}

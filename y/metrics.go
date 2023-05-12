@@ -30,44 +30,39 @@ var (
 
 	// These are cumulative
 
+	// VLOG METRICS
 	// numReads has cumulative number of reads from vlog
 	numReadsVlog *expvar.Int
-
 	// numWrites has cumulative number of writes into vlog
 	numWritesVlog *expvar.Int
-
-	// numBytesRead has cumulative number of bytes read from LSM tree
-	numBytesReadLSM *expvar.Int
-
 	// numBytesRead has cumulative number of bytes read from VLOG
 	numBytesReadVlog *expvar.Int
-
 	// numBytesVlogWritten has cumulative number of bytes written into VLOG
 	numBytesVlogWritten *expvar.Int
 
+	// LSM METRICS
+	// numBytesRead has cumulative number of bytes read from LSM tree
+	numBytesReadLSM *expvar.Int
 	// numBytesLSMWritten has cumulative number of bytes written into LSM Tree
 	numBytesLSMWritten *expvar.Int
-
 	// numLSMGets is number of LSM gets
 	numLSMGets *expvar.Map
-
 	// numBytesCompactionWritten is the number of bytes written in the lsm tree due to compaction
 	numBytesCompactionWritten *expvar.Int
-
 	// numLSMBloomHits is number of LMS bloom hits
 	numLSMBloomHits *expvar.Map
 
+	// DB METRICS
 	// numGets is number of gets -> Number of get requests made
 	numGets *expvar.Int
-
 	// numPuts is number of puts -> Number of puts requests made
 	numPuts *expvar.Int
-
 	// numMemtableGets is number of memtable gets -> Number of get requests made on memtable
 	numMemtableGets *expvar.Int
-
 	// numCompactionTables is the number of tables being compacted
 	numCompactionTables *expvar.Int
+	// Total writes by a user in bytes
+	numBytesWrittenUser *expvar.Int
 )
 
 // These variables are global and have cumulative values for all kv stores.
@@ -88,10 +83,15 @@ func init() {
 	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
 	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
 	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
+	numBytesWrittenUser = expvar.NewInt("badger_v4_write_user")
 }
 
 func NumReadsVlogAdd(enabled bool, val int64) {
 	addInt(enabled, numReadsVlog, val)
+}
+
+func NumBytesWrittenUserAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesWrittenUser, val)
 }
 
 func NumWritesVlogAdd(enabled bool, val int64) {
@@ -106,7 +106,7 @@ func NumBytesReadsLSMAdd(enabled bool, val int64) {
 	addInt(enabled, numBytesReadLSM, val)
 }
 
-func NumBytesWrittenAdd(enabled bool, val int64) {
+func NumBytesWrittenVlogAdd(enabled bool, val int64) {
 	addInt(enabled, numBytesVlogWritten, val)
 }
 
