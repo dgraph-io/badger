@@ -1478,9 +1478,9 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
-		s.kv.opt.Debugf("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
-		s.kv.opt.Debugf("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
