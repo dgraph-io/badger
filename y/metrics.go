@@ -88,7 +88,7 @@ func init() {
 	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
 	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
 	numBytesWrittenUser = expvar.NewInt("badger_v4_write_user")
-	numGetsWithResults = expvar.NewInt("badger_v4_write_user")
+	numGetsWithResults = expvar.NewInt("badger_v4_get_results")
 	numIteratorsCreated = expvar.NewInt("badger_v4_iterators")
 }
 
