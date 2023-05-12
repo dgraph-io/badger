@@ -1439,6 +1439,18 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		return err
 	}
 
+	getSizes := func(tables []*table.Table) int64 {
+		size := int64(0)
+		for _, i := range tables {
+			size += i.Size()
+		}
+		return size
+	}
+
+	sizeNewTables := getSizes(newTables)
+	sizeOldTables := getSizes(cd.bot) + getSizes(cd.top)
+	y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, sizeNewTables)
+
 	// See comment earlier in this function about the ordering of these ops, and the order in which
 	// we access levels when reading.
 	if err := nextLevel.replaceTables(cd.bot, newTables); err != nil {
@@ -1459,10 +1471,10 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 			expensive = " [E]"
 		}
 		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
-			" [%s] -> [%s], took %v\n",
+			" [%s] -> [%s], took %v\n, deleted %d bytes",
 			id, expensive, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
 			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
-			dur.Round(time.Millisecond))
+			dur.Round(time.Millisecond), sizeOldTables-sizeNewTables)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
@@ -1605,6 +1617,7 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 			maxVs = vs
 		}
 	}
+	y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(maxVs.Value)))
 	return maxVs, nil
 }
 

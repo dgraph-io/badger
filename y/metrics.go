@@ -30,41 +30,59 @@ var (
 
 	// These are cumulative
 
-	// numReads has cumulative number of reads -> reads from memtable wal. never invoked right now
-	numReads *expvar.Int
-	// numWrites has cumulative number of writes -> num writes into vlog
-	numWrites *expvar.Int
-	// numBytesRead has cumulative number of bytes read -> from memtable wal. never invoked right now
-	numBytesRead *expvar.Int
-	// numBytesWritten has cumulative number of bytes written -> into vlog
-	numBytesWritten *expvar.Int
-	// numLSMGets is number of LSM gets -> get from LSM Tree
+	// numReads has cumulative number of reads from vlog
+	numReadsVlog *expvar.Int
+
+	// numWrites has cumulative number of writes into vlog
+	numWritesVlog *expvar.Int
+
+	// numBytesRead has cumulative number of bytes read from LSM tree
+	numBytesReadLSM *expvar.Int
+
+	// numBytesRead has cumulative number of bytes read from VLOG
+	numBytesReadVlog *expvar.Int
+
+	// numBytesVlogWritten has cumulative number of bytes written into VLOG
+	numBytesVlogWritten *expvar.Int
+
+	// numBytesLSMWritten has cumulative number of bytes written into LSM Tree
+	numBytesLSMWritten *expvar.Int
+
+	// numLSMGets is number of LSM gets
 	numLSMGets *expvar.Map
+
+	// numBytesCompactionWritten is the number of bytes written in the lsm tree due to compaction
+	numBytesCompactionWritten *expvar.Int
+
 	// numLSMBloomHits is number of LMS bloom hits
 	numLSMBloomHits *expvar.Map
+
 	// numGets is number of gets -> Number of get requests made
 	numGets *expvar.Int
+
 	// numPuts is number of puts -> Number of puts requests made
 	numPuts *expvar.Int
-	// numBlockedPuts is number of blocked puts  -> Not used
-	numBlockedPuts *expvar.Int
-	// numMemtableGets is number of memtable gets -> Number of get requests made on memtables
+
+	// numMemtableGets is number of memtable gets -> Number of get requests made on memtable
 	numMemtableGets *expvar.Int
+
 	// numCompactionTables is the number of tables being compacted
 	numCompactionTables *expvar.Int
 )
 
 // These variables are global and have cumulative values for all kv stores.
 func init() {
-	numReads = expvar.NewInt("badger_v4_disk_reads_total")
-	numWrites = expvar.NewInt("badger_v4_disk_writes_total")
-	numBytesRead = expvar.NewInt("badger_v4_read_bytes")
-	numBytesWritten = expvar.NewInt("badger_v4_written_bytes")
+	numReadsVlog = expvar.NewInt("badger_v4_disk_reads_total")
+	numWritesVlog = expvar.NewInt("badger_v4_disk_writes_total")
+	numBytesReadLSM = expvar.NewInt("badger_v4_read_bytes_lsm")
+	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
+	numBytesVlogWritten = expvar.NewInt("badger_v4_vlog_written_bytes")
+	numBytesLSMWritten = expvar.NewInt("badger_v4_lsm_written_bytes")
+	numBytesCompactionWritten = expvar.NewInt("badger_v4_compaction_written_bytes")
 	numLSMGets = expvar.NewMap("badger_v4_lsm_level_gets_total")
 	numLSMBloomHits = expvar.NewMap("badger_v4_lsm_bloom_hits_total")
 	numGets = expvar.NewInt("badger_v4_gets_total")
 	numPuts = expvar.NewInt("badger_v4_puts_total")
-	numBlockedPuts = expvar.NewInt("badger_v4_blocked_puts_total")
 	numMemtableGets = expvar.NewInt("badger_v4_memtable_gets_total")
 	lsmSize = expvar.NewMap("badger_v4_lsm_size_bytes")
 	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
@@ -72,20 +90,32 @@ func init() {
 	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
 }
 
-func NumReadsAdd(enabled bool, val int64) {
-	addInt(enabled, numReads, val)
+func NumReadsVlogAdd(enabled bool, val int64) {
+	addInt(enabled, numReadsVlog, val)
 }
 
-func NumWritesAdd(enabled bool, val int64) {
-	addInt(enabled, numWrites, val)
+func NumWritesVlogAdd(enabled bool, val int64) {
+	addInt(enabled, numWritesVlog, val)
 }
 
-func NumBytesReadAdd(enabled bool, val int64) {
-	addInt(enabled, numBytesRead, val)
+func NumBytesReadsVlogAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesReadVlog, val)
+}
+
+func NumBytesReadsLSMAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesReadLSM, val)
 }
 
 func NumBytesWrittenAdd(enabled bool, val int64) {
-	addInt(enabled, numBytesWritten, val)
+	addInt(enabled, numBytesVlogWritten, val)
+}
+
+func NumBytesLSMWrittenAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesLSMWritten, val)
+}
+
+func NumBytesCompactionWrittenAdd(enabled bool, val int64) {
+	addInt(enabled, numBytesCompactionWritten, val)
 }
 
 func NumGetsAdd(enabled bool, val int64) {
@@ -94,10 +124,6 @@ func NumGetsAdd(enabled bool, val int64) {
 
 func NumPutsAdd(enabled bool, val int64) {
 	addInt(enabled, numPuts, val)
-}
-
-func NumBlockedPutsAdd(enabled bool, val int64) {
-	addInt(enabled, numBlockedPuts, val)
 }
 
 func NumMemtableGetsAdd(enabled bool, val int64) {
