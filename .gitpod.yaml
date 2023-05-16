@@ -1,0 +1,19 @@
+image: golang:1.19-alpine
+
+workspace:
+  name: badger-dev
+  path: /app
+
+addons:
+  - name: gitpod-vscode
+    language: go
+    autoStart: true
+
+before_script:
+  - apk add --no-cache git
+
+script:
+  - go install
+  - go build -o badger
+
+command: ["./badger"]
