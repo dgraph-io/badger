@@ -343,14 +343,14 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	return t, nil
 }
 
-func (t *Table) initBiggestAndSmallest() error {
+func (t *Table) initBiggestAndSmallest() (err error) {
 	// This defer will help gathering debugging info incase initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
 			// Use defer for printing info because there may be an intermediate panic.
 			var debugBuf bytes.Buffer
 			defer func() {
-				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
+				err = fmt.Errorf("recovered: %s", r)
 			}()
 
 			// Get the count of null bytes at the end of file. This is to make sure if there was an
@@ -398,7 +398,6 @@ func (t *Table) initBiggestAndSmallest() error {
 		}
 	}()
 
-	var err error
 	var ko *fb.BlockOffset
 	if ko, err = t.initIndex(); err != nil {
 		return y.Wrapf(err, "failed to read index.")
@@ -413,7 +412,7 @@ func (t *Table) initBiggestAndSmallest() error {
 		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
 	t.biggest = y.Copy(it2.Key())
-	return nil
+	return err
 }
 
 func (t *Table) read(off, sz int) ([]byte, error) {
