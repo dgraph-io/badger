@@ -87,13 +87,13 @@ func Wrapf(err error, format string, args ...interface{}) error {
 
 func CombineErrors(one, other error) error {
 	if one != nil && other != nil {
-		return fmt.Errorf("%w; %w", one, other)
+		return fmt.Errorf("%v; %v", one, other)
 	}
 	if one != nil && other == nil {
-		return fmt.Errorf("%w", one)
+		return fmt.Errorf("%v", one)
 	}
 	if one == nil && other != nil {
-		return fmt.Errorf("%w", other)
+		return fmt.Errorf("%v", other)
 	}
 	return nil
 }
