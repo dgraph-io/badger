@@ -702,19 +702,12 @@ func (db *DB) Sync() error {
 	                    :: of data and then the machine shuts down or the disk failure happens,
 						:: this will result in partial writes. [[This case needs verification]]
 	*/
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
-	var err error
+	db.lock.RLock()
 	memtableSyncError := db.mt.SyncWAL()
-	if memtableSyncError != nil {
-		err = errors.Wrap(memtableSyncError, "sync failed for the active memtable WAL")
-	}
+	db.lock.RUnlock()
+
 	vLogSyncError := db.vlog.sync()
-	if vLogSyncError != nil {
-		err = errors.Wrap(vLogSyncError, "sync failed for the vLog")
-	}
-	return err
+	return y.CombineErrors(memtableSyncError, vLogSyncError)
 }
 
 // getMemtables returns the current memtables and get references.
