@@ -695,19 +695,21 @@ func (db *DB) Sync() error {
 						:: but there was an error in syncing the vLog.
 						:: Nothing is lost for this very specific entry because the entry is completely present in the memtable's WAL.
 
-	- Partially_lost    :: If entries were written partially in either of the logs, the logs will be truncated during recovery.
-						:: As a result of truncation, some entries might be lost. Assume that 4KB of data is to be synced and
-					    :: invoking `Sync` results only in syncing 3KB of data and then the machine shuts down or the disk failure happens,
-	                    :: this will result in partial writes. [[This case needs verification]]
+	- Partially_lost    :: If entries were written partially in either of the logs,
+						:: the logs will be truncated during recovery.
+						:: As a result of truncation, some entries might be lost.
+					    :: Assume that 4KB of data is to be synced and invoking `Sync` results only in syncing 3KB
+	                    :: of data and then the machine shuts down or the disk failure happens,
+						:: this will result in partial writes. [[This case needs verification]]
 	*/
+	db.lock.Lock()
+	defer db.lock.Unlock()
 
 	var err error
-
 	memtableSyncError := db.mt.SyncWAL()
 	if memtableSyncError != nil {
 		err = errors.Wrap(memtableSyncError, "sync failed for the active memtable WAL")
 	}
-
 	vLogSyncError := db.vlog.sync()
 	if vLogSyncError != nil {
 		err = errors.Wrap(vLogSyncError, "sync failed for the vLog")
