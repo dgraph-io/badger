@@ -1059,3 +1059,79 @@ func TestKeyCount(t *testing.T) {
 	require.NoError(t, stream.Orchestrate(context.Background()))
 	require.Equal(t, N, uint64(count))
 }
+
+func TestAssertValueLogIsNotWrittenToOnStartup(t *testing.T) {
+	opt := DefaultOptions("").WithValueLogFileSize(1 << 20).WithValueThreshold(1 << 4)
+
+	dir, err := os.MkdirTemp(".", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	openDb := func(readonly bool) *DB {
+		opts := &opt
+		opts.Dir = dir
+		opts.ValueDir = dir
+		if readonly {
+			opts.ReadOnly = true
+		}
+
+		if opts.InMemory {
+			opts.Dir = ""
+			opts.ValueDir = ""
+		}
+		db, err := Open(*opts)
+		require.NoError(t, err)
+
+		return db
+	}
+
+	key := func(i int) string {
+		return fmt.Sprintf("key%100d", i)
+	}
+
+	assertOnLoadDb := func(db *DB) uint32 {
+		data := []byte(fmt.Sprintf("value%100d", 1))
+		for i := 0; i < 20; i++ {
+			err := db.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry([]byte(key(i)), data))
+			})
+			require.NoError(t, err)
+		}
+		return db.vlog.maxFid
+	}
+
+	latestVLogFileSize := func(db *DB, vLogId uint32) uint32 {
+		return db.vlog.filesMap[vLogId].size.Load()
+	}
+
+	assertOnReadDb := func(db *DB) {
+		for i := 0; i < 20; i++ {
+			err := db.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(key(i)))
+				require.NoError(t, err, "Getting key: %s", key(i))
+				err = item.Value(func(v []byte) error {
+					_ = v
+					return nil
+				})
+				require.NoError(t, err, "Getting value for the key: %s", key(i))
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	db := openDb(false)
+	vLogFileSize := latestVLogFileSize(db, assertOnLoadDb(db))
+	assertOnReadDb(db)
+
+	require.NoError(t, db.Sync())
+	require.NoError(t, db.Close())
+
+	db = openDb(true)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	assertOnReadDb(db)
+	require.Equal(t, latestVLogFileSize(db, db.vlog.maxFid), vLogFileSize)
+}
