@@ -85,6 +85,48 @@ func TestPublisherDeadlock(t *testing.T) {
 	})
 }
 
+func TestPublisherAsyncDeadlock(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
+		events, unsubscribe, err := db.SubscribeAsync([]pb.Match{match})
+		require.NoError(t, err)
+
+		firstUpdate := sync.WaitGroup{}
+		firstUpdate.Add(1)
+
+		go func() {
+			<-events
+			firstUpdate.Done()
+			time.Sleep(time.Second * 20)
+			unsubscribe()
+		}()
+
+		err = db.Update(func(txn *Txn) error {
+			e := NewEntry([]byte(fmt.Sprintf("key%d", 0)), []byte(fmt.Sprintf("value%d", 0)))
+			return txn.SetEntry(e)
+		})
+		require.NoError(t, err)
+
+		firstUpdate.Wait()
+		req := int64(0)
+		for i := 1; i < 1110; i++ {
+			time.Sleep(time.Millisecond * 10)
+			err := db.Update(func(txn *Txn) error {
+				e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+				return txn.SetEntry(e)
+			})
+			require.NoError(t, err)
+			atomic.AddInt64(&req, 1)
+		}
+		for atomic.LoadInt64(&req) != 1109 {
+			time.Sleep(time.Second)
+		}
+		for range events {
+			// wait for events to be closed
+		}
+	})
+}
+
 func TestPublisherOrdering(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		order := []string{}
@@ -120,6 +162,30 @@ func TestPublisherOrdering(t *testing.T) {
 		wg.Wait()
 		for i := 0; i < 5; i++ {
 			require.Equal(t, fmt.Sprintf("value%d", i), order[i])
+		}
+	})
+}
+
+func TestPublisherAsyncOrdering(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		match := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
+		events, unsubscribe, err := db.SubscribeAsync([]pb.Match{match})
+		require.NoError(t, err)
+		defer unsubscribe()
+
+		for i := 0; i < 5; i++ {
+			err := db.Update(func(txn *Txn) error {
+				e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+				return txn.SetEntry(e)
+			})
+			require.NoError(t, err)
+		}
+
+		for i := 0; i < 5; {
+			for _, kv := range (<-events).Kv {
+				require.Equal(t, fmt.Sprintf("value%d", i), string(kv.Value))
+				i++
+			}
 		}
 	})
 }
@@ -161,5 +227,35 @@ func TestMultiplePrefix(t *testing.T) {
 			return txn.SetEntry(NewEntry([]byte("hello"), []byte("badger")))
 		}))
 		wg.Wait()
+	})
+}
+
+func TestMultiplePrefixAsync(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		match1 := pb.Match{Prefix: []byte("ke"), IgnoreBytes: ""}
+		match2 := pb.Match{Prefix: []byte("hel"), IgnoreBytes: ""}
+		events, unsubscribe, err := db.SubscribeAsync([]pb.Match{match1, match2})
+		require.NoError(t, err)
+		defer unsubscribe()
+
+		err = db.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
+		})
+		require.NoError(t, err)
+		err = db.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry([]byte("hello"), []byte("badger")))
+		})
+		require.NoError(t, err)
+
+		for i := 0; i < 2; {
+			for _, kv := range (<-events).Kv {
+				if string(kv.Key) == "key" {
+					require.Equal(t, string(kv.Value), "value")
+				} else {
+					require.Equal(t, string(kv.Value), "badger")
+				}
+				i++
+			}
+		}
 	})
 }
