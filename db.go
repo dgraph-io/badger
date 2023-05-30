@@ -1879,7 +1879,11 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	drain := func() {
 		for {
 			select {
-			case <-s.sendCh:
+			case _, ok := <-s.sendCh:
+				if !ok {
+					// Channel is closed.
+					return
+				}
 			default:
 				return
 			}
