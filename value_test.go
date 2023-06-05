@@ -512,7 +512,6 @@ func waitForMessage(ch chan string, expected string, count int, timeout int, t *
 				"for message '%s' with %d remaining instances expected",
 				timeout, expected, remaining)
 			return
-		default:
 		}
 	}
 }
