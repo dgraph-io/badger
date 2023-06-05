@@ -127,6 +127,12 @@ type Options struct {
 	maxBatchSize  int64 // max batch size in bytes
 
 	maxValueThreshold float64
+
+	testChan chan string
+
+	// Used exclusively for test purposes, if not nil, then when we close
+	// the db.vlog, we copy the discardStats to this structure.
+	onCloseDiscardCapture map[uint64]uint64
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -357,6 +363,26 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 		}
 	}
 
+	return opt
+}
+
+// withTestChan returns a new Options value with testChan set to given value.
+//
+// testChan is used only for being able to coordinate tests operations.
+// Internally, access to the testChan will be nil-protected. We can safely
+// rely on branch-prediction optimization for performance, so adding this
+// will have negligible performance impact.
+func (opt Options) withTestChan(testChan chan string) Options {
+	opt.testChan = testChan
+	return opt
+}
+
+// withOnCloseDiscardCapture makes a shallow copy of the map c to
+// opt.onCloseDiscardCapture so that when we Close the DB, we make sure to
+// copy the contents of the discardStats to the map c.
+// This is strictly for testing purposes.
+func (opt Options) withOnCloseDiscardCapture(c map[uint64]uint64) Options {
+	opt.onCloseDiscardCapture = c
 	return opt
 }
 

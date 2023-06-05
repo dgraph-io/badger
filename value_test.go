@@ -484,6 +484,39 @@ func TestValueGC4(t *testing.T) {
 	require.NoError(t, kv.Close())
 }
 
+func waitForMessage(ch chan string, expected string, count int, timeout int, t *testing.T) {
+	if count <= 0 {
+		t.Logf("Will skip waiting for %s since expected count <= 0.",
+			expected)
+	}
+	tout := time.NewTimer(time.Duration(timeout) * time.Second)
+	remaining := count
+	for {
+		select {
+		case curMsg, ok := <-ch:
+			if !ok {
+				t.Errorf("Test chan closed while waiting for "+
+					"message %s with %d remaining instances expected",
+					expected, remaining)
+				return
+			}
+			t.Logf("Found message: %s", curMsg)
+			if curMsg == expected {
+				remaining--
+				if remaining == 0 {
+					return
+				}
+			}
+		case <-tout.C:
+			t.Errorf("Timed out after %d seconds while waiting on test chan "+
+				"for message '%s' with %d remaining instances expected",
+				timeout, expected, remaining)
+			return
+		default:
+		}
+	}
+}
+
 func TestPersistLFDiscardStats(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
@@ -496,6 +529,10 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt.CompactL0OnClose = false
 	opt.MemTableSize = 1 << 15
 	opt.ValueThreshold = 1 << 10
+	tChan := make(chan string, 100)
+	defer close(tChan)
+	opt = opt.withTestChan(tChan)
+	opt = opt.withOnCloseDiscardCapture(make(map[uint64]uint64))
 
 	db, err := Open(opt)
 	require.NoError(t, err)
@@ -522,14 +559,11 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(2 * time.Second) // wait for compaction to complete
+	// Wait for invocation of updateDiscardStats at least once -- timeout after 60 seconds.
+	waitForMessage(tChan, "updateDiscardStats iteration done", 1, 60, t)
 
-	persistedMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Lock()
 	require.True(t, db.vlog.discardStats.Len() > 1, "some discardStats should be generated")
-	db.vlog.discardStats.Iterate(func(fid, val uint64) {
-		persistedMap[fid] = val
-	})
 
 	db.vlog.discardStats.Unlock()
 	require.NoError(t, db.Close())
@@ -539,13 +573,13 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
+	waitForMessage(tChan, "End: vlog.init(db)", 1, 60, t)
 	db.vlog.discardStats.Lock()
 	statsMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		statsMap[fid] = val
 	})
-	require.True(t, reflect.DeepEqual(persistedMap, statsMap), "Discard maps are not equal")
+	require.True(t, reflect.DeepEqual(opt.onCloseDiscardCapture, statsMap), "Discard maps are not equal")
 	db.vlog.discardStats.Unlock()
 }
 

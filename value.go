@@ -554,6 +554,8 @@ func (vlog *valueLog) init(db *DB) {
 	lf, err := InitDiscardStats(vlog.opt)
 	y.Check(err)
 	vlog.discardStats = lf
+	// See TestPersistLFDiscardStats for purpose of statement below.
+	db.logToTestChan("End: vlog.init(db)")
 }
 
 func (vlog *valueLog) open(db *DB) error {
@@ -640,6 +642,13 @@ func (vlog *valueLog) Close() error {
 		}
 	}
 	if vlog.discardStats != nil {
+		if vlog.db.opt.onCloseDiscardCapture != nil {
+			vlog.discardStats.Lock()
+			vlog.discardStats.Iterate(func(id, val uint64) {
+				vlog.db.opt.onCloseDiscardCapture[id] = val
+			})
+			vlog.discardStats.Unlock()
+		}
 		if terr := vlog.discardStats.Close(-1); terr != nil && err == nil {
 			err = terr
 		}
@@ -1103,6 +1112,9 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	for fid, discard := range stats {
 		vlog.discardStats.Update(fid, discard)
 	}
+	// The following is to coordinate with some test cases where we want to
+	// verify that at least one iteration of updateDiscardStats has been completed.
+	vlog.db.logToTestChan("updateDiscardStats iteration done")
 }
 
 type vlogThreshold struct {
