@@ -2035,6 +2035,67 @@ func TestSyncForRace(t *testing.T) {
 	<-doneChan
 }
 
+func TestSyncForNoErrors(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10; i++ {
+		require.NoError(
+			t,
+			txn.SetEntry(NewEntry(
+				[]byte(fmt.Sprintf("key%d", i)),
+				[]byte(fmt.Sprintf("value%d", i)),
+			)),
+		)
+	}
+	require.NoError(t, txn.Commit())
+
+	if err := db.Sync(); err != nil {
+		require.NoError(t, err)
+	}
+}
+
+func TestSyncForReadingTheEntriesThatWereSynced(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10; i++ {
+		require.NoError(
+			t,
+			txn.SetEntry(NewEntry(
+				[]byte(fmt.Sprintf("key%d", i)),
+				[]byte(fmt.Sprintf("value%d", i)),
+			)),
+		)
+	}
+	require.NoError(t, txn.Commit())
+
+	if err := db.Sync(); err != nil {
+		require.NoError(t, err)
+	}
+
+	readOnlyTxn := db.NewTransaction(false)
+	for i := 0; i < 10; i++ {
+		item, err := readOnlyTxn.Get([]byte(fmt.Sprintf("key%d", i)))
+		require.NoError(t, err)
+
+		value := getItemValue(t, item)
+		require.Equal(t, []byte(fmt.Sprintf("value%d", i)), value)
+	}
+}
+
 func TestForceFlushMemtable(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger could not be created")
