@@ -42,14 +42,14 @@ const discardFname string = "DISCARD"
 func InitDiscardStats(opt Options) (*discardStats, error) {
 	fname := filepath.Join(opt.ValueDir, discardFname)
 
-	// 1GB file can store 67M discard entries. Each entry is 16 bytes.
+	// 1MB file can store 65.536 discard entries. Each entry is 16 bytes.
 	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR, 1<<20)
 	lf := &discardStats{
 		MmapFile: mf,
 		opt:      opt,
 	}
 	if err == z.NewFile {
-		// We don't need to zero out the entire 1GB.
+		// We don't need to zero out the entire 1MB.
 		lf.zeroOut()
 
 	} else if err != nil {
