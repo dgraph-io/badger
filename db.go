@@ -90,6 +90,8 @@ func (lk *lockedKeys) all() []uint64 {
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
+	testOnlyDBExtensions
+
 	lock sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *directoryLockGuard
@@ -124,8 +126,6 @@ type DB struct {
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
-
-	testChan chan string
 }
 
 const (
@@ -253,8 +253,10 @@ func Open(opt Options) (*DB, error) {
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
-		testChan:         opt.testChan,
 	}
+
+	db.setSyncChan(opt.syncChan)
+
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
@@ -398,17 +400,6 @@ func Open(opt Options) (*DB, error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
-}
-
-// logToTestChan sends a message to the DB's testChan. Note that we expect
-// that the DB *never* closes this channel; the responsibility for
-// allocating and closing the channel belongs to the test module.
-// if db.testChan is nil or has never been initialized, this will
-// be silently ignored.
-func (db *DB) logToTestChan(msg string) {
-	if db.testChan != nil {
-		db.testChan <- msg
-	}
 }
 
 // initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.

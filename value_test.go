@@ -26,7 +26,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
@@ -484,38 +483,6 @@ func TestValueGC4(t *testing.T) {
 	require.NoError(t, kv.Close())
 }
 
-func waitForMessage(ch chan string, expected string, count int, timeout int, t *testing.T) {
-	if count <= 0 {
-		t.Logf("Will skip waiting for %s since expected count <= 0.",
-			expected)
-	}
-	tout := time.NewTimer(time.Duration(timeout) * time.Second)
-	remaining := count
-	for {
-		select {
-		case curMsg, ok := <-ch:
-			if !ok {
-				t.Errorf("Test chan closed while waiting for "+
-					"message %s with %d remaining instances expected",
-					expected, remaining)
-				return
-			}
-			t.Logf("Found message: %s", curMsg)
-			if curMsg == expected {
-				remaining--
-				if remaining == 0 {
-					return
-				}
-			}
-		case <-tout.C:
-			t.Errorf("Timed out after %d seconds while waiting on test chan "+
-				"for message '%s' with %d remaining instances expected",
-				timeout, expected, remaining)
-			return
-		}
-	}
-}
-
 func TestPersistLFDiscardStats(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
@@ -530,7 +497,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt.ValueThreshold = 1 << 10
 	tChan := make(chan string, 100)
 	defer close(tChan)
-	opt = opt.withTestChan(tChan)
+	opt = opt.withSyncChan(tChan)
 	opt = opt.withOnCloseDiscardCapture(make(map[uint64]uint64))
 
 	db, err := Open(opt)
