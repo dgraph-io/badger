@@ -466,6 +466,8 @@ func BenchmarkDbGrowth(b *testing.B) {
 	opts.NumVersionsToKeep = 1
 	opts.NumLevelZeroTables = 1
 	opts.NumLevelZeroTablesStall = 2
+	opts.ValueThreshold = 1024
+	opts.MemTableSize = 1 << 20
 	db, err := Open(opts)
 	require.NoError(b, err)
 	for numWrites := 0; numWrites < maxWrites; numWrites++ {
