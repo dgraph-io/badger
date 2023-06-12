@@ -104,6 +104,14 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	}
 	sw.done = func() { once.Do(done) }
 
+	mts, decr := sw.db.getMemTables()
+	defer decr()
+	for _, m := range mts {
+		if !m.sl.Empty() {
+			return fmt.Errorf("Unable to do incremental writes because MemTable has data")
+		}
+	}
+
 	isEmptyDB := true
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
@@ -117,7 +125,13 @@ func (sw *StreamWriter) PrepareIncremental() error {
 		return nil
 	}
 	if sw.prevLevel == 0 {
-		return fmt.Errorf("Unable to do incremental writes because L0 has data")
+		// It seems that data is present in all levels from Lmax to L0. If we call flatten
+		// on the tree, all the data will go to Lmax. All the levels above will be empty
+		// after flatten call. Now, we should be able to use incremental stream writer again.
+		if err := sw.db.Flatten(3); err != nil {
+			return errors.Wrapf(err, "error during flatten in StreamWriter")
+		}
+		sw.prevLevel = len(sw.db.Levels()) - 1
 	}
 	return nil
 }
