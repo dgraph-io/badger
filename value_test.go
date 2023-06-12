@@ -498,10 +498,11 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	tChan := make(chan string, 100)
 	defer close(tChan)
 	opt = opt.withSyncChan(tChan)
-	opt = opt.withOnCloseDiscardCapture(make(map[uint64]uint64))
 
 	db, err := Open(opt)
 	require.NoError(t, err)
+	capturedDiscardStats := make(map[uint64]uint64)
+	db.onCloseDiscardCapture = capturedDiscardStats
 
 	sz := 128 << 10 // 5 entries per value log file.
 	v := make([]byte, sz)
@@ -526,7 +527,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	}
 
 	// Wait for invocation of updateDiscardStats at least once -- timeout after 60 seconds.
-	waitForMessage(tChan, "updateDiscardStats iteration done", 1, 60, t)
+	waitForMessage(tChan, updateDiscardStatsMsg, 1, 60, t)
 
 	db.vlog.discardStats.Lock()
 	require.True(t, db.vlog.discardStats.Len() > 1, "some discardStats should be generated")
@@ -539,13 +540,15 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	waitForMessage(tChan, "End: vlog.init(db)", 1, 60, t)
+	waitForMessage(tChan, endVLogInitMsg, 1, 60, t)
 	db.vlog.discardStats.Lock()
 	statsMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		statsMap[fid] = val
 	})
-	require.True(t, reflect.DeepEqual(opt.onCloseDiscardCapture, statsMap), "Discard maps are not equal")
+	require.Truef(t, reflect.DeepEqual(capturedDiscardStats, statsMap),
+		"Discard maps are not equal. On Close: %+v, After Reopen: %+v",
+		capturedDiscardStats, statsMap)
 	db.vlog.discardStats.Unlock()
 }
 

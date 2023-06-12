@@ -555,7 +555,7 @@ func (vlog *valueLog) init(db *DB) {
 	y.Check(err)
 	vlog.discardStats = lf
 	// See TestPersistLFDiscardStats for purpose of statement below.
-	db.logToSyncChan("End: vlog.init(db)")
+	db.logToSyncChan(endVLogInitMsg)
 }
 
 func (vlog *valueLog) open(db *DB) error {
@@ -1108,7 +1108,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	}
 	// The following is to coordinate with some test cases where we want to
 	// verify that at least one iteration of updateDiscardStats has been completed.
-	vlog.db.logToSyncChan("updateDiscardStats iteration done")
+	vlog.db.logToSyncChan(updateDiscardStatsMsg)
 }
 
 type vlogThreshold struct {

@@ -27,6 +27,9 @@ package badger
 //       If we do this, we will also want to introduce a parallel file that
 //       overrides some of these structs and functions with empty contents.
 
+const updateDiscardStatsMsg = "updateDiscardStats iteration done"
+const endVLogInitMsg = "End: vlog.init(db)"
+
 // testOnlyOptions specifies an extension to the type Options that we want to
 // use only in the context of testing.
 type testOnlyOptions struct {
@@ -34,11 +37,6 @@ type testOnlyOptions struct {
 	// that can occur in a DB instance. Currently, this is only used in
 	// testing activities.
 	syncChan chan string
-
-	// onCloseDiscardCapture will be populated by a DB instance during the
-	// process of performing the Close operation. Currently, we only consider
-	// using this during testing.
-	onCloseDiscardCapture map[uint64]uint64
 }
 
 // withSyncChan returns a new Options value with syncChan set to the given value.
@@ -49,18 +47,15 @@ func (opt Options) withSyncChan(ch chan string) Options {
 	return opt
 }
 
-// withOnCloseDiscardCapture makes a shallow copy of the map c to
-// opt.onCloseDiscardCapture. When we later perform DB.Close(), we make sure to
-// copy the contents of the DB.discardStats to the map c.
-func (opt Options) withOnCloseDiscardCapture(c map[uint64]uint64) Options {
-	opt.onCloseDiscardCapture = c
-	return opt
-}
-
 // testOnlyDBExtensions specifies an extension to the type DB that we want to
 // use only in the context of testing.
 type testOnlyDBExtensions struct {
 	syncChan chan string
+
+	// onCloseDiscardCapture will be populated by a DB instance during the
+	// process of performing the Close operation. Currently, we only consider
+	// using this during testing.
+	onCloseDiscardCapture map[uint64]uint64
 }
 
 // setSyncChan is a trivial setter for db.testOnlyDbExtensions.syncChan.
@@ -87,10 +82,10 @@ func (db *DB) logToSyncChan(msg string) {
 // db.opt. Of couse, if db.opt.onCloseDiscardCapture is nil (as expected
 // for a production system as opposed to a test system), this is a no-op.
 func (db *DB) captureDiscardStats() {
-	if db.opt.onCloseDiscardCapture != nil {
+	if db.onCloseDiscardCapture != nil {
 		db.vlog.discardStats.Lock()
 		db.vlog.discardStats.Iterate(func(id, val uint64) {
-			db.opt.onCloseDiscardCapture[id] = val
+			db.onCloseDiscardCapture[id] = val
 		})
 		db.vlog.discardStats.Unlock()
 	}
