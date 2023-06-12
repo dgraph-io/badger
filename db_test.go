@@ -40,6 +40,42 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 )
 
+// waitForMessage(ch, expected, count, timeout, t) will block until either
+// `timeout` seconds have occurred or `count` instances of the string `expected`
+// have occurred on the channel `ch`. We log messages or generate errors using `t`.
+func waitForMessage(ch chan string, expected string, count int, timeout int, t *testing.T) {
+	if count <= 0 {
+		t.Logf("Will skip waiting for %s since exected count <= 0.",
+			expected)
+		return
+	}
+	tout := time.NewTimer(time.Duration(timeout) * time.Second)
+	remaining := count
+	for {
+		select {
+		case curMsg, ok := <-ch:
+			if !ok {
+				t.Errorf("Test channel closed while waiting for "+
+					"message %s with %d remaining instances expected",
+					expected, remaining)
+				return
+			}
+			t.Logf("Found message: %s", curMsg)
+			if curMsg == expected {
+				remaining--
+				if remaining == 0 {
+					return
+				}
+			}
+		case <-tout.C:
+			t.Errorf("Timed out after %d seconds while waiting on test chan "+
+				"for message '%s' with %d remaining instances expected",
+				timeout, expected, remaining)
+			return
+		}
+	}
+}
+
 // summary is produced when DB is closed. Currently it is used only for testing.
 type summary struct {
 	fileIDs map[uint64]bool
