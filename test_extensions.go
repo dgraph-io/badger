@@ -27,8 +27,11 @@ package badger
 //       If we do this, we will also want to introduce a parallel file that
 //       overrides some of these structs and functions with empty contents.
 
-const updateDiscardStatsMsg = "updateDiscardStats iteration done"
-const endVLogInitMsg = "End: vlog.init(db)"
+// String constants for messages to be pushed to syncChan.
+const (
+	updateDiscardStatsMsg = "updateDiscardStats iteration done"
+	endVLogInitMsg        = "End: vlog.init(db)"
+)
 
 // testOnlyOptions specifies an extension to the type Options that we want to
 // use only in the context of testing.
