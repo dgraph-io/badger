@@ -26,7 +26,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
@@ -496,9 +495,14 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt.CompactL0OnClose = false
 	opt.MemTableSize = 1 << 15
 	opt.ValueThreshold = 1 << 10
+	tChan := make(chan string, 100)
+	defer close(tChan)
+	opt.syncChan = tChan
 
 	db, err := Open(opt)
 	require.NoError(t, err)
+	capturedDiscardStats := make(map[uint64]uint64)
+	db.onCloseDiscardCapture = capturedDiscardStats
 
 	sz := 128 << 10 // 5 entries per value log file.
 	v := make([]byte, sz)
@@ -522,14 +526,11 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(2 * time.Second) // wait for compaction to complete
+	// Wait for invocation of updateDiscardStats at least once -- timeout after 60 seconds.
+	waitForMessage(tChan, updateDiscardStatsMsg, 1, 60, t)
 
-	persistedMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Lock()
 	require.True(t, db.vlog.discardStats.Len() > 1, "some discardStats should be generated")
-	db.vlog.discardStats.Iterate(func(fid, val uint64) {
-		persistedMap[fid] = val
-	})
 
 	db.vlog.discardStats.Unlock()
 	require.NoError(t, db.Close())
@@ -539,13 +540,15 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
+	waitForMessage(tChan, endVLogInitMsg, 1, 60, t)
 	db.vlog.discardStats.Lock()
 	statsMap := make(map[uint64]uint64)
 	db.vlog.discardStats.Iterate(func(fid, val uint64) {
 		statsMap[fid] = val
 	})
-	require.True(t, reflect.DeepEqual(persistedMap, statsMap), "Discard maps are not equal")
+	require.Truef(t, reflect.DeepEqual(capturedDiscardStats, statsMap),
+		"Discard maps are not equal. On Close: %+v, After Reopen: %+v",
+		capturedDiscardStats, statsMap)
 	db.vlog.discardStats.Unlock()
 }
 

@@ -90,6 +90,8 @@ func (lk *lockedKeys) all() []uint64 {
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
+	testOnlyDBExtensions
+
 	lock sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *directoryLockGuard
@@ -252,6 +254,9 @@ func Open(opt Options) (*DB, error) {
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
 	}
+
+	db.syncChan = opt.syncChan
+
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
