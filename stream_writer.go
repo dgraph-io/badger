@@ -285,6 +285,11 @@ func (sw *StreamWriter) Flush() error {
 		if sw.db.orc != nil {
 			sw.db.orc.Stop()
 		}
+
+		if curMax := sw.db.orc.readTs(); curMax >= sw.maxVersion {
+			sw.maxVersion = curMax
+		}
+
 		sw.db.orc = newOracle(sw.db.opt)
 		sw.db.orc.nextTxnTs = sw.maxVersion
 		sw.db.orc.txnMark.Done(sw.maxVersion)
