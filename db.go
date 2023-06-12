@@ -729,6 +729,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 
 	var maxVs y.ValueStruct
 	version := y.ParseTs(key)
+	found := false
 
 	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
 	for i := 0; i < len(tables); i++ {
@@ -737,6 +738,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		if vs.Meta == 0 && vs.Value == nil {
 			continue
 		}
+		found = true
 		// Found the required version of the key, return immediately.
 		if vs.Version == version {
 			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
@@ -745,6 +747,9 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		if maxVs.Version < vs.Version {
 			maxVs = vs
 		}
+	}
+	if found {
+		return maxVs, nil
 	}
 	return db.lc.get(key, maxVs, 0)
 }
