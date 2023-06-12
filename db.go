@@ -255,7 +255,7 @@ func Open(opt Options) (*DB, error) {
 		threshold:        initVlogThreshold(&opt),
 	}
 
-	db.setSyncChan(opt.syncChan)
+	db.syncChan = opt.syncChan
 
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {

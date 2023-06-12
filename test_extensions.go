@@ -39,14 +39,6 @@ type testOnlyOptions struct {
 	syncChan chan string
 }
 
-// withSyncChan returns a new Options value with syncChan set to the given value.
-// If not specified, any operations that would otherwise occur with the syncChan
-// will be silently skipped.
-func (opt Options) withSyncChan(ch chan string) Options {
-	opt.syncChan = ch
-	return opt
-}
-
 // testOnlyDBExtensions specifies an extension to the type DB that we want to
 // use only in the context of testing.
 type testOnlyDBExtensions struct {
@@ -56,14 +48,6 @@ type testOnlyDBExtensions struct {
 	// process of performing the Close operation. Currently, we only consider
 	// using this during testing.
 	onCloseDiscardCapture map[uint64]uint64
-}
-
-// setSyncChan is a trivial setter for db.testOnlyDbExtensions.syncChan.
-// Strictly speaking, this has little value for us, except that it
-// can isolate the test-specific behaviors of a production Badger system
-// to this single file.
-func (db *DB) setSyncChan(ch chan string) {
-	db.syncChan = ch
 }
 
 // logToSyncChan sends a message to the DB's syncChan. Note that we expect

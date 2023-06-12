@@ -497,7 +497,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt.ValueThreshold = 1 << 10
 	tChan := make(chan string, 100)
 	defer close(tChan)
-	opt = opt.withSyncChan(tChan)
+	opt.syncChan = tChan
 
 	db, err := Open(opt)
 	require.NoError(t, err)
