@@ -73,23 +73,33 @@ var (
 func init() {
 	numReadsVlog = expvar.NewInt("badger_v4_disk_reads_total")
 	numWritesVlog = expvar.NewInt("badger_v4_disk_writes_total")
-	numBytesReadLSM = expvar.NewInt("badger_v4_read_bytes_lsm")
-	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
 	numBytesVlogWritten = expvar.NewInt("badger_v4_vlog_written_bytes")
+	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
+
+	numBytesReadLSM = expvar.NewInt("badger_v4_read_bytes_lsm")
 	numBytesLSMWritten = expvar.NewInt("badger_v4_lsm_written_bytes")
 	numBytesCompactionWritten = expvar.NewInt("badger_v4_compaction_written_bytes")
+
 	numLSMGets = expvar.NewMap("badger_v4_lsm_level_gets_total")
 	numLSMBloomHits = expvar.NewMap("badger_v4_lsm_bloom_hits_total")
+	numMemtableGets = expvar.NewInt("badger_v4_memtable_gets_total")
+
+	// User operations
 	numGets = expvar.NewInt("badger_v4_gets_total")
 	numPuts = expvar.NewInt("badger_v4_puts_total")
-	numMemtableGets = expvar.NewInt("badger_v4_memtable_gets_total")
-	lsmSize = expvar.NewMap("badger_v4_lsm_size_bytes")
-	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
-	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
-	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
 	numBytesWrittenUser = expvar.NewInt("badger_v4_write_user")
+
+	// Required for Enabled
+	// Do we need this? We don't use this anyway
 	numGetsWithResults = expvar.NewInt("badger_v4_get_results")
 	numIteratorsCreated = expvar.NewInt("badger_v4_iterators")
+
+	// Sizes
+	lsmSize = expvar.NewMap("badger_v4_lsm_size_bytes")
+	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
+
+	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
+	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
 }
 
 func NumIteratorsCreatedAdd(enabled bool, val int64) {
