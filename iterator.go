@@ -101,11 +101,8 @@ func (item *Item) Value(fn func(val []byte) error) error {
 		}
 		return item.err
 	}
-	buf, cb, err := item.yieldItemValue()
+	buf, cb := item.yieldItemValue()
 	defer runCallback(cb)
-	if err != nil {
-		return err
-	}
 	if fn != nil {
 		return fn(buf)
 	}
@@ -123,9 +120,9 @@ func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
 	if item.status == prefetched {
 		return y.SafeCopy(dst, item.val), item.err
 	}
-	buf, cb, err := item.yieldItemValue()
+	buf, cb := item.yieldItemValue()
 	defer runCallback(cb)
-	return y.SafeCopy(dst, buf), err
+	return y.SafeCopy(dst, buf), nil
 }
 
 func (item *Item) hasValue() bool {
@@ -147,10 +144,10 @@ func (item *Item) DiscardEarlierVersions() bool {
 	return item.meta&bitDiscardEarlierVersions > 0
 }
 
-func (item *Item) yieldItemValue() ([]byte, func(), error) {
+func (item *Item) yieldItemValue() ([]byte, func()) {
 	key := item.Key() // No need to copy.
 	if !item.hasValue() {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	if item.slice == nil {
@@ -160,7 +157,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if (item.meta & bitValuePointer) == 0 {
 		val := item.slice.Resize(len(item.vptr))
 		copy(val, item.vptr)
-		return val, nil, nil
+		return val, nil
 	}
 
 	var vp valuePointer
@@ -195,8 +192,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 				item.Key(), item.version, item.meta, item.userMeta, vp)
 		}
 	}
-	// Don't return error if we cannot read the value. Just log the error.
-	return result, cb, nil
+	return result, cb
 }
 
 func runCallback(cb func()) {
@@ -206,10 +202,9 @@ func runCallback(cb func()) {
 }
 
 func (item *Item) prefetchValue() {
-	val, cb, err := item.yieldItemValue()
+	val, cb := item.yieldItemValue()
 	defer runCallback(cb)
 
-	item.err = err
 	item.status = prefetched
 	if val == nil {
 		return
