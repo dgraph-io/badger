@@ -115,9 +115,9 @@ func (mi *MergeIterator) fix() {
 	case cmp < 0: // Small is less than bigger().
 		if mi.reverse {
 			mi.swapSmall()
-		} else { //nolint:staticcheck
-			// we don't need to do anything. Small already points to the smallest.
 		}
+		// if mi.reverse is false, we don't need to do anything.
+		// Small already points to the smallest.
 		return
 	default: // bigger() is less than small.
 		if mi.reverse {
