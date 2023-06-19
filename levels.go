@@ -1610,6 +1610,7 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
+		y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(vs.Value)))
 		if vs.Version == version {
 			return vs, nil
 		}
@@ -1617,7 +1618,6 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 			maxVs = vs
 		}
 	}
-	y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(maxVs.Value)))
 	if len(maxVs.Value) > 0 {
 		y.NumGetsWithResultsAdd(s.kv.opt.MetricsEnabled, 1)
 	}
