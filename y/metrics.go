@@ -72,9 +72,9 @@ var (
 // These variables are global and have cumulative values for all kv stores.
 func init() {
 	numReadsVlog = expvar.NewInt("badger_v4_disk_reads_total")
+	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
 	numWritesVlog = expvar.NewInt("badger_v4_disk_writes_total")
 	numBytesVlogWritten = expvar.NewInt("badger_v4_vlog_written_bytes")
-	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
 
 	numBytesReadLSM = expvar.NewInt("badger_v4_read_bytes_lsm")
 	numBytesLSMWritten = expvar.NewInt("badger_v4_lsm_written_bytes")
