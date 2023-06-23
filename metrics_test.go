@@ -18,7 +18,6 @@ package badger
 
 import (
 	"expvar"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -30,6 +29,7 @@ func TestWriteMetrics(t *testing.T) {
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		ClearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<12)
 		key := make([]byte, 40)
@@ -53,7 +53,6 @@ func TestWriteMetrics(t *testing.T) {
 
 		lsm_metric := expvar.Get("badger_v4_lsm_written_bytes")
 		require.Equal(t, expectedSize*int64(num), lsm_metric.(*expvar.Int).Value())
-		fmt.Println(lsm_metric)
 
 		compactionMetric := expvar.Get("badger_v4_compaction_written_bytes")
 		require.Equal(t, int64(0), compactionMetric.(*expvar.Int).Value())
@@ -75,6 +74,7 @@ func TestVlogMetris(t *testing.T) {
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		ClearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<20) // Large Value
 		key := make([]byte, 40)
@@ -90,7 +90,6 @@ func TestVlogMetris(t *testing.T) {
 		}
 
 		expectedSize := int64(len(val)) + 200 // vlog expected size
-		fmt.Println(expectedSize)
 
 		totalWrites := expvar.Get("badger_v4_disk_writes_total")
 		require.Equal(t, int64(num), totalWrites.(*expvar.Int).Value())
@@ -113,11 +112,28 @@ func TestVlogMetris(t *testing.T) {
 	})
 }
 
+func ClearAllMetrics() {
+	expvar.Do(func(kv expvar.KeyValue) {
+		// Reset the value of each expvar variable based on its type
+		switch v := kv.Value.(type) {
+		case *expvar.Int:
+			v.Set(0)
+		case *expvar.Float:
+			v.Set(0)
+		case *expvar.Map:
+			v.Init()
+		case *expvar.String:
+			v.Set("")
+		}
+	})
+}
+
 func TestReadMetrics(t *testing.T) {
 	opt := getTestOptions("")
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		ClearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<15)
 		keys := [][]byte{}
