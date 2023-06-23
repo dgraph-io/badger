@@ -207,7 +207,7 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
 		mt.maxVersion = ts
 	}
-	y.NumBytesLSMWrittenAdd(mt.opt.MetricsEnabled, entry.estimateSizeAndSetThreshold(mt.opt.ValueThreshold))
+	y.NumBytesWrittenToL0Add(mt.opt.MetricsEnabled, entry.estimateSizeAndSetThreshold(mt.opt.ValueThreshold))
 	return nil
 }
 

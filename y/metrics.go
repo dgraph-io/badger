@@ -20,12 +20,16 @@ import (
 	"expvar"
 )
 
+const (
+	BADGER_METRIC_PREFIX = "badger_v4_"
+)
+
 var (
 	// lsmSize has size of the LSM in bytes
 	lsmSize *expvar.Map
 	// vlogSize has size of the value log in bytes
 	vlogSize *expvar.Map
-	// pendingWrites tracks the number of pending writes. If no more writes happen, the value will not go to 0
+	// pendingWrites tracks the number of pending writes.
 	pendingWrites *expvar.Map
 
 	// These are cumulative
@@ -43,12 +47,12 @@ var (
 	// LSM METRICS
 	// numBytesRead has cumulative number of bytes read from LSM tree
 	numBytesReadLSM *expvar.Int
-	// numBytesLSMWritten has cumulative number of bytes written into LSM Tree
-	numBytesLSMWritten *expvar.Int
+	// numBytesWrittenToL0 has cumulative number of bytes written into LSM Tree
+	numBytesWrittenToL0 *expvar.Int
 	// numLSMGets is number of LSM gets
 	numLSMGets *expvar.Map
 	// numBytesCompactionWritten is the number of bytes written in the lsm tree due to compaction
-	numBytesCompactionWritten *expvar.Int
+	numBytesCompactionWritten *expvar.Map
 	// numLSMBloomHits is number of LMS bloom hits
 	numLSMBloomHits *expvar.Map
 
@@ -71,35 +75,35 @@ var (
 
 // These variables are global and have cumulative values for all kv stores.
 func init() {
-	numReadsVlog = expvar.NewInt("badger_v4_disk_reads_total")
-	numBytesReadVlog = expvar.NewInt("badger_v4_read_bytes_vlog")
-	numWritesVlog = expvar.NewInt("badger_v4_disk_writes_total")
-	numBytesVlogWritten = expvar.NewInt("badger_v4_vlog_written_bytes")
+	numReadsVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "disk_reads_total")
+	numBytesReadVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_vlog")
+	numWritesVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "disk_writes_total")
+	numBytesVlogWritten = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_written_bytes")
 
-	numBytesReadLSM = expvar.NewInt("badger_v4_read_bytes_lsm")
-	numBytesLSMWritten = expvar.NewInt("badger_v4_lsm_written_bytes")
-	numBytesCompactionWritten = expvar.NewInt("badger_v4_compaction_written_bytes")
+	numBytesReadLSM = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_lsm")
+	numBytesWrittenToL0 = expvar.NewInt(BADGER_METRIC_PREFIX + "written_to_l0")
+	numBytesCompactionWritten = expvar.NewMap(BADGER_METRIC_PREFIX + "compaction_written_bytes")
 
-	numLSMGets = expvar.NewMap("badger_v4_lsm_level_gets_total")
-	numLSMBloomHits = expvar.NewMap("badger_v4_lsm_bloom_hits_total")
-	numMemtableGets = expvar.NewInt("badger_v4_memtable_gets_total")
+	numLSMGets = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_level_gets_total")
+	numLSMBloomHits = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_bloom_hits_total")
+	numMemtableGets = expvar.NewInt(BADGER_METRIC_PREFIX + "memtable_gets_total")
 
 	// User operations
-	numGets = expvar.NewInt("badger_v4_gets_total")
-	numPuts = expvar.NewInt("badger_v4_puts_total")
-	numBytesWrittenUser = expvar.NewInt("badger_v4_write_user")
+	numGets = expvar.NewInt(BADGER_METRIC_PREFIX + "gets_total")
+	numPuts = expvar.NewInt(BADGER_METRIC_PREFIX + "puts_total")
+	numBytesWrittenUser = expvar.NewInt(BADGER_METRIC_PREFIX + "write_user")
 
 	// Required for Enabled
 	// Do we need this? We don't use this anyway
-	numGetsWithResults = expvar.NewInt("badger_v4_get_results")
-	numIteratorsCreated = expvar.NewInt("badger_v4_iterators")
+	numGetsWithResults = expvar.NewInt(BADGER_METRIC_PREFIX + "get_results")
+	numIteratorsCreated = expvar.NewInt(BADGER_METRIC_PREFIX + "iterators")
 
 	// Sizes
-	lsmSize = expvar.NewMap("badger_v4_lsm_size_bytes")
-	vlogSize = expvar.NewMap("badger_v4_vlog_size_bytes")
+	lsmSize = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_size_bytes")
+	vlogSize = expvar.NewMap(BADGER_METRIC_PREFIX + "vlog_size_bytes")
 
-	pendingWrites = expvar.NewMap("badger_v4_pending_writes_total")
-	numCompactionTables = expvar.NewInt("badger_v4_compactions_current")
+	pendingWrites = expvar.NewMap(BADGER_METRIC_PREFIX + "pending_writes_total")
+	numCompactionTables = expvar.NewInt(BADGER_METRIC_PREFIX + "compactions_current")
 }
 
 func NumIteratorsCreatedAdd(enabled bool, val int64) {
@@ -134,12 +138,12 @@ func NumBytesWrittenVlogAdd(enabled bool, val int64) {
 	addInt(enabled, numBytesVlogWritten, val)
 }
 
-func NumBytesLSMWrittenAdd(enabled bool, val int64) {
-	addInt(enabled, numBytesLSMWritten, val)
+func NumBytesWrittenToL0Add(enabled bool, val int64) {
+	addInt(enabled, numBytesWrittenToL0, val)
 }
 
-func NumBytesCompactionWrittenAdd(enabled bool, val int64) {
-	addInt(enabled, numBytesCompactionWritten, val)
+func NumBytesCompactionWrittenAdd(enabled bool, key string, val int64) {
+	addToMap(enabled, numBytesCompactionWritten, key, val)
 }
 
 func NumGetsAdd(enabled bool, val int64) {

@@ -51,20 +51,20 @@ func TestWriteMetrics(t *testing.T) {
 		put_metric := expvar.Get("badger_v4_puts_total")
 		require.Equal(t, int64(num), put_metric.(*expvar.Int).Value())
 
-		lsm_metric := expvar.Get("badger_v4_lsm_written_bytes")
+		lsm_metric := expvar.Get("badger_v4_written_to_l0")
 		require.Equal(t, expectedSize*int64(num), lsm_metric.(*expvar.Int).Value())
 
-		compactionMetric := expvar.Get("badger_v4_compaction_written_bytes")
-		require.Equal(t, int64(0), compactionMetric.(*expvar.Int).Value())
+		compactionMetric := expvar.Get("badger_v4_compaction_written_bytes").(*expvar.Map)
+		require.Equal(t, nil, compactionMetric.Get("l6"))
 
 		// Force compaction
 		db.Close()
 
-		db, err := OpenManaged(opt)
+		_, err := OpenManaged(opt)
 		require.Nil(t, err)
 
-		compactionMetric = expvar.Get("badger_v4_compaction_written_bytes")
-		require.GreaterOrEqual(t, expectedSize*int64(num)+int64(num*200), compactionMetric.(*expvar.Int).Value())
+		compactionMetric = expvar.Get("badger_v4_compaction_written_bytes").(*expvar.Map)
+		require.GreaterOrEqual(t, expectedSize*int64(num)+int64(num*200), compactionMetric.Get("l6").(*expvar.Int).Value())
 		// Because we have random values, compression is not able to do much, so we incur a cost on total size
 	})
 }
@@ -102,13 +102,15 @@ func TestVlogMetris(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), item.Version())
 
-		item.Value(func(val []byte) error {
+		err = item.Value(func(val []byte) error {
 			totalReads := expvar.Get("badger_v4_disk_reads_total")
 			bytesRead := expvar.Get("badger_v4_read_bytes_vlog")
 			require.Equal(t, int64(1), totalReads.(*expvar.Int).Value())
 			require.GreaterOrEqual(t, expectedSize, bytesRead.(*expvar.Int).Value())
 			return nil
 		})
+
+		require.Nil(t, err)
 	})
 }
 

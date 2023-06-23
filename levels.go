@@ -1449,7 +1449,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 
 	sizeNewTables := getSizes(newTables)
 	sizeOldTables := getSizes(cd.bot) + getSizes(cd.top)
-	y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, sizeNewTables)
+	y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
 
 	// See comment earlier in this function about the ordering of these ops, and the order in which
 	// we access levels when reading.
