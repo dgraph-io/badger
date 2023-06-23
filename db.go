@@ -745,6 +745,12 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 			maxVs = vs
 		}
 	}
+
+	if (maxVs.Version != 0) && maxVs.Meta != bitDiscardEarlierVersions {
+		y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
+		return maxVs, nil
+	}
+
 	return db.lc.get(key, maxVs, 0)
 }
 
