@@ -91,7 +91,7 @@ func TestVlogMetris(t *testing.T) {
 
 		expectedSize := int64(len(val)) + 200 // vlog expected size
 
-		totalWrites := expvar.Get("badger_v4_disk_writes_total")
+		totalWrites := expvar.Get("badger_v4_vlog_writes_num")
 		require.Equal(t, int64(num), totalWrites.(*expvar.Int).Value())
 
 		bytesWritten := expvar.Get("badger_v4_vlog_written_bytes")
@@ -103,8 +103,8 @@ func TestVlogMetris(t *testing.T) {
 		require.Equal(t, uint64(1), item.Version())
 
 		err = item.Value(func(val []byte) error {
-			totalReads := expvar.Get("badger_v4_disk_reads_total")
-			bytesRead := expvar.Get("badger_v4_read_bytes_vlog")
+			totalReads := expvar.Get("badger_v4_vlog_reads_num")
+			bytesRead := expvar.Get("badger_v4_vlog_reads_bytes")
 			require.Equal(t, int64(1), totalReads.(*expvar.Int).Value())
 			require.GreaterOrEqual(t, expectedSize, bytesRead.(*expvar.Int).Value())
 			return nil

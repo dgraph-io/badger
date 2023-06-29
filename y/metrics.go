@@ -75,9 +75,9 @@ var (
 
 // These variables are global and have cumulative values for all kv stores.
 func init() {
-	numReadsVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "disk_reads_total")
-	numBytesReadVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_vlog")
-	numWritesVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "disk_writes_total")
+	numReadsVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_reads_num")
+	numBytesReadVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_reads_bytes")
+	numWritesVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_writes_num")
 	numBytesVlogWritten = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_written_bytes")
 
 	numBytesReadLSM = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_lsm")
