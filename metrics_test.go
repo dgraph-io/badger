@@ -69,7 +69,7 @@ func TestWriteMetrics(t *testing.T) {
 	})
 }
 
-func TestVlogMetris(t *testing.T) {
+func TestVlogMetrics(t *testing.T) {
 	opt := getTestOptions("")
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true

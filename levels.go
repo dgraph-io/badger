@@ -1447,9 +1447,10 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		return size
 	}
 
+	sizeNewTables := int64(0)
 	sizeOldTables := int64(0)
 	if s.kv.opt.MetricsEnabled {
-		sizeNewTables := getSizes(newTables)
+		sizeNewTables = getSizes(newTables)
 		sizeOldTables = getSizes(cd.bot) + getSizes(cd.top)
 		y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
 	}
