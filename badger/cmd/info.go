@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -277,8 +277,14 @@ func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
 func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
 	tables := db.Tables()
-	fileInfos, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	y.Check(err)
+	fileInfos := make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		y.Check(err)
+		fileInfos = append(fileInfos, info)
+	}
 
 	fmt.Println()
 	// Total keys includes the internal keys as well.
@@ -333,10 +339,19 @@ func printInfo(dir, valueDir string) error {
 	fp.Close()
 	fp = nil
 
-	fileinfos, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
+	fileinfos := make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		fileinfos = append(fileinfos, info)
+	}
+
 	fileinfoByName := make(map[string]os.FileInfo)
 	fileinfoMarked := make(map[string]bool)
 	for _, info := range fileinfos {
@@ -402,9 +417,17 @@ func printInfo(dir, valueDir string) error {
 
 	valueDirFileinfos := fileinfos
 	if valueDir != dir {
-		valueDirFileinfos, err = ioutil.ReadDir(valueDir)
+		entries, err = os.ReadDir(valueDir)
 		if err != nil {
 			return err
+		}
+		valueDirFileinfos = make([]fs.FileInfo, 0, len(entries))
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			valueDirFileinfos = append(valueDirFileinfos, info)
 		}
 	}
 
