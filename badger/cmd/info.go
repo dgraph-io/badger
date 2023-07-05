@@ -277,14 +277,8 @@ func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
 func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
 	tables := db.Tables()
-	entries, err := os.ReadDir(dir)
+	fileInfos, err := readDir(dir)
 	y.Check(err)
-	fileInfos := make([]fs.FileInfo, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		y.Check(err)
-		fileInfos = append(fileInfos, info)
-	}
 
 	fmt.Println()
 	// Total keys includes the internal keys as well.
@@ -316,6 +310,23 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	fmt.Println()
 }
 
+func readDir(dir string) (fileInfos []fs.FileInfo, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	fileInfos = make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		var info fs.FileInfo
+		info, err = entry.Info()
+		if err != nil {
+			return
+		}
+		fileInfos = append(fileInfos, info)
+	}
+	return
+}
+
 func printInfo(dir, valueDir string) error {
 	if dir == "" {
 		return fmt.Errorf("--dir not supplied")
@@ -339,17 +350,9 @@ func printInfo(dir, valueDir string) error {
 	fp.Close()
 	fp = nil
 
-	entries, err := os.ReadDir(dir)
+	fileinfos, err := readDir(dir)
 	if err != nil {
 		return err
-	}
-	fileinfos := make([]fs.FileInfo, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		fileinfos = append(fileinfos, info)
 	}
 
 	fileinfoByName := make(map[string]os.FileInfo)
@@ -417,18 +420,11 @@ func printInfo(dir, valueDir string) error {
 
 	valueDirFileinfos := fileinfos
 	if valueDir != dir {
-		entries, err = os.ReadDir(valueDir)
+		valueDirFileinfos, err = readDir(valueDir)
 		if err != nil {
 			return err
 		}
-		valueDirFileinfos = make([]fs.FileInfo, 0, len(entries))
-		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				return err
-			}
-			valueDirFileinfos = append(valueDirFileinfos, info)
-		}
+
 	}
 
 	// If valueDir is different from dir, holds extra files in the value dir.
