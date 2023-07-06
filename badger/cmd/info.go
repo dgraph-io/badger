@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -277,7 +277,7 @@ func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
 func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
 	tables := db.Tables()
-	fileInfos, err := ioutil.ReadDir(dir)
+	fileInfos, err := readDir(dir)
 	y.Check(err)
 
 	fmt.Println()
@@ -310,6 +310,23 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	fmt.Println()
 }
 
+func readDir(dir string) ([]fs.FileInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]fs.FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		var info fs.FileInfo
+		info, err = entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, err
+}
+
 func printInfo(dir, valueDir string) error {
 	if dir == "" {
 		return fmt.Errorf("--dir not supplied")
@@ -333,10 +350,11 @@ func printInfo(dir, valueDir string) error {
 	fp.Close()
 	fp = nil
 
-	fileinfos, err := ioutil.ReadDir(dir)
+	fileinfos, err := readDir(dir)
 	if err != nil {
 		return err
 	}
+
 	fileinfoByName := make(map[string]os.FileInfo)
 	fileinfoMarked := make(map[string]bool)
 	for _, info := range fileinfos {
@@ -402,10 +420,11 @@ func printInfo(dir, valueDir string) error {
 
 	valueDirFileinfos := fileinfos
 	if valueDir != dir {
-		valueDirFileinfos, err = ioutil.ReadDir(valueDir)
+		valueDirFileinfos, err = readDir(valueDir)
 		if err != nil {
 			return err
 		}
+
 	}
 
 	// If valueDir is different from dir, holds extra files in the value dir.
