@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v4/pb"
-	bpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -50,7 +49,7 @@ func value(k int) []byte {
 }
 
 type collector struct {
-	kv []*bpb.KV
+	kv []*pb.KV
 }
 
 func (c *collector) Send(buf *z.Buffer) error {
@@ -62,7 +61,7 @@ func (c *collector) Send(buf *z.Buffer) error {
 		if kv.StreamDone == true {
 			return nil
 		}
-		cp := proto.Clone(kv).(*bpb.KV)
+		cp := proto.Clone(kv).(*pb.KV)
 		c.kv = append(c.kv, cp)
 	}
 	return err
@@ -193,7 +192,7 @@ func TestStreamWithThreadId(t *testing.T) {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
 	stream.KeyToList = func(key []byte, itr *Iterator) (
-		*bpb.KVList, error) {
+		*pb.KVList, error) {
 		require.Less(t, itr.ThreadId, stream.NumGo)
 		return stream.ToList(key, itr)
 	}

@@ -380,13 +380,13 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
 				"Please see https://dgraph.io/docs/badger/faq/#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
-				" on how to fix this.",
+				" on how to fix this",
 				version, badgerMagicVersion)
 	}
 	if extVersion != extMagic {
 		return Manifest{}, 0,
-			fmt.Errorf("Cannot open DB because the external magic number doesn't match. "+
-				"Expected: %d, version present in manifest: %d\n", extMagic, extVersion)
+			fmt.Errorf("cannot open DB because the external magic number doesn't match. "+
+				"Expected: %d, version present in manifest: %d", extMagic, extVersion)
 	}
 
 	stat, err := fp.Stat()

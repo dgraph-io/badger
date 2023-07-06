@@ -59,7 +59,7 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	// Check if the DB already exists
 	manifestFile := filepath.Join(sstDir, badger.ManifestFilename)
 	if _, err := os.Stat(manifestFile); err == nil { // No error. File already exists.
-		return errors.New("Cannot restore to an already existing database")
+		return errors.New("cannot restore to an already existing database")
 	} else if os.IsNotExist(err) {
 		// pass
 	} else { // Return an error if anything other than the error above

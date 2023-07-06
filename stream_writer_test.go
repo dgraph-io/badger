@@ -685,7 +685,7 @@ func TestStreamWriterIncremental(t *testing.T) {
 
 			sw := db.NewStreamWriter()
 			defer sw.Cancel()
-			require.EqualError(t, sw.PrepareIncremental(), "Unable to do incremental writes because MemTable has data")
+			require.EqualError(t, sw.PrepareIncremental(), "unable to do incremental writes because MemTable has data")
 
 			txn := db.NewTransaction(false)
 			defer txn.Discard()
