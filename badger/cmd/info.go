@@ -310,21 +310,21 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	fmt.Println()
 }
 
-func readDir(dir string) (fileInfos []fs.FileInfo, err error) {
+func readDir(dir string) ([]fs.FileInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return nil, err
 	}
-	fileInfos = make([]fs.FileInfo, 0, len(entries))
+	infos := make([]fs.FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		var info fs.FileInfo
 		info, err = entry.Info()
 		if err != nil {
-			return
+			return nil, err
 		}
-		fileInfos = append(fileInfos, info)
+		infos = append(infos, info)
 	}
-	return
+	return infos, err
 }
 
 func printInfo(dir, valueDir string) error {
