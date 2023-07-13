@@ -155,6 +155,7 @@ func TestReadMetrics(t *testing.T) {
 		txn := db.NewTransactionAt(2, false)
 		item, err := txn.Get(keys[0])
 		require.NoError(t, err)
+		require.Equal(t, uint64(1), item.Version())
 
 		totalGets := expvar.Get("badger_v4_gets_total")
 		require.Equal(t, int64(1), totalGets.(*expvar.Int).Value())
