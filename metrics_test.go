@@ -24,6 +24,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func ClearAllMetrics() {
+	expvar.Do(func(kv expvar.KeyValue) {
+		// Reset the value of each expvar variable based on its type
+		switch v := kv.Value.(type) {
+		case *expvar.Int:
+			v.Set(0)
+		case *expvar.Float:
+			v.Set(0)
+		case *expvar.Map:
+			v.Init()
+		case *expvar.String:
+			v.Set("")
+		}
+	})
+}
+
 func TestWriteMetrics(t *testing.T) {
 	opt := getTestOptions("")
 	opt.managedTxns = true
@@ -61,7 +77,7 @@ func TestWriteMetrics(t *testing.T) {
 		db.Close()
 
 		_, err := OpenManaged(opt)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		compactionMetric = expvar.Get("badger_v4_compaction_written_bytes").(*expvar.Map)
 		require.GreaterOrEqual(t, expectedSize*int64(num)+int64(num*200), compactionMetric.Get("l6").(*expvar.Int).Value())
@@ -110,23 +126,7 @@ func TestVlogMetrics(t *testing.T) {
 			return nil
 		})
 
-		require.Nil(t, err)
-	})
-}
-
-func ClearAllMetrics() {
-	expvar.Do(func(kv expvar.KeyValue) {
-		// Reset the value of each expvar variable based on its type
-		switch v := kv.Value.(type) {
-		case *expvar.Int:
-			v.Set(0)
-		case *expvar.Float:
-			v.Set(0)
-		case *expvar.Map:
-			v.Init()
-		case *expvar.String:
-			v.Set("")
-		}
+		require.NoError(t, err)
 	})
 }
 
@@ -148,7 +148,6 @@ func TestReadMetrics(t *testing.T) {
 			require.NoError(t, err)
 
 			require.NoError(t, writer.SetEntryAt(NewEntry([]byte(keyB), val), 1))
-
 		}
 		writer.Flush()
 
@@ -170,7 +169,7 @@ func TestReadMetrics(t *testing.T) {
 		db.Close()
 
 		db, err = OpenManaged(opt)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		txn = db.NewTransactionAt(2, false)
 		item, err = txn.Get(keys[0])
@@ -178,7 +177,7 @@ func TestReadMetrics(t *testing.T) {
 		require.Equal(t, uint64(1), item.Version())
 
 		_, err = txn.Get([]byte(key("abdbyte", 1000))) // val should be far enough that bloom filter doesn't hit
-		require.NotNil(t, err)
+		require.Error(t, err)
 
 		totalLSMGets = expvar.Get("badger_v4_lsm_level_gets_total")
 		require.Equal(t, int64(0x1), totalLSMGets.(*expvar.Map).Get("l6").(*expvar.Int).Value())
