@@ -168,7 +168,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	db := item.txn.db
 	result, cb, err := db.vlog.Read(vp, item.slice)
 	if err != nil {
-		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
+		db.opt.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
 			" Error: %v", key, item.version, item.meta, item.userMeta, err)
 		var txn *Txn
 		if db.opt.managedTxns {
@@ -191,7 +191,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 			if item.meta&bitValuePointer > 0 {
 				vp.Decode(item.vptr)
 			}
-			db.opt.Logger.Errorf("Key: %v, Version : %v, meta: %v, userMeta: %v valuePointer: %+v",
+			db.opt.Errorf("Key: %v, Version : %v, meta: %v, userMeta: %v valuePointer: %+v",
 				item.Key(), item.version, item.meta, item.userMeta, vp)
 		}
 	}

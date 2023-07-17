@@ -243,7 +243,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	for streamId := range closedStreams {
 		writer, ok := sw.writers[streamId]
 		if !ok {
-			sw.db.opt.Logger.Warningf("Trying to close stream: %d, but no sorted "+
+			sw.db.opt.Warningf("Trying to close stream: %d, but no sorted "+
 				"writer found for it", streamId)
 			continue
 		}
