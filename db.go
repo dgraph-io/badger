@@ -775,6 +775,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		}
 		// Found the required version of the key, return immediately.
 		if vs.Version == version {
+			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
@@ -898,6 +899,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
+	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, int64(size))
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}

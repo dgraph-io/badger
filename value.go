@@ -893,8 +893,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 			bytesWritten += buf.Len()
 			// No need to flush anything, we write to file directly via mmap.
 		}
-		y.NumWritesAdd(vlog.opt.MetricsEnabled, int64(written))
-		y.NumBytesWrittenAdd(vlog.opt.MetricsEnabled, int64(bytesWritten))
+		y.NumWritesVlogAdd(vlog.opt.MetricsEnabled, int64(written))
+		y.NumBytesWrittenVlogAdd(vlog.opt.MetricsEnabled, int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
 		vlog.db.threshold.update(valueSizes)
@@ -994,6 +994,8 @@ func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *logFile, error) 
 	}
 
 	buf, err := lf.read(vp)
+	y.NumReadsVlogAdd(vlog.db.opt.MetricsEnabled, 1)
+	y.NumBytesReadsVlogAdd(vlog.db.opt.MetricsEnabled, int64(len(buf)))
 	return buf, lf, err
 }
 

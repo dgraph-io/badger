@@ -475,6 +475,8 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		panic(ErrDBClosed)
 	}
 
+	y.NumIteratorsCreatedAdd(txn.db.opt.MetricsEnabled, 1)
+
 	// Keep track of the number of active iterators.
 	txn.numIterators.Add(1)
 

@@ -207,6 +207,7 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
 		mt.maxVersion = ts
 	}
+	y.NumBytesWrittenToL0Add(mt.opt.MetricsEnabled, entry.estimateSizeAndSetThreshold(mt.opt.ValueThreshold))
 	return nil
 }
 
@@ -388,7 +389,6 @@ func (lf *logFile) encryptionEnabled() bool {
 
 // Acquire lock on mmap/file if you are calling this
 func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
-	var nbr int64
 	offset := p.Offset
 	// Do not convert size to uint32, because the lf.Data can be of size
 	// 4GB, which overflows the uint32 during conversion to make the size 0,
@@ -404,10 +404,7 @@ func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 		err = y.ErrEOF
 	} else {
 		buf = lf.Data[offset : offset+valsz]
-		nbr = int64(valsz)
 	}
-	y.NumReadsAdd(lf.opt.MetricsEnabled, 1)
-	y.NumBytesReadAdd(lf.opt.MetricsEnabled, nbr)
 	return buf, err
 }
 

@@ -1439,6 +1439,22 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		return err
 	}
 
+	getSizes := func(tables []*table.Table) int64 {
+		size := int64(0)
+		for _, i := range tables {
+			size += i.Size()
+		}
+		return size
+	}
+
+	sizeNewTables := int64(0)
+	sizeOldTables := int64(0)
+	if s.kv.opt.MetricsEnabled {
+		sizeNewTables = getSizes(newTables)
+		sizeOldTables = getSizes(cd.bot) + getSizes(cd.top)
+		y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
+	}
+
 	// See comment earlier in this function about the ordering of these ops, and the order in which
 	// we access levels when reading.
 	if err := nextLevel.replaceTables(cd.bot, newTables); err != nil {
@@ -1459,16 +1475,16 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 			expensive = " [E]"
 		}
 		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
-			" [%s] -> [%s], took %v\n",
+			" [%s] -> [%s], took %v\n, deleted %d bytes",
 			id, expensive, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
 			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
-			dur.Round(time.Millisecond))
+			dur.Round(time.Millisecond), sizeOldTables-sizeNewTables)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
-		s.kv.opt.Debugf("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
-		s.kv.opt.Debugf("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
@@ -1598,12 +1614,16 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
+		y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(vs.Value)))
 		if vs.Version == version {
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
 			maxVs = vs
 		}
+	}
+	if len(maxVs.Value) > 0 {
+		y.NumGetsWithResultsAdd(s.kv.opt.MetricsEnabled, 1)
 	}
 	return maxVs, nil
 }
