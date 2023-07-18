@@ -90,21 +90,20 @@ func init() {
 	numMemtableGets = expvar.NewInt(BADGER_METRIC_PREFIX + "get_num_memtable")
 
 	// User operations
-	numGets = expvar.NewInt(BADGER_METRIC_PREFIX + "get_total_user")
-	numPuts = expvar.NewInt(BADGER_METRIC_PREFIX + "put_total_user")
+	numGets = expvar.NewInt(BADGER_METRIC_PREFIX + "get_num_user")
+	numPuts = expvar.NewInt(BADGER_METRIC_PREFIX + "put_num_user")
 	numBytesWrittenUser = expvar.NewInt(BADGER_METRIC_PREFIX + "write_bytes_user")
 
 	// Required for Enabled
-	// Do we need this? We don't use this anyway
-	numGetsWithResults = expvar.NewInt(BADGER_METRIC_PREFIX + "get_with_results_user")
+	numGetsWithResults = expvar.NewInt(BADGER_METRIC_PREFIX + "get_with_result_num_user")
 	numIteratorsCreated = expvar.NewInt(BADGER_METRIC_PREFIX + "iterator_num_user")
 
 	// Sizes
 	lsmSize = expvar.NewMap(BADGER_METRIC_PREFIX + "size_bytes_lsm")
 	vlogSize = expvar.NewMap(BADGER_METRIC_PREFIX + "size_bytes_vlog")
 
-	pendingWrites = expvar.NewMap(BADGER_METRIC_PREFIX + "writes_pending_num_total")
-	numCompactionTables = expvar.NewInt(BADGER_METRIC_PREFIX + "compactions_current")
+	pendingWrites = expvar.NewMap(BADGER_METRIC_PREFIX + "write_pending_num_memtable")
+	numCompactionTables = expvar.NewInt(BADGER_METRIC_PREFIX + "compaction_current_num_lsm")
 }
 
 func NumIteratorsCreatedAdd(enabled bool, val int64) {

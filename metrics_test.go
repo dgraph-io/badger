@@ -64,7 +64,7 @@ func TestWriteMetrics(t *testing.T) {
 		write_metric := expvar.Get("badger_v4_write_bytes_user")
 		require.Equal(t, expectedSize*int64(num), write_metric.(*expvar.Int).Value())
 
-		put_metric := expvar.Get("badger_v4_put_total_user")
+		put_metric := expvar.Get("badger_v4_put_num_user")
 		require.Equal(t, int64(num), put_metric.(*expvar.Int).Value())
 
 		lsm_metric := expvar.Get("badger_v4_write_bytes_l0")
@@ -156,7 +156,7 @@ func TestReadMetrics(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), item.Version())
 
-		totalGets := expvar.Get("badger_v4_get_total_user")
+		totalGets := expvar.Get("badger_v4_get_num_user")
 		require.Equal(t, int64(1), totalGets.(*expvar.Int).Value())
 
 		totalMemtableReads := expvar.Get("badger_v4_get_num_memtable")
@@ -190,7 +190,7 @@ func TestReadMetrics(t *testing.T) {
 		bytesLSM := expvar.Get("badger_v4_read_bytes_lsm")
 		require.Equal(t, int64(len(val)), bytesLSM.(*expvar.Int).Value())
 
-		getWithResult := expvar.Get("badger_v4_get_with_results_user")
+		getWithResult := expvar.Get("badger_v4_get_with_result_num_user")
 		require.Equal(t, int64(2), getWithResult.(*expvar.Int).Value())
 
 		iterOpts := DefaultIteratorOptions
