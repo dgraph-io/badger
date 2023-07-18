@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ClearAllMetrics() {
+func clearAllMetrics() {
 	expvar.Do(func(kv expvar.KeyValue) {
 		// Reset the value of each expvar variable based on its type
 		switch v := kv.Value.(type) {
@@ -45,7 +45,7 @@ func TestWriteMetrics(t *testing.T) {
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		ClearAllMetrics()
+		clearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<12)
 		key := make([]byte, 40)
@@ -61,16 +61,16 @@ func TestWriteMetrics(t *testing.T) {
 		}
 
 		expectedSize := int64(len(val)) + 48 + 2 // 48 := size of key (40 + 8(ts)), 2 := meta
-		write_metric := expvar.Get("badger_v4_write_user")
+		write_metric := expvar.Get("badger_v4_write_bytes_user")
 		require.Equal(t, expectedSize*int64(num), write_metric.(*expvar.Int).Value())
 
-		put_metric := expvar.Get("badger_v4_puts_total")
+		put_metric := expvar.Get("badger_v4_put_total_user")
 		require.Equal(t, int64(num), put_metric.(*expvar.Int).Value())
 
-		lsm_metric := expvar.Get("badger_v4_written_to_l0")
+		lsm_metric := expvar.Get("badger_v4_write_bytes_l0")
 		require.Equal(t, expectedSize*int64(num), lsm_metric.(*expvar.Int).Value())
 
-		compactionMetric := expvar.Get("badger_v4_compaction_written_bytes").(*expvar.Map)
+		compactionMetric := expvar.Get("badger_v4_write_bytes_compaction").(*expvar.Map)
 		require.Equal(t, nil, compactionMetric.Get("l6"))
 
 		// Force compaction
@@ -79,7 +79,7 @@ func TestWriteMetrics(t *testing.T) {
 		_, err := OpenManaged(opt)
 		require.NoError(t, err)
 
-		compactionMetric = expvar.Get("badger_v4_compaction_written_bytes").(*expvar.Map)
+		compactionMetric = expvar.Get("badger_v4_write_bytes_compaction").(*expvar.Map)
 		require.GreaterOrEqual(t, expectedSize*int64(num)+int64(num*200), compactionMetric.Get("l6").(*expvar.Int).Value())
 		// Because we have random values, compression is not able to do much, so we incur a cost on total size
 	})
@@ -90,7 +90,7 @@ func TestVlogMetrics(t *testing.T) {
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		ClearAllMetrics()
+		clearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<20) // Large Value
 		key := make([]byte, 40)
@@ -107,10 +107,10 @@ func TestVlogMetrics(t *testing.T) {
 
 		expectedSize := int64(len(val)) + 200 // vlog expected size
 
-		totalWrites := expvar.Get("badger_v4_vlog_writes_num")
+		totalWrites := expvar.Get("badger_v4_write_num_vlog")
 		require.Equal(t, int64(num), totalWrites.(*expvar.Int).Value())
 
-		bytesWritten := expvar.Get("badger_v4_vlog_written_bytes")
+		bytesWritten := expvar.Get("badger_v4_write_bytes_vlog")
 		require.GreaterOrEqual(t, expectedSize*int64(num), bytesWritten.(*expvar.Int).Value())
 
 		txn := db.NewTransactionAt(2, false)
@@ -119,8 +119,8 @@ func TestVlogMetrics(t *testing.T) {
 		require.Equal(t, uint64(1), item.Version())
 
 		err = item.Value(func(val []byte) error {
-			totalReads := expvar.Get("badger_v4_vlog_reads_num")
-			bytesRead := expvar.Get("badger_v4_vlog_reads_bytes")
+			totalReads := expvar.Get("badger_v4_read_num_vlog")
+			bytesRead := expvar.Get("badger_v4_read_bytes_vlog")
 			require.Equal(t, int64(1), totalReads.(*expvar.Int).Value())
 			require.GreaterOrEqual(t, expectedSize, bytesRead.(*expvar.Int).Value())
 			return nil
@@ -135,7 +135,7 @@ func TestReadMetrics(t *testing.T) {
 	opt.managedTxns = true
 	opt.CompactL0OnClose = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		ClearAllMetrics()
+		clearAllMetrics()
 		num := 10
 		val := make([]byte, 1<<15)
 		keys := [][]byte{}
@@ -156,13 +156,13 @@ func TestReadMetrics(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), item.Version())
 
-		totalGets := expvar.Get("badger_v4_gets_total")
+		totalGets := expvar.Get("badger_v4_get_total_user")
 		require.Equal(t, int64(1), totalGets.(*expvar.Int).Value())
 
-		totalMemtableReads := expvar.Get("badger_v4_memtable_gets_total")
+		totalMemtableReads := expvar.Get("badger_v4_get_num_memtable")
 		require.Equal(t, int64(1), totalMemtableReads.(*expvar.Int).Value())
 
-		totalLSMGets := expvar.Get("badger_v4_lsm_level_gets_total")
+		totalLSMGets := expvar.Get("badger_v4_get_num_lsm")
 		require.Nil(t, totalLSMGets.(*expvar.Map).Get("l6"))
 
 		// Force compaction
@@ -179,10 +179,10 @@ func TestReadMetrics(t *testing.T) {
 		_, err = txn.Get([]byte(key("abdbyte", 1000))) // val should be far enough that bloom filter doesn't hit
 		require.Error(t, err)
 
-		totalLSMGets = expvar.Get("badger_v4_lsm_level_gets_total")
+		totalLSMGets = expvar.Get("badger_v4_get_num_lsm")
 		require.Equal(t, int64(0x1), totalLSMGets.(*expvar.Map).Get("l6").(*expvar.Int).Value())
 
-		totalBloom := expvar.Get("badger_v4_lsm_bloom_hits_total")
+		totalBloom := expvar.Get("badger_v4_hit_num_lsm_bloom_filter")
 		require.Equal(t, int64(0x1), totalBloom.(*expvar.Map).Get("l6").(*expvar.Int).Value())
 		require.Equal(t, int64(0x1), totalBloom.(*expvar.Map).Get("DoesNotHave_HIT").(*expvar.Int).Value())
 		require.Equal(t, int64(0x2), totalBloom.(*expvar.Map).Get("DoesNotHave_ALL").(*expvar.Int).Value())
@@ -190,14 +190,14 @@ func TestReadMetrics(t *testing.T) {
 		bytesLSM := expvar.Get("badger_v4_read_bytes_lsm")
 		require.Equal(t, int64(len(val)), bytesLSM.(*expvar.Int).Value())
 
-		getWithResult := expvar.Get("badger_v4_get_results")
+		getWithResult := expvar.Get("badger_v4_get_with_results_user")
 		require.Equal(t, int64(2), getWithResult.(*expvar.Int).Value())
 
 		iterOpts := DefaultIteratorOptions
 		iter := txn.NewKeyIterator(keys[0], iterOpts)
 		iter.Seek(keys[0])
 
-		rangeQueries := expvar.Get("badger_v4_iterators")
+		rangeQueries := expvar.Get("badger_v4_iterator_num_user")
 		require.Equal(t, int64(1), rangeQueries.(*expvar.Int).Value())
 	})
 }

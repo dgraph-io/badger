@@ -74,35 +74,36 @@ var (
 )
 
 // These variables are global and have cumulative values for all kv stores.
+// Naming convention of metrics: {badger_version}_{singular operation}_{granularity}_{component}
 func init() {
-	numReadsVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_reads_num")
-	numBytesReadVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_reads_bytes")
-	numWritesVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_writes_num")
-	numBytesVlogWritten = expvar.NewInt(BADGER_METRIC_PREFIX + "vlog_written_bytes")
+	numReadsVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "read_num_vlog")
+	numBytesReadVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_vlog")
+	numWritesVlog = expvar.NewInt(BADGER_METRIC_PREFIX + "write_num_vlog")
+	numBytesVlogWritten = expvar.NewInt(BADGER_METRIC_PREFIX + "write_bytes_vlog")
 
 	numBytesReadLSM = expvar.NewInt(BADGER_METRIC_PREFIX + "read_bytes_lsm")
-	numBytesWrittenToL0 = expvar.NewInt(BADGER_METRIC_PREFIX + "written_to_l0")
-	numBytesCompactionWritten = expvar.NewMap(BADGER_METRIC_PREFIX + "compaction_written_bytes")
+	numBytesWrittenToL0 = expvar.NewInt(BADGER_METRIC_PREFIX + "write_bytes_l0")
+	numBytesCompactionWritten = expvar.NewMap(BADGER_METRIC_PREFIX + "write_bytes_compaction")
 
-	numLSMGets = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_level_gets_total")
-	numLSMBloomHits = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_bloom_hits_total")
-	numMemtableGets = expvar.NewInt(BADGER_METRIC_PREFIX + "memtable_gets_total")
+	numLSMGets = expvar.NewMap(BADGER_METRIC_PREFIX + "get_num_lsm")
+	numLSMBloomHits = expvar.NewMap(BADGER_METRIC_PREFIX + "hit_num_lsm_bloom_filter")
+	numMemtableGets = expvar.NewInt(BADGER_METRIC_PREFIX + "get_num_memtable")
 
 	// User operations
-	numGets = expvar.NewInt(BADGER_METRIC_PREFIX + "gets_total")
-	numPuts = expvar.NewInt(BADGER_METRIC_PREFIX + "puts_total")
-	numBytesWrittenUser = expvar.NewInt(BADGER_METRIC_PREFIX + "write_user")
+	numGets = expvar.NewInt(BADGER_METRIC_PREFIX + "get_total_user")
+	numPuts = expvar.NewInt(BADGER_METRIC_PREFIX + "put_total_user")
+	numBytesWrittenUser = expvar.NewInt(BADGER_METRIC_PREFIX + "write_bytes_user")
 
 	// Required for Enabled
 	// Do we need this? We don't use this anyway
-	numGetsWithResults = expvar.NewInt(BADGER_METRIC_PREFIX + "get_results")
-	numIteratorsCreated = expvar.NewInt(BADGER_METRIC_PREFIX + "iterators")
+	numGetsWithResults = expvar.NewInt(BADGER_METRIC_PREFIX + "get_with_results_user")
+	numIteratorsCreated = expvar.NewInt(BADGER_METRIC_PREFIX + "iterator_num_user")
 
 	// Sizes
-	lsmSize = expvar.NewMap(BADGER_METRIC_PREFIX + "lsm_size_bytes")
-	vlogSize = expvar.NewMap(BADGER_METRIC_PREFIX + "vlog_size_bytes")
+	lsmSize = expvar.NewMap(BADGER_METRIC_PREFIX + "size_bytes_lsm")
+	vlogSize = expvar.NewMap(BADGER_METRIC_PREFIX + "size_bytes_vlog")
 
-	pendingWrites = expvar.NewMap(BADGER_METRIC_PREFIX + "pending_writes_total")
+	pendingWrites = expvar.NewMap(BADGER_METRIC_PREFIX + "writes_pending_num_total")
 	numCompactionTables = expvar.NewInt(BADGER_METRIC_PREFIX + "compactions_current")
 }
 
