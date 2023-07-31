@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	BADGER_METRIC_PREFIX = "badger_v4_"
+	BADGER_METRIC_PREFIX = "badger_"
 )
 
 var (
