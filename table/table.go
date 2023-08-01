@@ -222,7 +222,7 @@ func (b *block) incrRef() bool {
 	}
 }
 func (b *block) decrRef() {
-	if b == nil {
+	if b == nil || b.ref.Load() == 0 {
 		return
 	}
 
@@ -239,7 +239,6 @@ func (b *block) decrRef() {
 		NumBlocks.Add(-1)
 		// blockPool.Put(&b.data)
 	}
-	y.AssertTrue(b.ref.Load() >= 0)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
