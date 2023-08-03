@@ -3,6 +3,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.2.0] - 2023-08-03
+
+### Breaking
+
+- feat(metrics): fix and update metrics in badger (#1948)
+
+### Added
+
+- Added a test for fill tables (#1911)
+
+### Fixed
+
+- remove badger version in the metrics name (#1982)
+- fix(logging): fix direct access to logger (#1980)
+- fix(sec): update gopkg.in/yaml.v2 package (#1969)
+- fix(test): fix flakiness of TestPersistLFDiscardStats (#1963)
+- fix(stream): setup oracle correctly in stream writer (#1968) (#1904)
+- fix(stream): improve incremental stream writer (#1901)
+- fix(Test): improve the params in BenchmarkDbGrowth (#1967)
+- Sync active memtable and value log on Db.Sync (#1847) (#1953)
+- fix(DeadlockTest): Handle draining of closed channel, speed up test. (#1957)
+- fix(Test): Fix table checksum test. Test on uncompressed. (#1952)
+- fix(level): change split key range right key to use ts=0 (#1932)
+- fix(test): The new test case PagebufferReader5 introduced an error. (#1936)
+- fix(test): add missing unlock in TestPersistLFDiscardStats (#1924)
+- fix(PageBufferReader): should conform to io.Reader interface (#1935)
+- fix(publisher): publish updates after persistence in WAL (#1917)
+
+### Chores
+
+- chore: package imported more than once (#1979)
+- chore: remove refs to deprecated io/ioutil (#1976)
+- chore(deps): bump google.golang.org/grpc from 1.20.1 to 1.53.0 (#1977)
+- chore: fix outdated comments regarding file size (#1965)
+- docs: Add DVID as a user of Badger system (#1960)
+- chore(ci): split off coverage workflow (#1944)
+- chore(ci): adding trivy scanning workflow (#1925)
+- chore(changelog): update changelog for v4.1.0 (#1918)
+
 ## [4.1.0] - 2023-03-30
 
 This release adds support for incremental stream writer.  We also do some cleanup in the docs 
