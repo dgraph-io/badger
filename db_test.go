@@ -106,7 +106,7 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 
 // Opens a badger db and runs a a test on it.
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	if opts == nil {
@@ -2585,4 +2585,40 @@ func TestCompactL0OnClose(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+}
+
+func TestConcurrent(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-concurrent-test")
+	require.NoError(t, err)
+	db, err := Open(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	key := []byte("key")
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set(key, []byte("value"))
+	})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				err := db.View(func(txn *Txn) error {
+					_, err := txn.Get(key)
+					return err
+				})
+				if err != nil {
+					require.Contains(t, err.Error(), "DB Closed")
+					break
+				}
+			}
+		}()
+	}
+
+	time.Sleep(time.Second)
+	err = db.Close()
+	require.NoError(t, err)
+	wg.Wait()
 }

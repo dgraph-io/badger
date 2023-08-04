@@ -547,6 +547,7 @@ func (db *DB) close() (err error) {
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
+	atomic.StoreUint32(&db.isClosed, 1)
 
 	if !db.opt.InMemory {
 		// Stop value GC first.
@@ -633,7 +634,6 @@ func (db *DB) close() (err error) {
 	db.blockCache.Close()
 	db.indexCache.Close()
 
-	atomic.StoreUint32(&db.isClosed, 1)
 	db.threshold.close()
 
 	if db.opt.InMemory {
