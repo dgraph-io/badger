@@ -2635,3 +2635,37 @@ func TestCompactL0OnClose(t *testing.T) {
 		}
 	})
 }
+
+func TestCloseDBWhileReading(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	key := []byte("key")
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set(key, []byte("value"))
+	})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				err := db.View(func(txn *Txn) error {
+					_, err := txn.Get(key)
+					return err
+				})
+				if err != nil {
+					require.Contains(t, err.Error(), "DB Closed")
+					break
+				}
+			}
+		}()
+	}
+
+	time.Sleep(time.Second)
+	require.NoError(t, db.Close())
+	wg.Wait()
+}
