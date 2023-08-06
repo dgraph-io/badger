@@ -262,6 +262,113 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 	return []*table.Table{tbl}, tbl.DecrRef
 }
 
+func (s *levelHandler) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
+	// Find the table for which the key is in, and then seek it
+	getForKey := func(key []byte) (y.ValueStruct, func() error, []*table.Iterator) {
+		tables, decr := s.getTableForKey(key)
+		keyNoTs := y.ParseKey(key)
+		itrs := make([]*table.Iterator, 0)
+
+		hash := y.Hash(keyNoTs)
+		var maxVs y.ValueStruct
+		for _, th := range tables {
+			if th.DoesNotHave(hash) {
+				y.NumLSMBloomHitsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
+				continue
+			}
+
+			it := th.NewIterator(0)
+			itrs = append(itrs, it)
+
+			y.NumLSMGetsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
+			it.Seek(key)
+			if !it.Valid() {
+				continue
+			}
+			if y.SameKey(key, it.Key()) {
+				if version := y.ParseTs(it.Key()); maxVs.Version < version {
+					maxVs = it.ValueCopy()
+					maxVs.Version = version
+				}
+			}
+		}
+
+		return maxVs, decr, itrs
+	}
+
+	// Use old results from getForKey and find in those tables.
+	findInIter := func(key []byte, itrs []*table.Iterator) y.ValueStruct {
+		var maxVs y.ValueStruct
+
+		for _, it := range itrs {
+			it.Seek(key)
+			if !it.Valid() {
+				continue
+			}
+			if y.SameKey(key, it.Key()) {
+				if version := y.ParseTs(it.Key()); maxVs.Version < version {
+					maxVs = it.ValueCopy()
+					maxVs.Version = version
+				}
+			}
+		}
+
+		return maxVs
+	}
+
+	results := make([]y.ValueStruct, len(keys))
+	// For L0, we need to search all tables each time, so we can just call get() as required
+	if s.level == 0 {
+		var err error
+		for i, key := range keys {
+			if done[i] {
+				continue
+			}
+			results[i], err = s.get(key)
+			if err != nil {
+				return results, err
+			}
+		}
+		return results, nil
+	} else {
+		decr := func() error { return nil }
+		var itrs []*table.Iterator
+
+		started := false
+		for i := 0; i < len(keys); i++ {
+			if done[i] {
+				continue
+			}
+			if !started {
+				var maxVs y.ValueStruct
+				maxVs, decr, itrs = getForKey(keys[0])
+				results[i] = maxVs
+				started = true
+			} else {
+				results[i] = findInIter(keys[i], itrs)
+				// If we can't find in the current tables, maybe the
+				// data is there in other tables
+				if len(results[i].Value) == 0 {
+					for i := 0; i < len(itrs); i++ {
+						itrs[i].Close()
+					}
+					err := decr()
+					if err != nil {
+						return nil, err
+					}
+					results[i], decr, itrs = getForKey(keys[i])
+				}
+			}
+		}
+
+		for i := 0; i < len(itrs); i++ {
+			itrs[i].Close()
+		}
+		return results, decr()
+	}
+
+}
+
 // get returns value for a given key or the key after that. If not found, return nil.
 func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
