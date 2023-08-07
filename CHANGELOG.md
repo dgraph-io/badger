@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- fix(db): avoid panic in parallel reads after closing DB (#1987)
 - fix(logging): fix direct access to logger (#1980)
 - fix(sec): bump google.golang.org/grpc from 1.20.1 to 1.53.0 (#1977)
 - fix(sec): update gopkg.in/yaml.v2 package (#1969)
