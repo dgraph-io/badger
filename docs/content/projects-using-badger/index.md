@@ -56,5 +56,6 @@ Below is a list of known projects that use Badger:
 * [Loggie](https://github.com/loggie-io/loggie) - A lightweight, cloud-native data transfer agent and aggregator.
 * [raft-badger](https://github.com/rfyiamcool/raft-badger) - raft-badger implements LogStore and StableStore Interface of hashcorp/raft. it is used to store raft log and metadata of hashcorp/raft.
 * [DVID](https://github.com/janelia-flyem/dvid) - A dataservice for branched versioning of a variety of data types. Originally created for large-scale brain reconstructions in Connectomics.
+* [KVS](https://github.com/tauraamui/kvs) - A library for making it easy to persist, load and query full structs into BadgerDB, using an ownership hierarchy model.
 
 If you are using Badger in a project please send a pull request to add it to the list.
