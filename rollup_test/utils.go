@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
 type delta struct {
-	set_op, del_op bool
-	values         []int32
+	set_op, del_op, consolidated bool
+	last_version                 int32
+	values                       []int32
 }
 
 func structToBytes(d delta) ([]byte, error) {
@@ -19,26 +19,32 @@ func structToBytes(d delta) ([]byte, error) {
 
 	err := binary.Write(buf, binary.LittleEndian, d.set_op)
 	if err != nil {
-		log.Printf("1. %s", err)
 		return nil, err
 	}
 
 	err = binary.Write(buf, binary.LittleEndian, d.del_op)
 	if err != nil {
-		log.Printf("2. %s", err)
+		return nil, err
+	}
+
+	err = binary.Write(buf, binary.LittleEndian, d.consolidated)
+	if err != nil {
+		return nil, err
+	}
+
+	err = binary.Write(buf, binary.LittleEndian, d.last_version)
+	if err != nil {
 		return nil, err
 	}
 
 	err = binary.Write(buf, binary.LittleEndian, int32(len(d.values)))
 	if err != nil {
-		log.Printf("3. %s", err)
 		return nil, err
 	}
 
 	for _, v := range d.values {
 		err = binary.Write(buf, binary.LittleEndian, v)
 		if err != nil {
-			log.Printf("4. %s", err)
 			return nil, err
 		}
 	}
@@ -57,6 +63,16 @@ func bytesToStruct(data []byte) (delta, error) {
 	}
 
 	err = binary.Read(buf, binary.LittleEndian, &d.del_op)
+	if err != nil {
+		return delta{}, err
+	}
+
+	err = binary.Read(buf, binary.LittleEndian, &d.consolidated)
+	if err != nil {
+		return delta{}, err
+	}
+
+	err = binary.Read(buf, binary.LittleEndian, &d.last_version)
 	if err != nil {
 		return delta{}, err
 	}
