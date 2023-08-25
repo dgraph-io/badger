@@ -31,10 +31,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/snappy"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"
