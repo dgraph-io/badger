@@ -226,7 +226,7 @@ func (b *block) decrRef() {
 		return
 	}
 
-	// Insert the []byte into pool only if the block is resuable. When a block
+	// Insert the []byte into pool only if the block is reusable. When a block
 	// is reusable a new []byte is used for decompression and this []byte can
 	// be reused.
 	// In case of an uncompressed block, the []byte is a reference to the
