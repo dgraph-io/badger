@@ -54,8 +54,8 @@ enum EncryptionAlgo {
 message ManifestChange {
   uint64 Id = 1;            // Table ID.
   enum Operation {
-          CREATE = 0;
-          DELETE = 1;
+    CREATE = 0;
+    DELETE = 1;
   }
   Operation Op   = 2;
   uint32 Level   = 3;       // Only used for CREATE.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/ristretto/z"
@@ -317,7 +318,7 @@ func TestAllocatorReuse(t *testing.T) {
 			kv.Version = uint64(sz)
 			list.Kv = append(list.Kv, kv)
 		}
-		_, err := list.Marshal()
+		_, err := proto.Marshal(&list)
 		require.NoError(t, err)
 	}
 	t.Logf("Allocator: %s\n", a)

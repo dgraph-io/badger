@@ -24,10 +24,10 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"

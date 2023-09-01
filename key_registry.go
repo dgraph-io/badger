@@ -30,6 +30,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -195,7 +196,7 @@ func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
 		return nil, y.Wrapf(y.ErrChecksumMismatch, "Error while checking checksum for data key.")
 	}
 	dataKey := &pb.DataKey{}
-	if err = dataKey.Unmarshal(data); err != nil {
+	if err = proto.Unmarshal(data, dataKey); err != nil {
 		return nil, y.Wrapf(err, "While unmarshal of datakey in keyRegistryIterator.next")
 	}
 	if len(kri.encryptionKey) > 0 {
@@ -404,7 +405,7 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 		return y.Wrapf(err, "Error while encrypting datakey in storeDataKey")
 	}
 	var data []byte
-	if data, err = k.Marshal(); err != nil {
+	if data, err = proto.Marshal(k); err != nil {
 		err = y.Wrapf(err, "Error while marshaling datakey in storeDataKey")
 		var err2 error
 		// decrypting the datakey back.
