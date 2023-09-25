@@ -9,7 +9,7 @@ on:
       - main
       - 'release/v*'
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/31 * * * *"
 jobs:
   badger-tests:
     runs-on: ubuntu-20.04
