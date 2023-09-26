@@ -39,7 +39,7 @@ Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
-[Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
+[Changelog]:https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
 
 ## Table of Contents
 - [BadgerDB](#badgerdb)
@@ -62,7 +62,7 @@ For more details on our version naming schema please read [Choosing a version](#
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.19 or above. Badger v3 needs go modules. From your project, run the following command
+To start using Badger, install Go 1.19 or above. Badger v3 and above needs go modules. From your project, run the following command
 
 ```sh
 $ go get github.com/dgraph-io/badger/v4
