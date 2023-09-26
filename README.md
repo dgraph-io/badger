@@ -35,6 +35,9 @@ be compatible with all of the v1.x. Badger v2.0 supports compression, encryption
 
 Badger v3.0 was released in January 2021.  This release improves compaction performance.
 
+Badger v4.0 was released in February 2023.  This release contains incremental improvement and bug fixes compared to the v3 serie,
+importantly it marks a transition to [Semantic Versioning](https://github.com/dgraph-io/badger/blob/main/VERSIONING.md).
+
 Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
