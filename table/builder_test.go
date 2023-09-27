@@ -178,12 +178,15 @@ func BenchmarkBuilder(b *testing.B) {
 		opt.BlockSize = 4 * 1024
 		opt.BloomFalsePositive = 0.01
 		opt.TableSize = 5 << 20
+
 		b.ResetTimer()
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			builder := NewTableBuilder(*opt)
 			for j := 0; j < keysCount; j++ {
 				builder.Add(keyList[j], vs, 0)
 			}
+
 			_ = builder.Finish()
 			builder.Close()
 		}
@@ -206,6 +209,11 @@ func BenchmarkBuilder(b *testing.B) {
 		key := make([]byte, 32)
 		rand.Read(key)
 		opt.DataKey = &pb.DataKey{Data: key}
+		bench(b, &opt)
+	})
+	b.Run("snappy compression", func(b *testing.B) {
+		var opt Options
+		opt.Compression = options.Snappy
 		bench(b, &opt)
 	})
 	b.Run("zstd compression", func(b *testing.B) {
