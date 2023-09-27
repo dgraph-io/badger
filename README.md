@@ -10,6 +10,7 @@
 
 ![Badger mascot](images/diggy-shadow.png)
 
+
 BadgerDB is an embeddable, persistent and fast key-value (KV) database written
 in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
