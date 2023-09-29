@@ -12,7 +12,7 @@ on:
     branches:
       - main 
   schedule:
-    - cron: "1 * * * *"
+    - cron: "1 0 * * *"
 jobs:
   build:
     name: trivy-tests

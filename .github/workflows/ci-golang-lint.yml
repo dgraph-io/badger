@@ -9,7 +9,7 @@ on:
       - main
       - 'release/v*'
   schedule:
-    - cron: "1 * * * *"
+    - cron: "1 0 * * *"
 jobs:
   go-lint:
     name: lint
