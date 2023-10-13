@@ -343,7 +343,8 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	return t, nil
 }
 
-func (t *Table) initBiggestAndSmallest() (err error) {
+func (t *Table) initBiggestAndSmallest() error {
+	var err error
 	// This defer will help gathering debugging info incase initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
