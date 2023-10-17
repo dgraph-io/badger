@@ -595,6 +595,11 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			"corrupted or the table options are incorrectly set")
 	}
 
+	if useCache && t.opt.BlockCache != nil && t.opt.Compression == options.None && !t.shouldDecrypt() {
+		// make a copy for caching later
+		blk.data = y.Copy(blk.data)
+	}
+
 	// Read checksum and store it
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
