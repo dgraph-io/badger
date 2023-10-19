@@ -84,3 +84,16 @@ func Wrapf(err error, format string, args ...interface{}) error {
 	}
 	return errors.Wrapf(err, format, args...)
 }
+
+func CombineErrors(one, other error) error {
+	if one != nil && other != nil {
+		return fmt.Errorf("%v; %v", one, other)
+	}
+	if one != nil && other == nil {
+		return fmt.Errorf("%v", one)
+	}
+	if one == nil && other != nil {
+		return fmt.Errorf("%v", other)
+	}
+	return nil
+}

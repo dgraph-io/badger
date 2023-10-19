@@ -90,6 +90,8 @@ func (lk *lockedKeys) all() []uint64 {
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
+	testOnlyDBExtensions
+
 	lock sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *directoryLockGuard
@@ -252,6 +254,9 @@ func Open(opt Options) (*DB, error) {
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
 		threshold:        initVlogThreshold(&opt),
 	}
+
+	db.syncChan = opt.syncChan
+
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
@@ -541,6 +546,7 @@ func (db *DB) close() (err error) {
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs.Load()))
 
 	db.blockWrites.Store(1)
+	db.isClosed.Store(1)
 
 	if !db.opt.InMemory {
 		// Stop value GC first.
@@ -626,7 +632,6 @@ func (db *DB) close() (err error) {
 	db.blockCache.Close()
 	db.indexCache.Close()
 
-	db.isClosed.Store(1)
 	db.threshold.close()
 
 	if db.opt.InMemory {
@@ -676,7 +681,38 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
-	return db.vlog.sync()
+	/**
+	Make an attempt to sync both the logs, the active memtable's WAL and the vLog (1847).
+	Cases:
+	- All_ok			:: If both the logs sync successfully.
+
+	- Entry_Lost		:: If an entry with a value pointer was present in the active memtable's WAL,
+						:: and the WAL was synced but there was an error in syncing the vLog.
+						:: The entry will be considered lost and this case will need to be handled during recovery.
+
+	- Entries_Lost		:: If there were errors in syncing both the logs, multiple entries would be lost.
+
+	- Entries_Lost      :: If the active memtable's WAL is not synced but the vLog is synced, it will
+						:: result in entries being lost because recovery of the active memtable is done from its WAL.
+						:: Check `UpdateSkipList` in memtable.go.
+
+	- Nothing_lost		:: If an entry with its value was present in the active memtable's WAL, and the WAL was synced,
+						:: but there was an error in syncing the vLog.
+						:: Nothing is lost for this very specific entry because the entry is completely present in the memtable's WAL.
+
+	- Partially_lost    :: If entries were written partially in either of the logs,
+						:: the logs will be truncated during recovery.
+						:: As a result of truncation, some entries might be lost.
+					    :: Assume that 4KB of data is to be synced and invoking `Sync` results only in syncing 3KB
+	                    :: of data and then the machine shuts down or the disk failure happens,
+						:: this will result in partial writes. [[This case needs verification]]
+	*/
+	db.lock.RLock()
+	memtableSyncError := db.mt.SyncWAL()
+	db.lock.RUnlock()
+
+	vLogSyncError := db.vlog.sync()
+	return y.CombineErrors(memtableSyncError, vLogSyncError)
 }
 
 // getMemtables returns the current memtables and get references.
@@ -739,6 +775,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		}
 		// Found the required version of the key, return immediately.
 		if vs.Version == version {
+			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
@@ -862,6 +899,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		size += e.estimateSizeAndSetThreshold(db.valueThreshold())
 		count++
 	}
+	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, size)
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
@@ -1579,7 +1617,7 @@ func (db *DB) Flatten(workers int) error {
 			}
 		}
 		if len(levels) <= 1 {
-			prios := db.lc.pickCompactLevels()
+			prios := db.lc.pickCompactLevels(nil)
 			if len(prios) == 0 || prios[0].score <= 1.0 {
 				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
 				return nil
@@ -1879,7 +1917,11 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	drain := func() {
 		for {
 			select {
-			case <-s.sendCh:
+			case _, ok := <-s.sendCh:
+				if !ok {
+					// Channel is closed.
+					return
+				}
 			default:
 				return
 			}

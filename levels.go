@@ -473,8 +473,13 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		}
 		return false
 	}
+
+	var priosBuffer []compactionPriority
 	runOnce := func() bool {
-		prios := s.pickCompactLevels()
+		prios := s.pickCompactLevels(priosBuffer)
+		defer func() {
+			priosBuffer = prios
+		}()
 		if id == 0 {
 			// Worker ID zero prefers to compact L0 always.
 			prios = moveL0toFront(prios)
@@ -536,7 +541,9 @@ func (s *levelsController) lastLevel() *levelHandler {
 
 // pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
-func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
+// It tries to reuse priosBuffer to reduce memory allocation,
+// passing nil is acceptable, then new memory will be allocated.
+func (s *levelsController) pickCompactLevels(priosBuffer []compactionPriority) (prios []compactionPriority) {
 	t := s.levelTargets()
 	addPriority := func(level int, score float64) {
 		pri := compactionPriority{
@@ -547,6 +554,12 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 		}
 		prios = append(prios, pri)
 	}
+
+	// Grow buffer to fit all levels.
+	if cap(priosBuffer) < len(s.levels) {
+		priosBuffer = make([]compactionPriority, 0, len(s.levels))
+	}
+	prios = priosBuffer[:0]
 
 	// Add L0 priority based on the number of tables.
 	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
@@ -1439,6 +1452,22 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		return err
 	}
 
+	getSizes := func(tables []*table.Table) int64 {
+		size := int64(0)
+		for _, i := range tables {
+			size += i.Size()
+		}
+		return size
+	}
+
+	sizeNewTables := int64(0)
+	sizeOldTables := int64(0)
+	if s.kv.opt.MetricsEnabled {
+		sizeNewTables = getSizes(newTables)
+		sizeOldTables = getSizes(cd.bot) + getSizes(cd.top)
+		y.NumBytesCompactionWrittenAdd(s.kv.opt.MetricsEnabled, nextLevel.strLevel, sizeNewTables)
+	}
+
 	// See comment earlier in this function about the ordering of these ops, and the order in which
 	// we access levels when reading.
 	if err := nextLevel.replaceTables(cd.bot, newTables); err != nil {
@@ -1459,16 +1488,16 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 			expensive = " [E]"
 		}
 		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
-			" [%s] -> [%s], took %v\n",
+			" [%s] -> [%s], took %v\n, deleted %d bytes",
 			id, expensive, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
 			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
-			dur.Round(time.Millisecond))
+			dur.Round(time.Millisecond), sizeOldTables-sizeNewTables)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
-		s.kv.opt.Debugf("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
-		s.kv.opt.Debugf("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
@@ -1573,8 +1602,8 @@ func (s *levelsController) close() error {
 }
 
 // get searches for a given key in all the levels of the LSM tree. It returns
-// key version <= the expected version (maxVs). If not found, it returns an empty
-// y.ValueStruct.
+// key version <= the expected version (version in key). If not found,
+// it returns an empty y.ValueStruct.
 func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) (
 	y.ValueStruct, error) {
 	if s.kv.IsClosed() {
@@ -1598,12 +1627,16 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
+		y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(vs.Value)))
 		if vs.Version == version {
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
 			maxVs = vs
 		}
+	}
+	if len(maxVs.Value) > 0 {
+		y.NumGetsWithResultsAdd(s.kv.opt.MetricsEnabled, 1)
 	}
 	return maxVs, nil
 }
@@ -1687,7 +1720,7 @@ type LevelInfo struct {
 
 func (s *levelsController) getLevelInfo() []LevelInfo {
 	t := s.levelTargets()
-	prios := s.pickCompactLevels()
+	prios := s.pickCompactLevels(nil)
 	result := make([]LevelInfo, len(s.levels))
 	for i, l := range s.levels {
 		l.RLock()

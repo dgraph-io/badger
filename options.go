@@ -42,6 +42,8 @@ import (
 //
 // Each option X is documented on the WithX method.
 type Options struct {
+	testOnlyOptions
+
 	// Required options.
 
 	Dir      string

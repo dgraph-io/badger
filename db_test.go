@@ -40,6 +40,42 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 )
 
+// waitForMessage(ch, expected, count, timeout, t) will block until either
+// `timeout` seconds have occurred or `count` instances of the string `expected`
+// have occurred on the channel `ch`. We log messages or generate errors using `t`.
+func waitForMessage(ch chan string, expected string, count int, timeout int, t *testing.T) {
+	if count <= 0 {
+		t.Logf("Will skip waiting for %s since exected count <= 0.",
+			expected)
+		return
+	}
+	tout := time.NewTimer(time.Duration(timeout) * time.Second)
+	remaining := count
+	for {
+		select {
+		case curMsg, ok := <-ch:
+			if !ok {
+				t.Errorf("Test channel closed while waiting for "+
+					"message %s with %d remaining instances expected",
+					expected, remaining)
+				return
+			}
+			t.Logf("Found message: %s", curMsg)
+			if curMsg == expected {
+				remaining--
+				if remaining == 0 {
+					return
+				}
+			}
+		case <-tout.C:
+			t.Errorf("Timed out after %d seconds while waiting on test chan "+
+				"for message '%s' with %d remaining instances expected",
+				timeout, expected, remaining)
+			return
+		}
+	}
+}
+
 // summary is produced when DB is closed. Currently it is used only for testing.
 type summary struct {
 	fileIDs map[uint64]bool
@@ -466,6 +502,8 @@ func BenchmarkDbGrowth(b *testing.B) {
 	opts.NumVersionsToKeep = 1
 	opts.NumLevelZeroTables = 1
 	opts.NumLevelZeroTablesStall = 2
+	opts.ValueThreshold = 1024
+	opts.MemTableSize = 1 << 20
 	db, err := Open(opts)
 	require.NoError(b, err)
 	for numWrites := 0; numWrites < maxWrites; numWrites++ {
@@ -2035,6 +2073,67 @@ func TestSyncForRace(t *testing.T) {
 	<-doneChan
 }
 
+func TestSyncForNoErrors(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10; i++ {
+		require.NoError(
+			t,
+			txn.SetEntry(NewEntry(
+				[]byte(fmt.Sprintf("key%d", i)),
+				[]byte(fmt.Sprintf("value%d", i)),
+			)),
+		)
+	}
+	require.NoError(t, txn.Commit())
+
+	if err := db.Sync(); err != nil {
+		require.NoError(t, err)
+	}
+}
+
+func TestSyncForReadingTheEntriesThatWereSynced(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10; i++ {
+		require.NoError(
+			t,
+			txn.SetEntry(NewEntry(
+				[]byte(fmt.Sprintf("key%d", i)),
+				[]byte(fmt.Sprintf("value%d", i)),
+			)),
+		)
+	}
+	require.NoError(t, txn.Commit())
+
+	if err := db.Sync(); err != nil {
+		require.NoError(t, err)
+	}
+
+	readOnlyTxn := db.NewTransaction(false)
+	for i := 0; i < 10; i++ {
+		item, err := readOnlyTxn.Get([]byte(fmt.Sprintf("key%d", i)))
+		require.NoError(t, err)
+
+		value := getItemValue(t, item)
+		require.Equal(t, []byte(fmt.Sprintf("value%d", i)), value)
+	}
+}
+
 func TestForceFlushMemtable(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger could not be created")
@@ -2535,4 +2634,38 @@ func TestCompactL0OnClose(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+}
+
+func TestCloseDBWhileReading(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	key := []byte("key")
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set(key, []byte("value"))
+	})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				err := db.View(func(txn *Txn) error {
+					_, err := txn.Get(key)
+					return err
+				})
+				if err != nil {
+					require.Contains(t, err.Error(), "DB Closed")
+					break
+				}
+			}
+		}()
+	}
+
+	time.Sleep(time.Second)
+	require.NoError(t, db.Close())
+	wg.Wait()
 }

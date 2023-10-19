@@ -28,7 +28,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v4/pb"
 	bpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -295,18 +294,18 @@ func TestStreamCustomKeyToList(t *testing.T) {
 
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
-	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+	stream.KeyToList = func(key []byte, itr *Iterator) (*bpb.KVList, error) {
 		item := itr.Item()
 		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return nil, err
 		}
-		kv := &pb.KV{
+		kv := &bpb.KV{
 			Key:   y.Copy(item.Key()),
 			Value: val,
 		}
-		return &pb.KVList{
-			Kv: []*pb.KV{kv},
+		return &bpb.KVList{
+			Kv: []*bpb.KV{kv},
 		}, nil
 	}
 	res := map[string]struct{}{"p0": {}, "p1": {}, "p2": {}}

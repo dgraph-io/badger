@@ -554,6 +554,8 @@ func (vlog *valueLog) init(db *DB) {
 	lf, err := InitDiscardStats(vlog.opt)
 	y.Check(err)
 	vlog.discardStats = lf
+	// See TestPersistLFDiscardStats for purpose of statement below.
+	db.logToSyncChan(endVLogInitMsg)
 }
 
 func (vlog *valueLog) open(db *DB) error {
@@ -640,6 +642,7 @@ func (vlog *valueLog) Close() error {
 		}
 	}
 	if vlog.discardStats != nil {
+		vlog.db.captureDiscardStats()
 		if terr := vlog.discardStats.Close(-1); terr != nil && err == nil {
 			err = terr
 		}
@@ -890,8 +893,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 			bytesWritten += buf.Len()
 			// No need to flush anything, we write to file directly via mmap.
 		}
-		y.NumWritesAdd(vlog.opt.MetricsEnabled, int64(written))
-		y.NumBytesWrittenAdd(vlog.opt.MetricsEnabled, int64(bytesWritten))
+		y.NumWritesVlogAdd(vlog.opt.MetricsEnabled, int64(written))
+		y.NumBytesWrittenVlogAdd(vlog.opt.MetricsEnabled, int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
 		vlog.db.threshold.update(valueSizes)
@@ -966,7 +969,7 @@ func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) 
 		}
 	}
 	if uint32(len(kv)) < h.klen+h.vlen {
-		vlog.db.opt.Logger.Errorf("Invalid read: vp: %+v", vp)
+		vlog.db.opt.Errorf("Invalid read: vp: %+v", vp)
 		return nil, nil, errors.Errorf("Invalid read: Len: %d read at:[%d:%d]",
 			len(kv), h.klen, h.klen+h.vlen)
 	}
@@ -991,6 +994,8 @@ func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, *logFile, error) 
 	}
 
 	buf, err := lf.read(vp)
+	y.NumReadsVlogAdd(vlog.db.opt.MetricsEnabled, 1)
+	y.NumBytesReadsVlogAdd(vlog.db.opt.MetricsEnabled, int64(len(buf)))
 	return buf, lf, err
 }
 
@@ -1103,6 +1108,9 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	for fid, discard := range stats {
 		vlog.discardStats.Update(fid, discard)
 	}
+	// The following is to coordinate with some test cases where we want to
+	// verify that at least one iteration of updateDiscardStats has been completed.
+	vlog.db.logToSyncChan(updateDiscardStatsMsg)
 }
 
 type vlogThreshold struct {

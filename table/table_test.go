@@ -682,10 +682,15 @@ func TestTableChecksum(t *testing.T) {
 	rand.Read(rb)
 	opts := getTestTableOptions()
 	opts.ChkMode = options.OnTableAndBlockRead
+	// When verifying checksum capability, we find it simpler to disable compression
+	// since randomly initializing bytes can kill the compression storage.
+	opts.Compression = options.None
 	tbl := buildTestTable(t, "k", 10000, opts)
 	defer func() { require.NoError(t, tbl.DecrRef()) }()
-	// Write random bytes at random location.
-	start := rand.Intn(len(tbl.Data) - len(rb))
+	// Write random bytes at location guaranteed to not be in range of
+	// metadata for block. (No particular reason for the value 128,
+	// it just avoids the sensitive block size or other metadata blocks).
+	start := 128
 	n := copy(tbl.Data[start:], rb)
 	require.Equal(t, n, len(rb))
 

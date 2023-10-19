@@ -5,7 +5,7 @@ on:
       - main
 jobs:
   dgraph-tests:
-    runs-on: [self-hosted, x64]
+    runs-on: ubuntu-20.04-32gb
     steps:
       - name: Checkout Dgraph repo
         uses: actions/checkout@v3

@@ -39,7 +39,7 @@ Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
-[Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
+[Changelog]:https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
 
 ## Table of Contents
 - [BadgerDB](#badgerdb)
@@ -62,7 +62,7 @@ For more details on our version naming schema please read [Choosing a version](#
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.19 or above. Badger v3 needs go modules. From your project, run the following command
+To start using Badger, install Go 1.19 or above. Badger v3 and above needs go modules. From your project, run the following command
 
 ```sh
 $ go get github.com/dgraph-io/badger/v4
@@ -218,6 +218,8 @@ Below is a list of known projects that use Badger:
 * [Wrgl](https://www.wrgl.co) - A data version control system that works like Git but specialized to store and diff CSV.
 * [Loggie](https://github.com/loggie-io/loggie) - A lightweight, cloud-native data transfer agent and aggregator.
 * [raft-badger](https://github.com/rfyiamcool/raft-badger) - raft-badger implements LogStore and StableStore Interface of hashcorp/raft. it is used to store raft log and metadata of hashcorp/raft.
+* [DVID](https://github.com/janelia-flyem/dvid) - A dataservice for branched versioning of a variety of data types. Originally created for large-scale brain reconstructions in Connectomics.
+* [KVS](https://github.com/tauraamui/kvs) - A library for making it easy to persist, load and query full structs into BadgerDB, using an ownership hierarchy model.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 

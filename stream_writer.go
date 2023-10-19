@@ -104,6 +104,14 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	}
 	sw.done = func() { once.Do(done) }
 
+	mts, decr := sw.db.getMemTables()
+	defer decr()
+	for _, m := range mts {
+		if !m.sl.Empty() {
+			return fmt.Errorf("Unable to do incremental writes because MemTable has data")
+		}
+	}
+
 	isEmptyDB := true
 	for _, level := range sw.db.Levels() {
 		if level.NumTables > 0 {
@@ -117,7 +125,13 @@ func (sw *StreamWriter) PrepareIncremental() error {
 		return nil
 	}
 	if sw.prevLevel == 0 {
-		return fmt.Errorf("Unable to do incremental writes because L0 has data")
+		// It seems that data is present in all levels from Lmax to L0. If we call flatten
+		// on the tree, all the data will go to Lmax. All the levels above will be empty
+		// after flatten call. Now, we should be able to use incremental stream writer again.
+		if err := sw.db.Flatten(3); err != nil {
+			return errors.Wrapf(err, "error during flatten in StreamWriter")
+		}
+		sw.prevLevel = len(sw.db.Levels()) - 1
 	}
 	return nil
 }
@@ -229,7 +243,7 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	for streamId := range closedStreams {
 		writer, ok := sw.writers[streamId]
 		if !ok {
-			sw.db.opt.Logger.Warningf("Trying to close stream: %d, but no sorted "+
+			sw.db.opt.Warningf("Trying to close stream: %d, but no sorted "+
 				"writer found for it", streamId)
 			continue
 		}
@@ -271,6 +285,11 @@ func (sw *StreamWriter) Flush() error {
 		if sw.db.orc != nil {
 			sw.db.orc.Stop()
 		}
+
+		if curMax := sw.db.orc.readTs(); curMax >= sw.maxVersion {
+			sw.maxVersion = curMax
+		}
+
 		sw.db.orc = newOracle(sw.db.opt)
 		sw.db.orc.nextTxnTs = sw.maxVersion
 		sw.db.orc.txnMark.Done(sw.maxVersion)
