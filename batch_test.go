@@ -103,7 +103,9 @@ func TestEmptyWriteBatch(t *testing.T) {
 			wb = db.NewWriteBatch()
 			require.NoError(t, wb.Flush())
 			wb = db.NewWriteBatch()
+			txn := wb.txn
 			require.NoError(t, wb.Flush())
+			require.True(t, txn.discarded)
 		})
 	})
 	t.Run("managed mode", func(t *testing.T) {
