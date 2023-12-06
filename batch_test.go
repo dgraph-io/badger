@@ -103,8 +103,11 @@ func TestEmptyWriteBatch(t *testing.T) {
 			wb = db.NewWriteBatch()
 			require.NoError(t, wb.Flush())
 			wb = db.NewWriteBatch()
+			// Flush commits inner txn and sets a new one instead.
+			// Thus we need to save it to check if it was discarded.
 			txn := wb.txn
 			require.NoError(t, wb.Flush())
+			// check that flushed txn was discarded and marked as read.
 			require.True(t, txn.discarded)
 		})
 	})
