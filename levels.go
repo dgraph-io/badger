@@ -112,6 +112,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	defer tick.Stop()
 
 	for fileID, tf := range mf.Tables {
+		tf := tf
 		fname := table.NewFilename(fileID, db.opt.Dir)
 		select {
 		case <-tick.C:
@@ -126,7 +127,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
-		go func(fname string, tf TableManifest) {
+		db._go(func() {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
@@ -162,7 +163,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			mu.Lock()
 			tables[tf.Level] = append(tables[tf.Level], t)
 			mu.Unlock()
-		}(fname, tf)
+		})
 	}
 	if err := throttle.Finish(); err != nil {
 		closeAllTables(tables)
@@ -351,7 +352,10 @@ func (s *levelsController) startCompact(lc *z.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
-		go s.runCompactor(i, lc)
+		i := i
+		s.kv._go(func() {
+			s.runCompactor(i, lc)
+		})
 	}
 }
 
@@ -846,7 +850,9 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			// Can't return from here, until I decrRef all the tables that I built so far.
 			break
 		}
-		go func(builder *table.Builder, fileID uint64) {
+
+		fileID := s.reserveFileID()
+		s.kv._go(func() {
 			var err error
 			defer inflightBuilders.Done(err)
 			defer builder.Close()
@@ -864,7 +870,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				return
 			}
 			res <- tbl
-		}(builder, s.reserveFileID())
+		})
 	}
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
@@ -920,28 +926,30 @@ func (s *levelsController) compactBuildTables(
 	res := make(chan *table.Table, 3)
 	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
 	for _, kr := range cd.splits {
+		kr := kr
+
 		// Initiate Do here so we can register the goroutines for buildTables too.
 		if err := inflightBuilders.Do(); err != nil {
 			s.kv.opt.Errorf("cannot start subcompaction: %+v", err)
 			return nil, nil, err
 		}
-		go func(kr keyRange) {
+		s.kv._go(func() {
 			defer inflightBuilders.Done(nil)
 			it := table.NewMergeIterator(newIterator(), false)
 			defer it.Close()
 			s.subcompact(it, kr, cd, inflightBuilders, res)
-		}(kr)
+		})
 	}
 
 	var newTables []*table.Table
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() {
+	s.kv._go(func() {
 		defer wg.Done()
 		for t := range res {
 			newTables = append(newTables, t)
 		}
-	}()
+	})
 
 	// Wait for all table builders to finish and also for newTables accumulator to finish.
 	err := inflightBuilders.Finish()

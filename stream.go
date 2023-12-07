@@ -398,14 +398,17 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	}
 
 	// Picks up ranges from Badger, and sends them to rangeCh.
-	go st.produceRanges(ctx)
+	st.db._go(func() {
+		st.produceRanges(ctx)
+	})
 
 	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
 	var wg sync.WaitGroup
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
 
-		go func(threadId int) {
+		threadId := i
+		st.db._go(func() {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
 			if err := st.produceKVs(ctx, threadId); err != nil {
@@ -414,19 +417,19 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 				default:
 				}
 			}
-		}(i)
+		})
 	}
 
 	// Pick up key-values from kvChan and send to stream.
 	kvErr := make(chan error, 1)
-	go func() {
+	st.db._go(func() {
 		// Picks up KV lists from kvChan, and sends them to Output.
 		err := st.streamKVs(ctx)
 		if err != nil {
 			cancel() // Stop all the go routines.
 		}
 		kvErr <- err
-	}()
+	})
 	wg.Wait()        // Wait for produceKVs to be over.
 	close(st.kvChan) // Now we can close kvChan.
 	defer func() {
