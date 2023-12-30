@@ -162,7 +162,7 @@ func checkAndSetOptions(opt *Options) error {
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if opt.ValueThreshold > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
+			"reduce opt.ValueThreshold or increase opt.BaseTableSize.",
 			opt.ValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
