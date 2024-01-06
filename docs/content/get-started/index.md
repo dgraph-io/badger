@@ -603,7 +603,7 @@ the `Options` struct that is passed in when opening the database using
   - If you modify `Options.NumMemtables`, also adjust `Options.NumLevelZeroTables` and
    `Options.NumLevelZeroTablesStall` accordingly.
 - Number of concurrent compactions (`Options.NumCompactors`)
-- Size of table (`Options.MaxTableSize`)
+- Size of table (`Options.BaseTableSize`)
 - Size of value log file (`Options.ValueLogFileSize`)
 
 If you want to decrease the memory usage of Badger instance, tweak these

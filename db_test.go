@@ -1800,7 +1800,7 @@ func TestLSMOnly(t *testing.T) {
 
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
 	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
-	// maxBatchSize is calculated from MaxTableSize.
+	// maxBatchSize is calculated from BaseTableSize.
 	dopts.MemTableSize = LSMOnlyOptions(dir).ValueThreshold
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")

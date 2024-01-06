@@ -463,7 +463,7 @@ func (opt Options) WithLoggingLevel(val loggingLevel) Options {
 	return opt
 }
 
-// WithBaseTableSize returns a new Options value with MaxTableSize set to the given value.
+// WithBaseTableSize returns a new Options value with BaseTableSize set to the given value.
 //
 // BaseTableSize sets the maximum size in bytes for LSM table or file in the base level.
 //
