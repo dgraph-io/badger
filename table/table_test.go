@@ -32,6 +32,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto"
@@ -83,6 +84,20 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *Table {
 	tbl, err := CreateTable(filename, b)
 	require.NoError(t, err, "writing to file failed")
 	return tbl
+}
+
+func TestTableCacheNoCompression(t *testing.T) {
+	opts := getTestTableOptions()
+	opts.Compression = options.None
+	opts.BlockCache, _ = ristretto.NewCache(&cacheConfig)
+
+	table := buildTestTable(t, "key", 1000, opts)
+	blockIdx := 0
+	var ko fb.BlockOffset
+	y.AssertTrue(table.offsets(&ko, blockIdx))
+	expected := ko.Len()
+	blk, _ := table.block(blockIdx, true)
+	require.Equal(t, int(expected), cap(blk.data), "incorrect cached block size")
 }
 
 func TestTableIterator(t *testing.T) {
