@@ -118,6 +118,10 @@ type Options struct {
 	// with incompatible data format.
 	ExternalMagicVersion uint16
 
+	// PanicHandler if set will forward panic payloads to the panic handler instead of panicking.
+	// It is very important that the panic handler actually handles the panics instead of ignoring them.
+	PanicHandler func(panicPayload interface{})
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -791,6 +795,14 @@ func (opt Options) WithNamespaceOffset(offset int) Options {
 // The DB would fail to start if either the internal or the external magic number fails validated.
 func (opt Options) WithExternalMagic(magic uint16) Options {
 	opt.ExternalMagicVersion = magic
+	return opt
+}
+
+// WithPanicHandler returns a new Options value with PanicHandler set to the given value.
+//
+// If a PanicHandler is passed it should actually handle the panic or repanic.
+func (opt Options) WithPanicHandler(panicHandler func(panicPayload interface{})) Options {
+	opt.PanicHandler = panicHandler
 	return opt
 }
 
