@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -1512,7 +1513,7 @@ func tablesToString(tables []*table.Table) []string {
 	return res
 }
 
-var errFillTables = errors.New("Unable to fill tables")
+var errFillTables = stderrors.New("Unable to fill tables")
 
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
