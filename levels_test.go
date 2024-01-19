@@ -959,6 +959,21 @@ func TestLevelGet(t *testing.T) {
 				{"foo", "bar10", 11, 0}, // Should return biggest version.
 			},
 		},
+		{
+			"zero version",
+			map[int][][]keyValVersion{
+				0: { // Level 1 has 1 table with a single key.
+					{{"fool0", "barl0", 0, 0}},
+				},
+				1: { // Level 1 has 1 table with a single key.
+					{{"foo", "bar", 0, 0}},
+				},
+			},
+			[]keyValVersion{
+				{"fool0", "barl0", 0, 0},
+				{"foo", "bar", 0, 0},
+			},
+		},
 	}
 	for _, ti := range tt {
 		t.Run(ti.name, func(t *testing.T) {
