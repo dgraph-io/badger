@@ -33,6 +33,13 @@ message KV {
   uint32 stream_id = 10;
   // Stream done is used to indicate end of stream.
   bool stream_done = 11;
+
+  enum Kind {
+    KEY = 0;
+    DATA_KEY = 1;
+    FILE = 2;
+  }
+  Kind kind = 12;
 }
 
 message KVList {
