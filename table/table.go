@@ -77,8 +77,8 @@ type Options struct {
 	Compression options.CompressionType
 
 	// Block cache is used to cache decompressed and decrypted blocks.
-	BlockCache *ristretto.Cache
-	IndexCache *ristretto.Cache
+	BlockCache *ristretto.Cache[[]byte, *Block]
+	IndexCache *ristretto.Cache[uint64, *fb.TableIndex]
 
 	AllocPool *z.AllocatorPool
 
@@ -178,13 +178,11 @@ func (t *Table) DecrRef() error {
 }
 
 // BlockEvictHandler is used to reuse the byte slice stored in the block on cache eviction.
-func BlockEvictHandler(value interface{}) {
-	if b, ok := value.(*block); ok {
-		b.decrRef()
-	}
+func BlockEvictHandler(b *Block) {
+	b.decrRef()
 }
 
-type block struct {
+type Block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
@@ -199,7 +197,7 @@ var NumBlocks atomic.Int32
 
 // incrRef increments the ref of a block and return a bool indicating if the
 // increment was successful. A true value indicates that the block can be used.
-func (b *block) incrRef() bool {
+func (b *Block) incrRef() bool {
 	for {
 		// We can't blindly add 1 to ref. We need to check whether it has
 		// reached zero first, because if it did, then we should absolutely not
@@ -222,7 +220,7 @@ func (b *block) incrRef() bool {
 		}
 	}
 }
-func (b *block) decrRef() {
+func (b *Block) decrRef() {
 	if b == nil {
 		return
 	}
@@ -242,12 +240,12 @@ func (b *block) decrRef() {
 	}
 	y.AssertTrue(b.ref.Load() >= 0)
 }
-func (b *block) size() int64 {
+func (b *Block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
-func (b *block) verifyCheckSum() error {
+func (b *Block) verifyCheckSum() error {
 	cs := &pb.Checksum{}
 	if err := proto.Unmarshal(b.checksum, cs); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
@@ -521,7 +519,7 @@ func (t *Table) fetchIndex() *fb.TableIndex {
 		panic("Index Cache must be set for encrypted workloads")
 	}
 	if val, ok := t.opt.IndexCache.Get(t.indexKey()); ok && val != nil {
-		return val.(*fb.TableIndex)
+		return val
 	}
 
 	index, err := t.readTableIndex()
@@ -537,7 +535,7 @@ func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
 // block function return a new block. Each block holds a ref and the byte
 // slice stored in the block will be reused when the ref becomes zero. The
 // caller should release the block by calling block.decrRef() on it.
-func (t *Table) block(idx int, useCache bool) (*block, error) {
+func (t *Table) block(idx int, useCache bool) (*Block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= t.offsetsLength() {
 		return nil, errors.New("block out of index")
@@ -549,15 +547,15 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 			// Use the block only if the increment was successful. The block
 			// could get evicted from the cache between the Get() call and the
 			// incrRef() call.
-			if b := blk.(*block); b.incrRef() {
-				return b, nil
+			if blk.incrRef() {
+				return blk, nil
 			}
 		}
 	}
 
 	var ko fb.BlockOffset
 	y.AssertTrue(t.offsets(&ko, idx))
-	blk := &block{offset: int(ko.Offset())}
+	blk := &Block{offset: int(ko.Offset())}
 	blk.ref.Store(1)
 	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
 	NumBlocks.Add(1)
@@ -795,7 +793,7 @@ func NewFilename(id uint64, dir string) string {
 }
 
 // decompress decompresses the data stored in a block.
-func (t *Table) decompress(b *block) error {
+func (t *Table) decompress(b *Block) error {
 	var dst []byte
 	var err error
 

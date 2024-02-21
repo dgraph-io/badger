@@ -38,7 +38,7 @@ func TestTableIndex(t *testing.T) {
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
-	cache, err := ristretto.NewCache(&ristretto.Config{
+	cache, err := ristretto.NewCache[uint64, *fb.TableIndex](&ristretto.Config[uint64, *fb.TableIndex]{
 		NumCounters: 1000,
 		MaxCost:     1 << 20,
 		BufferItems: 64,
@@ -199,7 +199,7 @@ func BenchmarkBuilder(b *testing.B) {
 	})
 	b.Run("encryption", func(b *testing.B) {
 		var opt Options
-		cache, err := ristretto.NewCache(&ristretto.Config{
+		cache, err := ristretto.NewCache(&ristretto.Config[uint64, *fb.TableIndex]{
 			NumCounters: 1000,
 			MaxCost:     1 << 20,
 			BufferItems: 64,
