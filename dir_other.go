@@ -1,5 +1,5 @@
-//go:build !windows && !plan9 && !js && !wasip1
-// +build !windows,!plan9,!js,!wasip1
+//go:build js || wasip1
+// +build js wasip1
 
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/dgraph-io/badger/v4/y"
 )
@@ -55,18 +53,9 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	if err != nil {
 		return nil, y.Wrapf(err, "cannot open directory %q", dirPath)
 	}
-	opts := unix.LOCK_EX | unix.LOCK_NB
-	if readOnly {
-		opts = unix.LOCK_SH | unix.LOCK_NB
-	}
 
-	err = unix.Flock(int(f.Fd()), opts)
-	if err != nil {
-		f.Close()
-		return nil, y.Wrapf(err,
-			"Cannot acquire directory lock on %q.  Another process is using this Badger database.",
-			dirPath)
-	}
+	// NOTE: Here is where we would normally call flock.
+	// This is not supported in js / wasm, so skip it.
 
 	if !readOnly {
 		// Yes, we happily overwrite a pre-existing pid file.  We're the
@@ -78,6 +67,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 				"Cannot write pid file %q", absPidFilePath)
 		}
 	}
+
 	return &directoryLockGuard{f, absPidFilePath, readOnly}, nil
 }
 
