@@ -328,6 +328,64 @@ func TestTxnWriteSkew(t *testing.T) {
 	})
 }
 
+// https://wiki.postgresql.org/wiki/SSI#Intersecting_Data
+func TestTxnWriteSkew2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Setup
+		db.opt.managedTxns = false
+		txn := db.NewTransaction(true)
+		defer txn.Discard()
+		txn.SetEntry(NewEntry([]byte("a1"), []byte("10")))
+		txn.SetEntry(NewEntry([]byte("a2"), []byte("20")))
+		txn.SetEntry(NewEntry([]byte("b1"), []byte("100")))
+		txn.SetEntry(NewEntry([]byte("b2"), []byte("200")))
+		require.NoError(t, txn.Commit())
+
+		txn1 := db.NewTransaction(true)
+		defer txn1.Discard()
+
+		itr := txn1.NewIterator(DefaultIteratorOptions)
+		sum := 0
+		{
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				if itr.Item().Key()[0] == 'a' {
+					a, _ := itr.Item().ValueCopy(nil)
+					val, _ := strconv.ParseUint(string(a), 10, 64)
+					sum += int(val)
+				}
+			}
+			itr.Close()
+		}
+
+		txn1.SetEntry(NewEntry([]byte("b3"), []byte("30")))
+
+		txn2 := db.NewTransaction(true)
+		defer txn2.Discard()
+		{
+			itr = txn2.NewIterator(DefaultIteratorOptions)
+			sum = 0
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				if itr.Item().Key()[0] == 'b' {
+					a, _ := itr.Item().ValueCopy(nil)
+					val, _ := strconv.ParseUint(string(a), 10, 64)
+					sum += int(val)
+				}
+			}
+			itr.Close()
+		}
+
+		txn2.SetEntry(NewEntry([]byte("a3"), []byte("300")))
+		require.NoError(t, txn2.Commit())
+
+		// Each transaction has modified what the other transaction would have read.
+		// If both were allowed to commit, this would break serializable behavior,
+		// because if they were run one at a time, one of the transactions would have seen the INSERT the other committed.
+		// We wait for a successful COMMIT of one of the transactions before we roll anything back,
+		// though, to ensure progress and prevent thrashing.
+		require.Error(t, txn1.Commit())
+	})
+}
+
 // a3, a2, b4 (del), b3, c2, c1
 // Read at ts=4 -> a3, c2
 // Read at ts=4(Uncommitted) -> a3, b4

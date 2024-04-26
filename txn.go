@@ -62,7 +62,9 @@ type oracle struct {
 type committedTxn struct {
 	ts uint64
 	// ConflictKeys Keeps track of the entries written at timestamp ts.
-	conflictKeys map[uint64]struct{}
+	// The first one is the hash of the write key. The second one is the
+	// the len of the reads when insert this write
+	conflictKeys map[uint64]int
 }
 
 func newOracle(opt Options) *oracle {
@@ -151,9 +153,31 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 			continue
 		}
 
+		// check if there is any direct conflict
 		for _, ro := range txn.reads {
 			if _, has := committedTxn.conflictKeys[ro]; has {
 				return true
+			}
+		}
+
+		// check if there is any indirect conflict (logical conflict)
+		for _, i := range txn.conflictKeys {
+			if i == -1 {
+				continue
+			}
+
+			happensBeforeReads := txn.reads[:i]
+
+			for _, j := range committedTxn.conflictKeys {
+				otherHappensBeforeReads := txn.reads[:j]
+
+				for fp := range happensBeforeReads {
+					for otherFp := range otherHappensBeforeReads {
+						if fp == otherFp {
+							return true
+						}
+					}
+				}
 			}
 		}
 	}
@@ -256,7 +280,8 @@ type Txn struct {
 
 	reads []uint64 // contains fingerprints of keys read.
 	// contains fingerprints of keys written. This is used for conflict detection.
-	conflictKeys map[uint64]struct{}
+	// The value int is the len of the reads when insert this write
+	conflictKeys map[uint64]int
 	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
@@ -393,8 +418,8 @@ func (txn *Txn) modify(e *Entry) error {
 	// The txn.conflictKeys is used for conflict detection. If conflict detection
 	// is disabled, we don't need to store key hashes in this map.
 	if txn.db.opt.DetectConflicts {
-		fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
-		txn.conflictKeys[fp] = struct{}{}
+		fp := z.MemHash(e.Key)                    // Avoid dealing with byte arrays.
+		txn.conflictKeys[fp] = len(txn.reads) - 1 // store this write happens after how many reads
 	}
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
@@ -783,7 +808,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	}
 	if update {
 		if db.opt.DetectConflicts {
-			txn.conflictKeys = make(map[uint64]struct{})
+			txn.conflictKeys = make(map[uint64]int)
 		}
 		txn.pendingWrites = make(map[string]*Entry)
 	}
