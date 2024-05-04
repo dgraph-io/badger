@@ -705,7 +705,7 @@ func TestTableChecksum(t *testing.T) {
 	})
 }
 
-var cacheConfig = ristretto.Config{
+var cacheConfig = ristretto.Config[[]byte, *Block]{
 	NumCounters: 1000000 * 10,
 	MaxCost:     1000000,
 	BufferItems: 64,
@@ -848,7 +848,7 @@ func BenchmarkRandomRead(b *testing.B) {
 	}
 }
 
-func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Table {
+func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache[[]byte, *Block]) *Table {
 	rand.Seed(time.Now().Unix())
 	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	if cache == nil {
