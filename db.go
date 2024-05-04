@@ -34,6 +34,7 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/skl"
@@ -123,8 +124,8 @@ type DB struct {
 
 	pub        *publisher
 	registry   *KeyRegistry
-	blockCache *ristretto.Cache
-	indexCache *ristretto.Cache
+	blockCache *ristretto.Cache[[]byte, *table.Block]
+	indexCache *ristretto.Cache[uint64, *fb.TableIndex]
 	allocPool  *z.AllocatorPool
 }
 
@@ -274,14 +275,14 @@ func Open(opt Options) (*DB, error) {
 			numInCache = 1
 		}
 
-		config := ristretto.Config{
+		config := ristretto.Config[[]byte, *table.Block]{
 			NumCounters: numInCache * 8,
 			MaxCost:     opt.BlockCacheSize,
 			BufferItems: 64,
 			Metrics:     true,
 			OnExit:      table.BlockEvictHandler,
 		}
-		db.blockCache, err = ristretto.NewCache(&config)
+		db.blockCache, err = ristretto.NewCache[[]byte, *table.Block](&config)
 		if err != nil {
 			return nil, y.Wrap(err, "failed to create data cache")
 		}
@@ -297,7 +298,7 @@ func Open(opt Options) (*DB, error) {
 			numInCache = 1
 		}
 
-		config := ristretto.Config{
+		config := ristretto.Config[uint64, *fb.TableIndex]{
 			NumCounters: numInCache * 8,
 			MaxCost:     opt.IndexCacheSize,
 			BufferItems: 64,
