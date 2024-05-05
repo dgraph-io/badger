@@ -17,6 +17,7 @@ package pb
 
 import (
 	"os/exec"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,13 @@ func Exec(argv ...string) error {
 }
 
 func TestProtosRegenerate(t *testing.T) {
-	err := Exec("./gen.sh")
+	var err error
+
+	if runtime.GOOS == "windows" {
+		err = Exec("bash", "./gen.sh")
+	} else {
+		err = Exec("./gen.sh")
+	}
 	require.NoError(t, err, "Got error while regenerating protos: %v\n", err)
 
 	generatedProtos := "badgerpb4.pb.go"
