@@ -295,7 +295,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			continue
 		}
 		if y.SameKey(key, it.Key()) {
-			if version := y.ParseTs(it.Key()); maxVs.Version < version {
+			if version := y.ParseTs(it.Key()); maxVs.Version < version || maxVs.Value == nil {
 				maxVs = it.ValueCopy()
 				maxVs.Version = version
 			}
