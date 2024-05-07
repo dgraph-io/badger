@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -185,6 +186,15 @@ func checkAndSetOptions(opt *Options) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (*DB, error) {
+	if opt.PanicHandler != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				r = fmt.Sprintf("%v\n%s", r, string(debug.Stack()))
+				opt.PanicHandler(r)
+			}
+		}()
+	}
+
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}
@@ -310,7 +320,9 @@ func Open(opt Options) (*DB, error) {
 	}
 
 	db.closers.cacheHealth = z.NewCloser(1)
-	go db.monitorCache(db.closers.cacheHealth)
+	db._go(func() {
+		db.monitorCache(db.closers.cacheHealth)
+	})
 
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
@@ -330,7 +342,9 @@ func Open(opt Options) (*DB, error) {
 	}
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
-	go db.updateSize(db.closers.updateSize)
+	db._go(func() {
+		db.updateSize(db.closers.updateSize)
+	})
 
 	if err := db.openMemTables(db.opt); err != nil {
 		return nil, y.Wrapf(err, "while opening memtables")
@@ -355,9 +369,10 @@ func Open(opt Options) (*DB, error) {
 		db.lc.startCompact(db.closers.compactors)
 
 		db.closers.memtable = z.NewCloser(1)
-		go func() {
+		db._go(func() {
 			db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
-		}()
+		})
+
 		// Flush them to disk asap.
 		for _, mt := range db.imm {
 			db.flushChan <- mt
@@ -379,22 +394,28 @@ func Open(opt Options) (*DB, error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	go db.threshold.listenForValueThresholdUpdate()
+	db._go(db.threshold.listenForValueThresholdUpdate)
 
 	if err := db.initBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
 	db.closers.writes = z.NewCloser(1)
-	go db.doWrites(db.closers.writes)
+	db._go(func() {
+		db.doWrites(db.closers.writes)
+	})
 
 	if !db.opt.InMemory {
 		db.closers.valueGC = z.NewCloser(1)
-		go db.vlog.waitOnGC(db.closers.valueGC)
+		db._go(func() {
+			db.vlog.waitOnGC(db.closers.valueGC)
+		})
 	}
 
 	db.closers.pub = z.NewCloser(1)
-	go db.pub.listenForUpdates(db.closers.pub)
+	db._go(func() {
+		db.pub.listenForUpdates(db.closers.pub)
+	})
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -975,7 +996,10 @@ func (db *DB) doWrites(lc *z.Closer) {
 		}
 
 	writeCase:
-		go writeRequests(reqs)
+		_reqs := reqs
+		db._go(func() {
+			writeRequests(_reqs)
+		})
 		reqs = make([]*request, 0, 10)
 		reqLen.Set(0)
 	}
@@ -1006,11 +1030,11 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 	if err != nil {
 		return err
 	}
-	go func() {
+	db._go(func() {
 		err := req.Wait()
 		// Write is complete. Let's call the callback function now.
 		f(err)
-	}()
+	})
 	return nil
 }
 
@@ -1556,9 +1580,9 @@ func (db *DB) startMemoryFlush() {
 	if db.closers.memtable != nil {
 		db.flushChan = make(chan *memTable, db.opt.NumMemtables)
 		db.closers.memtable = z.NewCloser(1)
-		go func() {
+		db._go(func() {
 			db.flushMemtable(db.closers.memtable)
-		}()
+		})
 	}
 }
 
@@ -1576,9 +1600,9 @@ func (db *DB) Flatten(workers int) error {
 		db.opt.Infof("Attempting to compact with %+v\n", cp)
 		errCh := make(chan error, 1)
 		for i := 0; i < workers; i++ {
-			go func() {
+			db._go(func() {
 				errCh <- db.lc.doCompact(175, cp)
-			}()
+			})
 		}
 		var success int
 		var rerr error
@@ -1649,7 +1673,9 @@ func (db *DB) blockWrite() error {
 
 func (db *DB) unblockWrite() {
 	db.closers.writes = z.NewCloser(1)
-	go db.doWrites(db.closers.writes)
+	db._go(func() {
+		db.doWrites(db.closers.writes)
+	})
 
 	// Resume writes.
 	db.blockWrites.Store(0)
@@ -2084,4 +2110,23 @@ func (db *DB) LevelsToString() string {
 	}
 	b.WriteString("Level Done\n")
 	return b.String()
+}
+
+// go will start a goroutine but will also handle panics
+// by calling a PanicHandler if provided on the Options.
+func (db *DB) _go(fn func()) {
+	if db.opt.PanicHandler == nil {
+		go fn()
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				r = fmt.Sprintf("%v\n%s", r, string(debug.Stack()))
+				db.opt.PanicHandler(r)
+			}
+		}()
+		fn()
+	}()
 }
