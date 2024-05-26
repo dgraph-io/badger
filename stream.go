@@ -25,8 +25,10 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -83,7 +85,9 @@ type Stream struct {
 	Send func(buf *z.Buffer) error
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
-	SinceTs      uint64
+	SinceTs uint64
+	// FullCopy should be set to true only when encryption mode is same for sender and receiver.
+	FullCopy     bool
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
@@ -108,9 +112,6 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
-		if item.IsDeletedOrExpired() {
-			break
-		}
 		if !bytes.Equal(key, item.Key()) {
 			// Break out on the first encounter with another key.
 			break
@@ -128,6 +129,8 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
+		// As we do full copy, we need to transmit only if it is a delete key or not.
+		kv.Meta = []byte{item.meta & bitDelete}
 		kv.UserMeta = a.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
@@ -136,6 +139,12 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 
 		if item.DiscardEarlierVersions() {
+			break
+		}
+		if item.IsDeletedOrExpired() {
+			// We do a FullCopy in stream. It might happen that tables from L6 contain K(version=1),
+			// while the table at L4 that was not copied contains K(version=2) with delete mark.
+			// Hence, we need to send the deleted or expired item too.
 			break
 		}
 	}
@@ -164,17 +173,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
+func (st *Stream) produceKVs(ctx context.Context, itr *Iterator) error {
 	st.numProducers.Add(1)
 	defer st.numProducers.Add(-1)
-
-	var txn *Txn
-	if st.readTs > 0 {
-		txn = st.db.NewTransactionAt(st.readTs, false)
-	} else {
-		txn = st.db.NewTransaction(false)
-	}
-	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
 	outList := z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
@@ -185,15 +186,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}()
 
 	iterate := func(kr keyRange) error {
-		iterOpts := DefaultIteratorOptions
-		iterOpts.AllVersions = true
-		iterOpts.Prefix = st.Prefix
-		iterOpts.PrefetchValues = false
-		iterOpts.SinceTs = st.SinceTs
-		itr := txn.NewIterator(iterOpts)
-		itr.ThreadId = threadId
-		defer itr.Close()
-
 		itr.Alloc = z.NewAllocator(1<<20, "Stream.Iterate")
 		defer itr.Alloc.Release()
 
@@ -377,6 +369,77 @@ outer:
 	return nil
 }
 
+func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Table) error {
+	// TODO: See if making this concurrent would be helpful. Most likely it won't.
+	// But, if it does work, then most like <3 goroutines might be sufficient.
+	infof := st.db.opt.Infof
+	// Make a copy of the manifest so that we don't have race condition.
+	manifest := st.db.manifest.manifest.clone()
+	dataKeys := make(map[uint64]struct{})
+	// Iterate in reverse order so that the receiver gets the bottommost level first.
+	for i := len(tableMatrix) - 1; i >= 0; i-- {
+		level := i
+		tables := tableMatrix[i]
+		for _, t := range tables {
+			// This table can be picked for copying directly.
+			out := z.NewBuffer(int(t.Size())+1024, "Stream.Table")
+			if dk := t.DataKey(); dk != nil {
+				y.AssertTrue(dk.KeyId != 0)
+				// If we have a legit data key, send it over so the table can be decrypted. The same
+				// data key could have been used to encrypt many tables. Avoid sending it
+				// repeatedly.
+				if _, sent := dataKeys[dk.KeyId]; !sent {
+					infof("Sending data key with ID: %d\n", dk.KeyId)
+					val, err := dk.Marshal()
+					y.Check(err)
+
+					// This would go to key registry in destination.
+					kv := &pb.KV{
+						Value: val,
+						Kind:  pb.KV_DATA_KEY,
+					}
+					KVToBuffer(kv, out)
+					dataKeys[dk.KeyId] = struct{}{}
+				}
+			}
+
+			infof("Sending table ID: %d at level: %d. Size: %s\n",
+				t.ID(), level, humanize.IBytes(uint64(t.Size())))
+			tableManifest := manifest.Tables[t.ID()]
+			change := pb.ManifestChange{
+				Op:    pb.ManifestChange_CREATE,
+				Level: uint32(level),
+				KeyId: tableManifest.KeyID,
+				// Hard coding it, since we're supporting only AES for now.
+				EncryptionAlgo: pb.EncryptionAlgo_aes,
+				Compression:    uint32(tableManifest.Compression),
+			}
+
+			buf, err := change.Marshal()
+			y.Check(err)
+
+			// We send the table along with level to the destination, so they'd know where to
+			// place the tables. We'd send all the tables first, before we start streaming. So, the
+			// destination DB would write streamed keys one level above.
+			kv := &pb.KV{
+				// Key can be used for MANIFEST.
+				Key:   buf,
+				Value: t.Data,
+				Kind:  pb.KV_FILE,
+			}
+			KVToBuffer(kv, out)
+
+			select {
+			case st.kvChan <- out:
+			case <-ctx.Done():
+				_ = out.Release()
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
+}
+
 // Orchestrate runs Stream. It picks up ranges from the SSTables, then runs NumGo number of
 // goroutines to iterate over these ranges and batch up KVs in lists. It concurrently runs a single
 // goroutine to pick these lists, batch them up further and send to Output.Send. Orchestrate also
@@ -384,6 +447,11 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	if st.FullCopy {
+		if !st.db.opt.managedTxns || st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
+			panic("Got invalid stream options when doing full copy")
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
@@ -397,26 +465,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		st.KeyToList = st.ToList
 	}
 
-	// Picks up ranges from Badger, and sends them to rangeCh.
-	go st.produceRanges(ctx)
-
-	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
-	var wg sync.WaitGroup
-	for i := 0; i < st.NumGo; i++ {
-		wg.Add(1)
-
-		go func(threadId int) {
-			defer wg.Done()
-			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx, threadId); err != nil {
-				select {
-				case errCh <- err:
-				default:
-				}
-			}
-		}(i)
-	}
-
 	// Pick up key-values from kvChan and send to stream.
 	kvErr := make(chan error, 1)
 	go func() {
@@ -427,6 +475,138 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		}
 		kvErr <- err
 	}()
+
+	// Pick all relevant tables from levels. We'd use this to copy them over,
+	// or generate iterators from them.
+	memTables, decr := st.db.getMemTables()
+	defer decr()
+
+	opts := DefaultIteratorOptions
+	opts.Prefix = st.Prefix
+	opts.SinceTs = st.SinceTs
+	tableMatrix := st.db.lc.getTables(&opts)
+	defer func() {
+		for _, tables := range tableMatrix {
+			for _, t := range tables {
+				_ = t.DecrRef()
+			}
+		}
+	}()
+	y.AssertTrue(len(tableMatrix) == st.db.opt.MaxLevels)
+
+	infof := st.db.opt.Infof
+	copyTables := func() error {
+		// Figure out which tables we can copy. Only choose from the last 2 levels.
+		// Say last level has data of size 100. Given a 10x level multiplier and
+		// assuming the tree is balanced, second last level would have 10, and the
+		// third last level would have 1. The third last level would only have 1%
+		// of the data of the last level. It's OK for us to stop there and just
+		// stream it, instead of trying to copy over those tables too.  When we
+		// copy over tables to Level i, we can't stream any data to level i, i+1,
+		// and so on. The stream has to create tables at level i-1, so there can be
+		// overlap between the tables at i-1 and i.
+
+		// Let's pick the tables which can be fully copied over from last level.
+		threshold := len(tableMatrix) - 2
+		toCopy := make([][]*table.Table, len(tableMatrix))
+		var numCopy, numStream int
+		for lev, tables := range tableMatrix {
+			// We stream only the data in the two bottommost levels.
+			if lev < threshold {
+				numStream += len(tables)
+				continue
+			}
+			var rem []*table.Table
+			cp := tables[:0]
+			for _, t := range tables {
+				// We can only copy over those tables that satisfy following conditions:
+				// - All the keys have version less than st.readTs
+				// - st.Prefix fully covers the table
+				if t.MaxVersion() > st.readTs || !t.CoveredByPrefix(st.Prefix) {
+					rem = append(rem, t)
+					continue
+				}
+				cp = append(cp, t)
+			}
+			toCopy[lev] = cp       // Pick tables to copy.
+			tableMatrix[lev] = rem // Keep remaining for streaming.
+			numCopy += len(cp)
+			numStream += len(rem)
+		}
+		infof("Num tables to copy: %d. Num to stream: %d\n", numCopy, numStream)
+
+		return st.copyTablesOver(ctx, toCopy)
+	}
+
+	if st.FullCopy {
+		// As of now, we don't handle the non-zero SinceTs.
+		if err := copyTables(); err != nil {
+			return errors.Wrap(err, "while copying tables")
+		}
+	}
+
+	var txn *Txn
+	if st.readTs > 0 {
+		txn = st.db.NewTransactionAt(st.readTs, false)
+	} else {
+		txn = st.db.NewTransaction(false)
+	}
+	defer txn.Discard()
+
+	newIterator := func(threadId int) *Iterator {
+		var itrs []y.Iterator
+		for _, mt := range memTables {
+			itrs = append(itrs, mt.sl.NewUniIterator(false))
+		}
+		if tables := tableMatrix[0]; len(tables) > 0 {
+			itrs = append(itrs, iteratorsReversed(tables, 0)...)
+		}
+		for _, tables := range tableMatrix[1:] {
+			if len(tables) == 0 {
+				continue
+			}
+			itrs = append(itrs, table.NewConcatIterator(tables, 0))
+		}
+
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		opt.Prefix = st.Prefix
+		opt.PrefetchValues = false
+		opt.SinceTs = st.SinceTs
+
+		res := &Iterator{
+			txn:      txn,
+			iitr:     table.NewMergeIterator(itrs, false),
+			opt:      opt,
+			readTs:   txn.readTs,
+			ThreadId: threadId,
+		}
+		return res
+	}
+
+	// Picks up ranges from Badger, and sends them to rangeCh.
+	// Just for simplicity, we'd consider all the tables for range production.
+	go st.produceRanges(ctx)
+
+	errCh := make(chan error, st.NumGo) // Stores error by consumeKeys.
+	var wg sync.WaitGroup
+	for i := 0; i < st.NumGo; i++ {
+		wg.Add(1)
+
+		go func(threadId int) {
+			defer wg.Done()
+			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
+			itr := newIterator(threadId)
+			defer itr.Close()
+			if err := st.produceKVs(ctx, itr); err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+			}
+		}(i)
+	}
+
 	wg.Wait()        // Wait for produceKVs to be over.
 	close(st.kvChan) // Now we can close kvChan.
 	defer func() {
