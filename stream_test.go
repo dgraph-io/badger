@@ -171,6 +171,68 @@ func TestStream(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
+
+func TestStreamMaxSize(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
+	// Set the maxStreamSize to 1MB for the duration of the test so that the it can use a smaller
+	// dataset than it would otherwise need.
+	originalMaxStreamSize := maxStreamSize
+	maxStreamSize = 1 << 20
+	defer func() {
+		maxStreamSize = originalMaxStreamSize
+	}()
+
+	testSize := int(1e6)
+	dir, err := os.MkdirTemp("", "badger-big-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	var count int
+	wb := db.NewWriteBatchAt(5)
+	for _, prefix := range []string{"p0", "p1", "p2"} {
+		for i := 1; i <= testSize; i++ {
+			require.NoError(t, wb.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
+			count++
+		}
+	}
+	require.NoError(t, wb.Flush())
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "Testing"
+	c := &collector{}
+	stream.Send = c.Send
+
+	// default value
+	require.Equal(t, stream.MaxSize, maxStreamSize)
+
+	// reset maxsize
+	stream.MaxSize = 1024 * 1024 * 50
+
+	// Test case 1. Retrieve everything.
+	err = stream.Orchestrate(ctxb)
+	require.NoError(t, err)
+	require.Equal(t, 3*testSize, len(c.kv), "Expected 30000. Got: %d", len(c.kv))
+
+	m := make(map[string]int)
+	for _, kv := range c.kv {
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
+		require.Equal(t, expected, kv.Value)
+		m[prefix]++
+	}
+	require.Equal(t, 3, len(m))
+	for pred, count := range m {
+		require.Equal(t, testSize, count, "Count mismatch for pred: %s", pred)
+	}
+	require.NoError(t, db.Close())
+}
+
 func TestStreamWithThreadId(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
