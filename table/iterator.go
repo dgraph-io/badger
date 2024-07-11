@@ -34,7 +34,7 @@ type blockIterator struct {
 	key          []byte
 	val          []byte
 	entryOffsets []uint32
-	block        *block
+	block        *Block
 
 	tableID uint64
 	blockID int
@@ -43,7 +43,7 @@ type blockIterator struct {
 	prevOverlap uint16
 }
 
-func (itr *blockIterator) setBlock(b *block) {
+func (itr *blockIterator) setBlock(b *Block) {
 	// Decrement the ref for the old block. If the old block was compressed, we
 	// might be able to reuse it.
 	itr.block.decrRef()
