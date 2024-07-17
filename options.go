@@ -173,8 +173,6 @@ func DefaultOptions(path string) Options {
 		// Benchmark code can be found in table/builder_test.go file
 		ZSTDCompressionLevel: 1,
 
-		// Nothing to read/write value log using standard File I/O
-		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
