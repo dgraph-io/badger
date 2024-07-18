@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	stderrors "errors"
 	"expvar"
 	"fmt"
 	"math"
@@ -1015,7 +1016,7 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 	return nil
 }
 
-var errNoRoom = errors.New("No room for write")
+var errNoRoom = stderrors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
