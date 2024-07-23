@@ -165,8 +165,8 @@ func (s *levelHandler) addTable(t *table.Table) {
 // sortTables sorts tables of levelHandler based on table.Smallest.
 // Normally it should be called after all addTable calls.
 func (s *levelHandler) sortTables() {
-	s.RLock()
-	defer s.RUnlock()
+	s.Lock()
+	defer s.Unlock()
 
 	sort.Slice(s.tables, func(i, j int) bool {
 		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0

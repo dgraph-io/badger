@@ -57,7 +57,7 @@ workloads, you should be using the `Transaction` API.
 
 If you're using Badger with `SyncWrites=false`, then your writes might not be written to value log
 and won't get synced to disk immediately. Writes to LSM tree are done inmemory first, before they
-get compacted to disk. The compaction would only happen once `MaxTableSize` has been reached. So, if
+get compacted to disk. The compaction would only happen once `BaseTableSize` has been reached. So, if
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
 the database, you'll see these writes on disk.
 

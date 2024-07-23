@@ -349,7 +349,7 @@ func TestStreamWriter6(t *testing.T) {
 			}
 		}
 
-		// list has 3 pairs for equal keys. Since each Key has size equal to MaxTableSize
+		// list has 3 pairs for equal keys. Since each Key has size equal to BaseTableSize
 		// we would have 6 tables, if keys are not equal. Here we should have 3 tables.
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
