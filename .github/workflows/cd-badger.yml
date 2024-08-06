@@ -8,9 +8,9 @@ on:
         type: string
 jobs:
   badger-build-amd64:
-    runs-on: ubuntu-20.04
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: '${{ github.event.inputs.releasetag }}'
       - name: Get Go Version
@@ -19,7 +19,7 @@ jobs:
           GOVERSION=$({ [ -f .go-version ] && cat .go-version; })
           echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GOVERSION }}
       - name: Set Badger Release Version
@@ -51,9 +51,9 @@ jobs:
             badger/badger-checksum-linux-amd64.sha256
             badger/badger-linux-amd64.tar.gz
   badger-build-arm64:
-    runs-on: [self-hosted, ARM64]
+    runs-on: warp-ubuntu-latest-arm64-4x
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: '${{ github.event.inputs.releasetag }}'
       - name: Get Go Version
@@ -62,7 +62,7 @@ jobs:
           GOVERSION=$({ [ -f .go-version ] && cat .go-version; })
           echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GOVERSION }}
       - name: Set Badger Release Version
