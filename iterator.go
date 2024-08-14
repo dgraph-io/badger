@@ -589,7 +589,7 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	for it.iitr.Valid() {
+	for it.iitr.Valid() && hasPrefix(it.iitr, it.opt.Prefix) {
 		if it.parseItem() {
 			// parseItem calls one extra next.
 			// This is used to deal with the complexity of reverse iteration.
@@ -725,6 +725,13 @@ func (it *Iterator) fill(item *Item) {
 	}
 }
 
+func hasPrefix(it y.Iterator, prefix []byte) bool {
+	if len(prefix) > 0 {
+		return bytes.HasPrefix(y.ParseKey(it.Key()), prefix)
+	}
+	return true
+}
+
 func (it *Iterator) prefetch() {
 	prefetchSize := 2
 	if it.opt.PrefetchValues && it.opt.PrefetchSize > 1 {
@@ -734,7 +741,7 @@ func (it *Iterator) prefetch() {
 	i := it.iitr
 	var count int
 	it.item = nil
-	for i.Valid() {
+	for i.Valid() && hasPrefix(i, it.opt.Prefix) {
 		if !it.parseItem() {
 			continue
 		}
