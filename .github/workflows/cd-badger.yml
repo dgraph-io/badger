@@ -45,7 +45,7 @@ jobs:
       - name: Tar Archive for Linux Build
         run: cd badger && tar -zcvf badger-linux-amd64.tar.gz badger-linux-amd64
       - name: Upload Badger Binary Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: |
             badger/badger-checksum-linux-amd64.sha256
@@ -88,7 +88,7 @@ jobs:
       - name: Tar Archive for Linux Build
         run: cd badger && tar -zcvf badger-linux-arm64.tar.gz badger-linux-arm64
       - name: Upload Badger Binary Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: |
             badger/badger-checksum-linux-arm64.sha256
