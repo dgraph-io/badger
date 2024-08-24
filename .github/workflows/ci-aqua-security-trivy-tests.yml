@@ -8,6 +8,8 @@ on:
       - ready_for_review
     branches:
       - main
+  schedule:
+    - cron: "0 0 * * *"
 jobs:
   build:
     name: trivy-tests
