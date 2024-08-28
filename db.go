@@ -166,7 +166,7 @@ func checkAndSetOptions(opt *Options) error {
 			"reduce opt.ValueThreshold or increase opt.BaseTableSize.",
 			opt.ValueThreshold, opt.maxBatchSize)
 	}
-	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
+	// ValueLogFileSize should be strictly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
 	if !(opt.ValueLogFileSize < 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return ErrValueLogSize
@@ -403,7 +403,7 @@ func Open(opt Options) (*DB, error) {
 	return db, nil
 }
 
-// initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
+// initBannedNamespaces retrieves the banned namespaces from the DB and updates in-memory structure.
 func (db *DB) initBannedNamespaces() error {
 	if db.opt.NamespaceOffset < 0 {
 		return nil
@@ -905,7 +905,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		return nil, ErrTxnTooBig
 	}
 
-	// We can only service one request because we need each txn to be stored in a contigous section.
+	// We can only service one request because we need each txn to be stored in a contiguous section.
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
 	req.reset()
@@ -1710,7 +1710,7 @@ func (db *DB) dropAll() (func(), error) {
 	if err != nil {
 		return f, err
 	}
-	// prepareToDrop will stop all the incomming write and flushes any pending memtables.
+	// prepareToDrop will stop all the incoming write and flushes any pending memtables.
 	// Before we drop, we'll stop the compaction because anyways all the datas are going to
 	// be deleted.
 	db.stopCompactions()
@@ -1753,7 +1753,7 @@ func (db *DB) dropAll() (func(), error) {
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
 //   - Stop accepting new writes.
-//   - Stop memtable flushes before acquiring lock. Because we're acquring lock here
+//   - Stop memtable flushes before acquiring lock. Because we're acquiring lock here
 //     and memtable flush stalls for lock, which leads to deadlock
 //   - Flush out all memtables, skipping over keys with the given prefix, Kp.
 //   - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
