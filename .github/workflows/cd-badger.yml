@@ -93,5 +93,5 @@ jobs:
         with:
           name: badger-linux-arm64-${{ github.run_id }}
           path: |
-            badger/badger-checksum-linux-arm64.sha256
-            badger/badger-linux-arm64.tar.gz
+            badger-arm/badger-checksum-linux-arm64.sha256
+            badger-arm/badger-linux-arm64.tar.gz
