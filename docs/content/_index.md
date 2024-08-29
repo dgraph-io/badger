@@ -80,16 +80,9 @@ non-Go-based key-value stores like RocksDB.
 
 ## Changelog
 
-The [Changelog] is kept fairly up-to-date.
+The [Changelog] is kept fairly up-to-date with each release.
 
-- Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
-with v1.0 is v1.6.0.
-- Badger v2.0 was released in Nov 2019 with a new storage format which won't
-be compatible with all of the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
-
-For more details on our version naming schema please read [Choosing a version]({{< relref "get-started/index.md#choosing-a-version" >}}).
-
-[Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
+[Changelog]:https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
 
 ## Contribute
 
@@ -99,7 +92,7 @@ For more details on our version naming schema please read [Choosing a version]({
       <div class="col-12 col-sm-6">
         <div class="section-item">
           <div class="section-name">
-            <a href="https://github.com/dgraph-io/badger/blob/master/CONTRIBUTING.md">
+            <a href="https://github.com/dgraph-io/badger/blob/main/CONTRIBUTING.md">
               Contribute to Badger
             </a>
           </div>

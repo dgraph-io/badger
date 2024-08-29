@@ -17,4 +17,4 @@ Go](https://open.dgraph.io/post/badger/)
 
 ## Contributing
 
-If you're interested in contributing to Badger see [CONTRIBUTING.md](https://github.com/dgraph-io/badger/blob/master/CONTRIBUTING.md).
+If you're interested in contributing to Badger see [CONTRIBUTING.md](https://github.com/dgraph-io/badger/blob/main/CONTRIBUTING.md).
