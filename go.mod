@@ -8,7 +8,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.4
-	github.com/google/flatbuffers v1.12.1
+	github.com/google/flatbuffers v24.3.25+incompatible
 	github.com/klauspost/compress v1.17.9
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
