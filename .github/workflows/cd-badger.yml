@@ -47,10 +47,10 @@ jobs:
       - name: Upload Badger Binary Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: badger-linux-amd64-${{ github.run_id }}-${{ github.job }}-${{ steps.id }}-${{ github.event.inputs.releasetag }}-${{ github.run_number }}-${{ github.run_attempt }}
+          name: badger-linux-amd64-${{ github.run_id }}-${{ github.job }}
           path: |
             badger/badger-checksum-linux-amd64.sha256
-            badger/badger-linux-amd64-${{ github.run_id }}.tar.gz
+            badger/badger-linux-amd64.tar.gz
   badger-build-arm64:
     runs-on: warp-ubuntu-latest-arm64-4x
     steps:
@@ -93,7 +93,7 @@ jobs:
       - name: Upload Badger Binary Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: badger-linux-arm64-${{ github.run_id }}-${{ github.job }}-${{ steps.id }}-${{ github.event.inputs.releasetag }}-${{ github.run_number }}-${{ github.run_attempt }}
+          name: badger-linux-arm64-${{ github.run_id }}-${{ github.job }}
           path: |
             badger/badger-checksum-linux-arm64.sha256
-            badger/badger-linux-arm64-${{ github.run_id }}.tar.gz
+            badger/badger-linux-arm64.tar.gz
