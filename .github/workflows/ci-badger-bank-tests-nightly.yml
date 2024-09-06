@@ -1,6 +1,12 @@
 name: ci-badger-bank-tests-nightly
 on:
   push:
+    paths-ignore:
+      - '**.md'
+      - '.github/*'
+      - '.github/ISSUE_TEMPLATE/*'
+      - 'docs/**'
+      - 'images/**'
     branches:
       - main
       - 'release/v*'

@@ -1,6 +1,12 @@
 name: ci-badger-tests-coverage
 on:
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - '.github/*'
+      - '.github/ISSUE_TEMPLATE/*'
+      - 'docs/**'
+      - 'images/**'
     branches:
       - main
       - 'release/v*'
