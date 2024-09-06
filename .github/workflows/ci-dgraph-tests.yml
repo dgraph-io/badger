@@ -1,6 +1,12 @@
 name: ci-dgraph-tests
 on:
   push:
+    paths-ignore:
+      - '**.md'
+      - '.github/*'
+      - '.github/ISSUE_TEMPLATE/*'
+      - 'docs/**'
+      - 'images/**'
     branches:
       - main
 jobs:
