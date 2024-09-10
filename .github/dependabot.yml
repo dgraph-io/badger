@@ -20,3 +20,9 @@ updates:
       interval: "weekly"
       day: wednesday
       time: "16:00"
+    groups:
+      actions:
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"
