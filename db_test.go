@@ -164,6 +164,38 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 	test(t, db)
 }
 
+func TestReverseIterator(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		key := make([]byte, 6)
+		db.Update(func(txn *Txn) error {
+			binary.BigEndian.PutUint16(key, 5)
+			binary.BigEndian.PutUint32(key[2:], 1)
+			txn.Set(key, []byte("value1"))
+
+			binary.BigEndian.PutUint32(key[2:], 2)
+			txn.Set(key, []byte("value2"))
+			return nil
+		})
+
+		db.View(func(txn *Txn) error {
+			searchBuffer := make([]byte, 3)
+			binary.BigEndian.PutUint16(searchBuffer, 5)
+			searchBuffer[2] = 0xFF
+
+			iteratorOptions := DefaultIteratorOptions
+			iteratorOptions.Reverse = true
+			iteratorOptions.PrefetchValues = false
+			iteratorOptions.Prefix = searchBuffer
+			it := txn.NewIterator(iteratorOptions)
+			defer it.Close()
+
+			it.Rewind()
+			require.Equal(t, it.Item().Key(), key)
+			return nil
+		})
+	})
+}
+
 func TestWrite(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 100; i++ {
