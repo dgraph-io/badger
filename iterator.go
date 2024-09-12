@@ -726,6 +726,8 @@ func (it *Iterator) fill(item *Item) {
 }
 
 func hasPrefix(it *Iterator) bool {
+	// We shouldn't check prefix in case the iterator is going in reverse. Since in reverse we expect
+	// people to append items to the end of prefix.
 	if !it.opt.Reverse && len(it.opt.Prefix) > 0 {
 		return bytes.HasPrefix(y.ParseKey(it.iitr.Key()), it.opt.Prefix)
 	}
