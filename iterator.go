@@ -589,7 +589,7 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	for it.iitr.Valid() && (!it.opt.Reverse && hasPrefix(it)) {
+	for it.iitr.Valid() && hasPrefix(it) {
 		if it.parseItem() {
 			// parseItem calls one extra next.
 			// This is used to deal with the complexity of reverse iteration.
