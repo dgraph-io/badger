@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/dgraph-io/ristretto v0.1.2-0.20240116140435-c67e07994f91
+	github.com/dgraph-io/ristretto v1.0.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.4
