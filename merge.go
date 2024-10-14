@@ -17,10 +17,9 @@
 package badger
 
 import (
+	stderrors "errors"
 	"sync"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -58,7 +57,7 @@ func (db *DB) GetMergeOperator(key []byte,
 	return op
 }
 
-var errNoMerge = errors.New("No need for merge")
+var errNoMerge = stderrors.New("No need for merge")
 
 func (op *MergeOperator) iterateAndMerge() (newVal []byte, latest uint64, err error) {
 	txn := op.db.NewTransaction(false)
