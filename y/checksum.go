@@ -17,16 +17,16 @@
 package y
 
 import (
+	stderrors "errors"
 	"hash/crc32"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/pb"
 )
 
 // ErrChecksumMismatch is returned at checksum mismatch.
-var ErrChecksumMismatch = errors.New("checksum mismatch")
+var ErrChecksumMismatch = stderrors.New("checksum mismatch")
 
 // CalculateChecksum calculates checksum for data using ct checksum type.
 func CalculateChecksum(data []byte, ct pb.Checksum_Algorithm) uint64 {
