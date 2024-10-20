@@ -323,7 +323,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			// Send the batch immediately if it already exceeds the maximum allowed size.
 			// If the size of the batch exceeds maxStreamSize, break from the loop to
 			// avoid creating a batch that is so big that certain limits are reached.
-			if batch.LenNoPadding() > uint64(st.MaxSize) {
+			if uint64(batch.LenNoPadding()) > st.MaxSize {
 				break loop
 			}
 			select {
