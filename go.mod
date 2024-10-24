@@ -1,10 +1,10 @@
 module github.com/dgraph-io/badger/v4
 
-go 1.19
+go 1.23
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/dgraph-io/ristretto v1.0.0
+	github.com/dgraph-io/ristretto/v2 v2.0.0-alpha
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.4
@@ -31,3 +31,5 @@ require (
 )
 
 retract v4.0.0 // see #1888 and #1889
+
+retract v4.3.0 // see #2113 and #2121

@@ -29,7 +29,7 @@ import (
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
