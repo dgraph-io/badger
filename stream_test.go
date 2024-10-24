@@ -171,7 +171,6 @@ func TestStream(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-
 func TestStreamMaxSize(t *testing.T) {
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")
