@@ -33,7 +33,7 @@ import (
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 const (

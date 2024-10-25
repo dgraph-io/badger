@@ -1,11 +1,11 @@
-+++ 
-title = "Get Started - Quickstart Guide" 
-aliases = ["/get-started"] 
++++
+title = "Get Started - Quickstart Guide"
+aliases = ["/get-started"]
 +++
 
 
 ## Installing
-To start using Badger, install Go 1.19 or above. Run the following command to retrieve the library.
+To start using Badger, install Go 1.23 or above. Run the following command to retrieve the library.
 
 ```sh
 $ go get github.com/dgraph-io/badger/v4

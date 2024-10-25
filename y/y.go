@@ -32,7 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v4/pb"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 var (

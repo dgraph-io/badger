@@ -38,7 +38,7 @@ import (
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/skl"
 	"github.com/dgraph-io/badger/v4/y"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 // memTable structure stores a skiplist and a corresponding WAL. Writes to memTable are written
