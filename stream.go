@@ -62,6 +62,14 @@ type Stream struct {
 	// Note: Calls to ChooseKey are concurrent.
 	ChooseKey func(item *Item) bool
 
+	// MaxSize is the maximum allowed size of a stream batch. This is a soft limit
+	// as a single list that is still over the limit will have to be sent as is since it
+	// cannot be split further. This limit prevents the framework from creating batches
+	// so big that sending them causes issues (e.g running into the max size gRPC limit).
+	// If necessary, set it up before the Stream starts synchronisation
+	// This is not a concurrency-safe setting
+	MaxSize uint64
+
 	// KeyToList, similar to ChooseKey, is only invoked on the highest version of the value. It
 	// is upto the caller to iterate over the versions and generate zero, one or more KVs. It
 	// is expected that the user would advance the iterator to go through the versions of the
@@ -315,7 +323,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			// Send the batch immediately if it already exceeds the maximum allowed size.
 			// If the size of the batch exceeds maxStreamSize, break from the loop to
 			// avoid creating a batch that is so big that certain limits are reached.
-			if batch.LenNoPadding() > int(maxStreamSize) {
+			if uint64(batch.LenNoPadding()) > st.MaxSize {
 				break loop
 			}
 			select {
@@ -452,6 +460,7 @@ func (db *DB) newStream() *Stream {
 		db:        db,
 		NumGo:     db.opt.NumGoroutines,
 		LogPrefix: "Badger.Stream",
+		MaxSize:   maxStreamSize,
 	}
 }
 

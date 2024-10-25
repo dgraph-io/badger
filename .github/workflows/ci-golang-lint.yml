@@ -26,7 +26,7 @@ jobs:
         with:
           go-version: ${{ env.GOVERSION }}
       - name: golang-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v6.1.1
         with:
           # Required: the version of golangci-lint is required and must be specified without patch version: we always use the latest patch version.
           version: latest
