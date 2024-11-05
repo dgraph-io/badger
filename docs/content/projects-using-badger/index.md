@@ -59,5 +59,6 @@ Below is a list of known projects that use Badger:
 * [KVS](https://github.com/tauraamui/kvs) - A library for making it easy to persist, load and query full structs into BadgerDB, using an ownership hierarchy model.
 * [LLS](https://github.com/Boc-chi-no/LLS) - LLS is an efficient URL Shortener that can be used to shorten links and track link usage. Support for BadgerDB and MongoDB. Improved performance by more than 30% when using BadgerDB
 * [ActionManager](https://mftlabs.io/actionmanager) - A dynamic entity manager based on rjsf schema and badger db
+* [MightyMap](https://github.com/thisisdevelopment/mightymap) - Mightymap: Conveys both robustness and high capability, fitting for a powerful concurrent map.
 
 If you are using Badger in a project please send a pull request to add it to the list.
