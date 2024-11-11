@@ -3,6 +3,81 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.4.0] - 2024-10-26
+
+- retract v4.3.0 due to #2121 and #2113, upgrade to Go v1.23, use ristretto v2 in https://github.com/dgraph-io/badger/pull/2122
+- Allow stream custom maxsize per batch in https://github.com/dgraph-io/badger/pull/2063
+- chore(deps): bump github.com/klauspost/compress from 1.17.10 to 1.17.11 in the patch group in https://github.com/dgraph-io/badger/pull/2120
+- fix: sentinel errors should not have stack traces in https://github.com/dgraph-io/badger/pull/2042
+- chore(deps): bump the minor group with 2 updates in https://github.com/dgraph-io/badger/pull/2119
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.3.1...v4.4.0
+
+
+## [4.3.1] - 2024-10-06
+
+- chore: update docs links by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2097
+- chore(deps): bump golang.org/x/sys from 0.24.0 to 0.25.0 in the minor group by @dependabot in https://github.com/dgraph-io/badger/pull/2100
+- chore(deps): bump golang.org/x/net from 0.28.0 to 0.29.0 in the minor group by @dependabot in https://github.com/dgraph-io/badger/pull/2106
+- fix: fix reverse iterator broken by seek by @harshil-goel in https://github.com/dgraph-io/badger/pull/2109
+- chore(deps): bump github.com/klauspost/compress from 1.17.9 to 1.17.10 in the patch group by @dependabot in https://github.com/dgraph-io/badger/pull/2114
+- chore(deps): bump github.com/dgraph-io/ristretto from 0.1.2-0.20240116140435-c67e07994f91 to 1.0.0 by @dependabot in https://github.com/dgraph-io/badger/pull/2112
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.3.0...v4.3.1
+
+
+## [4.3.0] - 2024-08-29
+
+> **Warning**
+> The tag v4.3.0 has been retracted due to an issue go.sum.
+> Use v4.3.1 (see #2121 and #2113)
+
+### Fixes
+- chore(changelog): add a missed entry in CHANGELOG for v4.2.0 by @mangalaman93 in https://github.com/dgraph-io/badger/pull/1988
+- update README with project KVS using badger by @tauraamui in https://github.com/dgraph-io/badger/pull/1989
+- fix edge case for watermark when index is zero by @mangalaman93 in https://github.com/dgraph-io/badger/pull/1999
+- upgrade spf13/cobra to version v1.7.0 by @mangalaman93 in https://github.com/dgraph-io/badger/pull/2001
+- chore: update readme by @joshua-goldstein in https://github.com/dgraph-io/badger/pull/2011
+- perf: upgrade compress package test and benchmark.  by @siddhant2001 in https://github.com/dgraph-io/badger/pull/2009
+- fix(Transactions): Fix resource consumption on empty write transaction by @Zach-Johnson in https://github.com/dgraph-io/badger/pull/2018
+- chore(deps): bump golang.org/x/net from 0.7.0 to 0.17.0 by @dependabot in https://github.com/dgraph-io/badger/pull/2017
+- perf(compactor): optimize allocations: use buffer for priorities by @deff7 in https://github.com/dgraph-io/badger/pull/2006
+- fix(Transaction): discard empty transactions on CommitWith  by @Wondertan in https://github.com/dgraph-io/badger/pull/2031
+- fix(levelHandler): use lock for levelHandler sort tables instead of rlock by @xgzlucario in https://github.com/dgraph-io/badger/pull/2034
+- Docs: update README with project LLS using badger by @Boc-chi-no in https://github.com/dgraph-io/badger/pull/2032
+- chore: MaxTableSize has been renamed to BaseTableSize by @mitar in https://github.com/dgraph-io/badger/pull/2038
+- Update CODEOWNERS by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2043
+- Chore(): add Stale Action by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2070
+- Update ristretto and refactor for use of generics by @paralin in https://github.com/dgraph-io/badger/pull/2047
+- chore: Remove obsolete comment by @mitar in https://github.com/dgraph-io/badger/pull/2039
+- chore(Docs): Update jQuery 3.2.1 to 3.7.1 by @kokizzu in https://github.com/dgraph-io/badger/pull/2023
+- chore(deps): bump the go_modules group with 3 updates by @dependabot in https://github.com/dgraph-io/badger/pull/2074
+- docs(): update docs path by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2076
+- perf: fix operation in seek by @harshil-goel in https://github.com/dgraph-io/badger/pull/2077
+- Add lakeFS to README.md by @N-o-Z in https://github.com/dgraph-io/badger/pull/2078
+- chore(): add Dependabot by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2080
+- chore(deps): bump golangci/golangci-lint-action from 4 to 6 by @dependabot in https://github.com/dgraph-io/badger/pull/2083
+- chore(deps): bump actions/upload-artifact from 3 to 4 by @dependabot in https://github.com/dgraph-io/badger/pull/2081
+- chore(deps): bump github/codeql-action from 2 to 3 by @dependabot in https://github.com/dgraph-io/badger/pull/2082
+- chore(deps): bump the minor group with 7 updates by @dependabot in https://github.com/dgraph-io/badger/pull/2089
+- Action Manager by @madhu72 in https://github.com/dgraph-io/badger/pull/2050
+- chore(deps): bump golang.org/x/sys from 0.23.0 to 0.24.0 in the minor group by @dependabot in https://github.com/dgraph-io/badger/pull/2091
+- chore(deps): bump github.com/golang/protobuf from 1.5.3 to 1.5.4 in the patch group by @dependabot in https://github.com/dgraph-io/badger/pull/2090
+- chore: fix some comments by @dufucun in https://github.com/dgraph-io/badger/pull/2092
+- chore(deps): bump github.com/google/flatbuffers from 1.12.1 to 24.3.25+incompatible by @dependabot in https://github.com/dgraph-io/badger/pull/2084
+
+### CI
+- ci: change cron frequency to fix ghost jobs by @joshua-goldstein in https://github.com/dgraph-io/badger/pull/2010
+- fix(CI): Update to pull_request trigger by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2056
+- ci/cd optimization by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2051
+- fix(cd): fixed cd pipeline by @harshil-goel in https://github.com/dgraph-io/badger/pull/2093
+- fix(cd): change name by @harshil-goel in https://github.com/dgraph-io/badger/pull/2094
+- fix(cd): added more debug things to cd by @harshil-goel in https://github.com/dgraph-io/badger/pull/2095
+- fix(cd): removing some debug items by @harshil-goel in https://github.com/dgraph-io/badger/pull/2096
+
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.2.0...v4.3.0
+
 ## [4.2.0] - 2023-08-03
 
 ### Breaking
@@ -34,9 +109,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - chore(ci): split off coverage workflow (#1944)
 - chore(ci): adding trivy scanning workflow (#1925)
 
+
 ## [4.1.0] - 2023-03-30
 
-This release adds support for incremental stream writer.  We also do some cleanup in the docs 
+This release adds support for incremental stream writer.  We also do some cleanup in the docs
 and resolve some CI issues for community PR's.  We resolve high and medium CVE's and fix
 [#1833](https://github.com/dgraph-io/badger/issues/1833).
 
@@ -73,6 +149,7 @@ and resolve some CI issues for community PR's.  We resolve high and medium CVE's
 - chore(memtable): refactor code for memtable flush (#1866)
 - resolve coveralls issue for community PR's (#1892, #1894, #1896)
 
+
 ## [4.0.1] - 2023-02-28
 
 We issue a follow up release in order to resolve a bug in subscriber.  We also generate updated protobufs for Badger v4.
@@ -84,6 +161,7 @@ We issue a follow up release in order to resolve a bug in subscriber.  We also g
 ### Chores
   - chore(cd): tag based deployments #1887
   - chore(ci): fail fast when testing #1890
+
 
 ## [4.0.0] - 2023-02-27
 
@@ -101,18 +179,20 @@ to understand when breaking API and data format changes are made.
 ### Fixed
 - fix: update maxHeaderSize #1877
 - feat(externalMagic): Introduce external magic number (#1745) #1852
-- fix(bench): bring in benchmark fixes from main #1863 
+- fix(bench): bring in benchmark fixes from main #1863
 
 ### Chores
-- upgrade go to 1.19 #1868 
-- enable linters (gosimple, govet, lll, unused, staticcheck, errcheck, ineffassign, gofmt) #1871 #1870 #1876 
-- remove dependency on io/ioutil #1879 
+- upgrade go to 1.19 #1868
+- enable linters (gosimple, govet, lll, unused, staticcheck, errcheck, ineffassign, gofmt) #1871 #1870 #1876
+- remove dependency on io/ioutil #1879
 - various doc and comment fixes #1857
 - moving from CalVer to SemVer
+
 
 ## [3.2103.5] - 2022-12-15
 
 We release Badger CLI tool binaries for amd64 and now arm64. This release does not involve any core code changes to Badger. We add a CD job for building Badger for arm64.
+
 
 ## [3.2103.4] - 2022-11-04
 
@@ -505,17 +585,17 @@ This sections lists the changes which were reverted because of non-reproducible 
 - Improve write stalling on level 0 and 1. (#1186)
 - Disable compression and set ZSTD Compression Level to 1. (#1191)
 
-## [2.0.1] - 2020-01-02 
+## [2.0.1] - 2020-01-02
 
 ### New APIs
 
 - badger.Options
   - WithInMemory (f5b6321)
   - WithZSTDCompressionLevel (3eb4e72)
-  
+
 - Badger.TableInfo
   - EstimatedSz (f46f8ea)
-  
+
 ### Features
 
 - Introduce in-memory mode in badger. (#1113)
@@ -528,12 +608,12 @@ This sections lists the changes which were reverted because of non-reproducible 
 - Fix windows dataloss issue. (#1134)
 - Fix VerifyValueChecksum checks. (#1138)
 - Fix encryption in stream writer. (#1146)
-- Fix segmentation fault in vlog.Read. (header.Decode) (#1150) 
+- Fix segmentation fault in vlog.Read. (header.Decode) (#1150)
 - Fix merge iterator duplicates issue. (#1157)
 
 ### Performance
 
-- Set level 15 as default compression level in Zstd. (#1111) 
+- Set level 15 as default compression level in Zstd. (#1111)
 - Optimize createTable in stream_writer.go. (#1132)
 
 ## [2.0.0] - 2019-11-12
@@ -555,7 +635,7 @@ This sections lists the changes which were reverted because of non-reproducible 
   - WithEncryptionKey (a425b0e)
   - WithEncryptionKeyRotationDuration (a425b0e)
   - WithChecksumVerificationMode (7b4083d)
-  
+
 ### Features
 
 - Data cache to speed up lookups and iterations. (#1066)
@@ -635,7 +715,7 @@ _Note_: The hashes in parentheses correspond to the commits that impacted the gi
   - NewEntry
   - WithMeta
   - WithDiscard
-  - WithTTL 
+  - WithTTL
 
 - badger.Item
   - KeySize (fd59907)
