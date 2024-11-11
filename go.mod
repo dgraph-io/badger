@@ -1,10 +1,12 @@
 module github.com/dgraph-io/badger/v4
 
-go 1.23
+go 1.21
+
+toolchain go1.23.2
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/dgraph-io/ristretto/v2 v2.0.0-alpha
+	github.com/dgraph-io/ristretto/v2 v2.0.0-rc1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.4
