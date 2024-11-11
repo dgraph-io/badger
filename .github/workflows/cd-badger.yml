@@ -32,7 +32,7 @@ jobs:
           echo "making a new release for "$BADGER_RELEASE_VERSION
           echo "BADGER_RELEASE_VERSION=$BADGER_RELEASE_VERSION" >> $GITHUB_ENV
       - name: Fetch dependencies
-        run: sudo apt-get -y install build-essential
+        run: sudo apt-get update && sudo apt-get -y install build-essential
       - name: Build badger linux/amd64
         run: make badger
       - name: Generate SHA for Linux Build
