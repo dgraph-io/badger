@@ -14,7 +14,7 @@ require (
 	github.com/klauspost/compress v1.17.11
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.31.0
 	golang.org/x/sys v0.27.0
