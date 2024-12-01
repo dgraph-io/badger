@@ -17,15 +17,10 @@ jobs:
       - uses: actions/checkout@v4 # checkout merge commit
         with:
           ref: "refs/pull/${{ github.event.number }}/merge"
-      - name: Get Go Version
-        run: |
-          #!/bin/bash
-          GOVERSION=$({ [ -f .go-version ] && cat .go-version; })
-          echo "GOVERSION=$GOVERSION" >> $GITHUB_ENV
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GOVERSION }}
+          go-version-file: go.mod
       - name: Install Dependencies
         run: make dependency
       - name: Run Badger Tests
