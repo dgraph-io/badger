@@ -3,6 +3,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.5.0] - 2024-11-29
+
+- fix the cd pipeline by @mangalaman93 in https://github.com/dgraph-io/badger/pull/2127
+- chore(deps): bump the minor group with 2 updates by @dependabot in https://github.com/dgraph-io/badger/pull/2128
+- chore(deps): bump github.com/stretchr/testify from 1.9.0 to 1.10.0 in the minor group by @dependabot in https://github.com/dgraph-io/badger/pull/2130
+- upgrade protobuf library by @shivaji-kharse in https://github.com/dgraph-io/badger/pull/2131
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.4.0...v4.5.0
+
+
 ## [4.4.0] - 2024-10-26
 
 - retract v4.3.0 due to #2121 and #2113, upgrade to Go v1.23, use ristretto v2 in https://github.com/dgraph-io/badger/pull/2122
