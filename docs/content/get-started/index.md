@@ -431,6 +431,89 @@ db.View(func(txn *badger.Txn) error {
 })
 ```
 
+### Possible pagination implementation using Prefix scans
+
+Considering that iteration happens in **byte-wise lexicographical sorting** order,
+it's possible to create a sorting-sensitive key. For example, a simple blog post 
+key might look like:`feed:userUuid:timestamp:postUuid`. Here, the `timestamp` part 
+of the key is treated as an attribute, and items will be stored in the corresponding order:
+
+| Order   ASC | Key                                                           | 
+|:-----------:|:-------------------------------------------------------------| 
+|      1      | feed:tQpnEDVRoCxTFQDvyQEzdo:1733127889:tQpnEDVRoCxTFQDvyQEzdo | 
+|      2      | feed:tQpnEDVRoCxTFQDvyQEzdo:1733127533:1Mryrou1xoekEaxzrFiHwL |  
+|      3      | feed:tQpnEDVRoCxTFQDvyQEzdo:1733127486:pprRrNL2WP4yfVXsSNBSx6 |    
+
+It is important to properly configure keys for lexicographical sorting to avoid 
+incorrect ordering.
+
+A **prefix scan** through the keys above can be achieved using the prefix 
+`feed:tQpnEDVRoCxTFQDvyQEzdo`. All matching keys will be returned, sorted by `timestamp`.  
+For the example above, sorting can be done in ascending or descending order based on 
+`timestamp` or `reversed timestamp` as needed:
+
+```go
+reversedTimestamp := math.MaxInt64-time.Now().Unix()
+```
+
+This makes it possible to implement simple pagination by using a limit for 
+the number of keys and a cursor (the last key from the previous iteration) to 
+identify where to resume.
+
+```go
+// startCursor may look like 'feed:tQpnEDVRoCxTFQDvyQEzdo:1733127486'. 
+// A prefix scan with this cursor will locate the specific key where 
+// the previous iteration stopped.
+err = db.badger.View(func(txn *badger.Txn) error {
+        it := txn.NewIterator(opts)
+        defer it.Close()
+
+        // Prefix example 'feed:tQpnEDVRoCxTFQDvyQEzdo'
+        // if no cursor provided prefix scan starts from the beginning
+        p := prefix
+        if startCursor != nil { 
+             p = startCursor
+        }
+        iterNum := 0 // Tracks the number of iterations to enforce the limit.
+        for it.Seek(p); it.ValidForPrefix(p); it.Next() {
+            // The method it.ValidForPrefix ensures that iteration continues 
+            // as long as keys match the prefix. 
+            // For example, if p = 'feed:tQpnEDVRoCxTFQDvyQEzdo:1733127486', 
+            // it matches keys like 
+            // 'feed:tQpnEDVRoCxTFQDvyQEzdo:1733127889:pprRrNL2WP4yfVXsSNBSx6'.
+			
+            // Once the starting point for iteration is found, revert the prefix 
+            // back to 'feed:tQpnEDVRoCxTFQDvyQEzdo' to continue iterating sequentially.
+            // Otherwise, iteration would stop after a single prefix-key match.
+            p = prefix 
+			
+            item := it.Item()
+            key := string(item.Key())
+
+            if iterNum > limit { // Limit reached.
+                nextCursor = key // Save the next cursor for future iterations.
+                return nil
+            }
+            iterNum++ // Increment iteration count.
+
+            err := item.Value(func(v []byte) error {
+                fmt.Printf("key=%s, value=%s\n", k, v)
+                return nil
+            })
+            if err != nil {
+                return err
+            }
+        }
+        // If the number of iterations is less than the limit, 
+        // it means there are no more items for the prefix.
+        if iterNum < limit {
+            nextCursor = ""
+        }
+        return nil
+    })
+return nextCursor, err
+```
+
 ### Key-only iteration
 Badger supports a unique mode of iteration called _key-only_ iteration. It is
 several order of magnitudes faster than regular iteration, because it involves
