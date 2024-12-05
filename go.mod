@@ -15,8 +15,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.31.0
-	golang.org/x/sys v0.27.0
-	google.golang.org/protobuf v1.33.0
+	golang.org/x/sys v0.28.0
+	google.golang.org/protobuf v1.35.2
 )
 
 require (
