@@ -6,6 +6,7 @@
 [![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
 [![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
 [![ci-golang-lint](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml)
+[![Gurubase](https://img.shields.io/badge/Gurubase-Ask%20BadgerDB%20Guru-006BFF)](https://gurubase.io/g/badgerdb)
 
 
 ![Badger mascot](images/diggy-shadow.png)
