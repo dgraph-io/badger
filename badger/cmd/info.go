@@ -305,7 +305,7 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	}
 	fmt.Println()
 	fmt.Printf("Total Index Size: %s\n", hbytes(int64(totalIndex)))
-	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalIndex)))
+	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalBloomFilter)))
 	fmt.Printf("Mean Compression Ratio: %.2f\n", totalCompressionRatio/float64(len(tables)))
 	fmt.Println()
 }
