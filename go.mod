@@ -16,7 +16,7 @@ require (
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.34.0
 	golang.org/x/sys v0.29.0
-	google.golang.org/protobuf v1.36.1
+	google.golang.org/protobuf v1.36.2
 )
 
 require (
