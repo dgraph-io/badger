@@ -173,17 +173,21 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	it := txn.NewIterator(iopt)
 	defer it.Close()
 
-	totalKeys := 0
+	var totalKeys, totalSize int64
 	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
-		if err := printKey(item, false); err != nil {
+		itemSize, err := printKeyReturnSize(item, false)
+		if err != nil {
 			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
+
 		totalKeys++
+		totalSize += itemSize
 	}
 	fmt.Print("\n[Summary]\n")
 	fmt.Println("Total Number of keys:", totalKeys)
+	fmt.Println("Total Size of key-value pairs:", totalSize)
 	return nil
 
 }
@@ -209,7 +213,7 @@ func lookup(db *badger.DB) error {
 	}
 	fmt.Println()
 	item := itr.Item()
-	if err := printKey(item, true); err != nil {
+	if _, err := printKeyReturnSize(item, true); err != nil {
 		return y.Wrapf(err, "failed to print information about key: %x(%d)",
 			item.Key(), item.Version())
 	}
@@ -224,7 +228,7 @@ func lookup(db *badger.DB) error {
 		if !bytes.Equal(key, item.Key()) {
 			break
 		}
-		if err := printKey(item, true); err != nil {
+		if _, err := printKeyReturnSize(item, true); err != nil {
 			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
@@ -232,11 +236,12 @@ func lookup(db *badger.DB) error {
 	return nil
 }
 
-func printKey(item *badger.Item, showValue bool) error {
+func printKeyReturnSize(item *badger.Item, showValue bool) (int64, error) {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "Key: %x\tversion: %d", item.Key(), item.Version())
+	size := item.EstimatedSize()
 	if opt.itemMeta {
-		fmt.Fprintf(&buf, "\tsize: %d\tmeta: b%04b", item.EstimatedSize(), item.UserMeta())
+		fmt.Fprintf(&buf, "\tsize: %d\tmeta: b%04b", size, item.UserMeta())
 	}
 	if item.IsDeletedOrExpired() {
 		buf.WriteString("\t{deleted}")
@@ -247,13 +252,13 @@ func printKey(item *badger.Item, showValue bool) error {
 	if showValue {
 		val, err := item.ValueCopy(nil)
 		if err != nil {
-			return y.Wrapf(err,
+			return size, y.Wrapf(err,
 				"failed to copy value of the key: %x(%d)", item.Key(), item.Version())
 		}
 		fmt.Fprintf(&buf, "\n\tvalue: %v", val)
 	}
 	fmt.Println(buf.String())
-	return nil
+	return size, nil
 }
 
 func hbytes(sz int64) string {
