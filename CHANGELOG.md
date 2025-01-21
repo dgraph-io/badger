@@ -3,6 +3,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.5.1] - 2025-01-21
+
+- chore(deps): bump google.golang.org/protobuf from 1.36.2 to 1.36.3 in the patch group (#2150)
+- bump github.com/dgraph-io/ristretto/v2 from 2.0.1 to 2.1.0 in the minor group (#2151)
+- feat(info): print total size of listed keys (#2149)
+- chore(deps): bump google.golang.org/protobuf from 1.36.1 to 1.36.2 in the patch group (#2146)
+- chore(deps): bump the minor group with 2 updates (#2147)
+- fix(info): print Total BloomFilter Size with totalBloomFilter instead of totalIndex (#2145)
+- chore(deps): bump the minor group with 2 updates (#2141)
+- chore(deps): bump google.golang.org/protobuf from 1.36.0 to 1.36.1 in the patch group (#2140)
+- chore(deps): bump google.golang.org/protobuf from 1.35.2 to 1.36.0 in the minor group (#2139)
+- chore(deps): bump github.com/dgraph-io/ristretto/v2 from 2.0.0 to 2.0.1 in the patch group (#2136)
+- chore(deps): bump golang.org/x/net from 0.31.0 to 0.32.0 in the minor group (#2137)
+- chore(deps): bump the minor group with 2 updates (#2135)
+- docs: Add pagination explanation to docs (#2134)
+- Fix build for GOARCH=wasm with GOOS=js or GOOS=wasip1 (#2048)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.5.0...v4.5.1
+
 ## [4.5.0] - 2024-11-29
 
 - fix the cd pipeline by @mangalaman93 in https://github.com/dgraph-io/badger/pull/2127
