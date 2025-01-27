@@ -99,7 +99,6 @@ write_coverage() {
       cat cover_tmp.out >> cover.out && rm cover_tmp.out
     fi
   fi
-  
 }
 
 # parallel tests currently not working
