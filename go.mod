@@ -8,7 +8,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgraph-io/ristretto/v2 v2.1.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/google/flatbuffers v25.1.21+incompatible
+	github.com/google/flatbuffers v25.1.24+incompatible
 	github.com/klauspost/compress v1.17.11
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
@@ -16,7 +16,7 @@ require (
 	go.opencensus.io v0.24.0
 	golang.org/x/net v0.34.0
 	golang.org/x/sys v0.29.0
-	google.golang.org/protobuf v1.36.3
+	google.golang.org/protobuf v1.36.4
 )
 
 require (
