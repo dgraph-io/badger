@@ -571,7 +571,7 @@ func TestIngest(t *testing.T) {
 	ts := uint64(0)
 
 	for totalBytes < totalDataSize {
-		fmt.Println(ts, totalBytes)
+		fmt.Println(ts, totalBytes, float64(totalBytes)/float64(totalDataSize), time.Since(startTime))
 		ts += 1
 		var wg sync.WaitGroup
 		txn := db.NewTransactionAt(math.MaxUint64, true)
@@ -582,6 +582,9 @@ func TestIngest(t *testing.T) {
 			totalBytes += uint64(len(key) + len(value))
 			if err := txn.Set([]byte(key), value); err != nil {
 				log.Fatalf("Failed to write to Badger: %v", err)
+			}
+			if txn.skiplist.MemSize() >= opt.MemTableSize {
+				break
 			}
 		}
 		wg.Add(1)
