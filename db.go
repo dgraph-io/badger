@@ -897,9 +897,6 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist) error {
 		panic("Handover Skiplist is only available in managed mode.")
 	}
 
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
 	mt := &memTable{sl: skl}
 	db.flushChan <- mt
 	db.imm = append(db.imm, mt)
