@@ -575,6 +575,7 @@ func TestIngest(t *testing.T) {
 		ts += 1
 		var wg sync.WaitGroup
 		txn := db.NewTransactionAt(math.MaxUint64, true)
+		txn.SetCommitTs(ts)
 		for i := 0; i < batchSize && totalBytes < totalDataSize; i++ {
 			key := predicates[totalBytes%numPredicates] + randomUID()
 			value := randomValue()

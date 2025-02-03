@@ -21,13 +21,12 @@ import (
 	"context"
 	"encoding/hex"
 	"math"
-	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v4/skl"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2/z"
 )
@@ -259,88 +258,12 @@ type Txn struct {
 	conflictKeys map[uint64]struct{}
 	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
-	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
-	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
+	skiplist *skl.Skiplist
 
 	numIterators atomic.Int32
 	discarded    bool
 	doneRead     bool
 	update       bool // update is used to conditionally keep track of reads.
-}
-
-type pendingWritesIterator struct {
-	entries  []*Entry
-	nextIdx  int
-	readTs   uint64
-	reversed bool
-}
-
-func (pi *pendingWritesIterator) Next() {
-	pi.nextIdx++
-}
-
-func (pi *pendingWritesIterator) Rewind() {
-	pi.nextIdx = 0
-}
-
-func (pi *pendingWritesIterator) Seek(key []byte) {
-	key = y.ParseKey(key)
-	pi.nextIdx = sort.Search(len(pi.entries), func(idx int) bool {
-		cmp := bytes.Compare(pi.entries[idx].Key, key)
-		if !pi.reversed {
-			return cmp >= 0
-		}
-		return cmp <= 0
-	})
-}
-
-func (pi *pendingWritesIterator) Key() []byte {
-	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
-	return y.KeyWithTs(entry.Key, pi.readTs)
-}
-
-func (pi *pendingWritesIterator) Value() y.ValueStruct {
-	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
-	return y.ValueStruct{
-		Value:     entry.Value,
-		Meta:      entry.meta,
-		UserMeta:  entry.UserMeta,
-		ExpiresAt: entry.ExpiresAt,
-		Version:   pi.readTs,
-	}
-}
-
-func (pi *pendingWritesIterator) Valid() bool {
-	return pi.nextIdx < len(pi.entries)
-}
-
-func (pi *pendingWritesIterator) Close() error {
-	return nil
-}
-
-func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
-	if !txn.update || len(txn.pendingWrites) == 0 {
-		return nil
-	}
-	entries := make([]*Entry, 0, len(txn.pendingWrites))
-	for _, e := range txn.pendingWrites {
-		entries = append(entries, e)
-	}
-	// Number of pending writes per transaction shouldn't be too big in general.
-	sort.Slice(entries, func(i, j int) bool {
-		cmp := bytes.Compare(entries[i].Key, entries[j].Key)
-		if !reversed {
-			return cmp < 0
-		}
-		return cmp > 0
-	})
-	return &pendingWritesIterator{
-		readTs:   txn.readTs,
-		entries:  entries,
-		reversed: reversed,
-	}
 }
 
 func (txn *Txn) checkSize(e *Entry) error {
@@ -399,10 +322,17 @@ func (txn *Txn) modify(e *Entry) error {
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
 	// same versions, we will overwrite the existing entry.
-	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
-		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
-	}
-	txn.pendingWrites[string(e.Key)] = e
+	txn.skiplist.Put(e.Key, y.ValueStruct{
+		Value:   e.Value,
+		Version: txn.commitTs,
+		// Ensure value pointer flag is removed. Otherwise, the value will fail
+		// to be retrieved during iterator prefetch. `bitValuePointer` is only
+		// known to be set in write to LSM when the entry is loaded from a backup
+		// with lower ValueThreshold and its value was stored in the value log.
+		Meta:      e.meta &^ bitValuePointer,
+		UserMeta:  e.UserMeta,
+		ExpiresAt: e.ExpiresAt,
+	})
 	return nil
 }
 
@@ -455,12 +385,13 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 
 	item = new(Item)
 	if txn.update {
-		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
-			if isDeletedOrExpired(e.meta, e.ExpiresAt) {
+		e := txn.skiplist.Get(key)
+		if e.Version != 0 {
+			if isDeletedOrExpired(e.Meta, e.ExpiresAt) {
 				return nil, ErrKeyNotFound
 			}
 			// Fulfill from cache.
-			item.meta = e.meta
+			item.meta = e.Meta
 			item.val = e.Value
 			item.userMeta = e.UserMeta
 			item.key = key
@@ -530,91 +461,12 @@ func (txn *Txn) Discard() {
 }
 
 func (txn *Txn) commitAndSend() (func() error, error) {
-	orc := txn.db.orc
-	// Ensure that the order in which we get the commit timestamp is the same as
-	// the order in which we push these updates to the write channel. So, we
-	// acquire a writeChLock before getting a commit timestamp, and only release
-	// it after pushing the entries to it.
-	orc.writeChLock.Lock()
-	defer orc.writeChLock.Unlock()
+	txn.db.HandoverSkiplist(txn.skiplist)
+	return func() error { return nil }, nil
+}
 
-	commitTs, conflict := orc.newCommitTs(txn)
-	if conflict {
-		return nil, ErrConflict
-	}
-
-	keepTogether := true
-	setVersion := func(e *Entry) {
-		if e.version == 0 {
-			e.version = commitTs
-		} else {
-			keepTogether = false
-		}
-	}
-	for _, e := range txn.pendingWrites {
-		setVersion(e)
-	}
-	// The duplicateWrites slice will be non-empty only if there are duplicate
-	// entries with different versions.
-	for _, e := range txn.duplicateWrites {
-		setVersion(e)
-	}
-
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
-
-	processEntry := func(e *Entry) {
-		// Suffix the keys with commit ts, so the key versions are sorted in
-		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, e.version)
-		// Add bitTxn only if these entries are part of a transaction. We
-		// support SetEntryAt(..) in managed mode which means a single
-		// transaction can have entries with different timestamps. If entries
-		// in a single transaction have different timestamps, we don't add the
-		// transaction markers.
-		if keepTogether {
-			e.meta |= bitTxn
-		}
-		entries = append(entries, e)
-	}
-
-	// The following debug information is what led to determining the cause of
-	// bank txn violation bug, and it took a whole bunch of effort to narrow it
-	// down to here. So, keep this around for at least a couple of months.
-	// var b strings.Builder
-	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
-	for _, e := range txn.pendingWrites {
-		processEntry(e)
-	}
-	for _, e := range txn.duplicateWrites {
-		processEntry(e)
-	}
-
-	if keepTogether {
-		// CommitTs should not be zero if we're inserting transaction markers.
-		y.AssertTrue(commitTs != 0)
-		e := &Entry{
-			Key:   y.KeyWithTs(txnKey, commitTs),
-			Value: []byte(strconv.FormatUint(commitTs, 10)),
-			meta:  bitFinTxn,
-		}
-		entries = append(entries, e)
-	}
-
-	req, err := txn.db.sendToWriteCh(entries)
-	if err != nil {
-		orc.doneCommit(commitTs)
-		return nil, err
-	}
-	ret := func() error {
-		err := req.Wait()
-		// Wait before marking commitTs as done.
-		// We can't defer doneCommit above, because it is being called from a
-		// callback here.
-		orc.doneCommit(commitTs)
-		return err
-	}
-	return ret, nil
+func (txn *Txn) SetCommitTs(ts uint64) {
+	txn.commitTs = ts
 }
 
 func (txn *Txn) commitPrecheck() error {
@@ -622,11 +474,6 @@ func (txn *Txn) commitPrecheck() error {
 		return errors.New("Trying to commit a discarded txn")
 	}
 	keepTogether := true
-	for _, e := range txn.pendingWrites {
-		if e.version != 0 {
-			keepTogether = false
-		}
-	}
 
 	// If keepTogether is True, it implies transaction markers will be added.
 	// In that case, commitTs should not be never be zero. This might happen if
@@ -660,7 +507,7 @@ func (txn *Txn) commitPrecheck() error {
 func (txn *Txn) Commit() error {
 	// txn.conflictKeys can be zero if conflict detection is turned off. So we
 	// should check txn.pendingWrites.
-	if len(txn.pendingWrites) == 0 {
+	if txn.skiplist.Empty() {
 		// Discard the transaction so that the read is marked done.
 		txn.Discard()
 		return nil
@@ -713,7 +560,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	if len(txn.pendingWrites) == 0 {
+	if txn.skiplist.Empty() {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
@@ -785,7 +632,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		if db.opt.DetectConflicts {
 			txn.conflictKeys = make(map[uint64]struct{})
 		}
-		txn.pendingWrites = make(map[string]*Entry)
+		txn.skiplist = skl.NewSkiplist(arenaSize(db.opt))
 	}
 	if !isManaged {
 		txn.readTs = db.orc.readTs()

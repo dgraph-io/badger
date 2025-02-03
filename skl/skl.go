@@ -432,6 +432,8 @@ func (s *Iterator) ValueUint64() uint64 {
 	return s.n.value.Load()
 }
 
+func (s *Iterator) Rewind() {}
+
 // Next advances to the next position.
 func (s *Iterator) Next() {
 	y.AssertTrue(s.Valid())

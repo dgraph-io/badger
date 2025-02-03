@@ -892,6 +892,24 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 
+func (db *DB) HandoverSkiplist(skl *skl.Skiplist) error {
+	if !db.opt.managedTxns {
+		panic("Handover Skiplist is only available in managed mode.")
+	}
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	mt := &memTable{sl: skl}
+
+	if err := db.handleMemTableFlush(mt, nil); err != nil {
+		// Encountered error. Retry indefinitely.
+		db.opt.Errorf("error flushing memtable to disk: %v, retrying", err)
+		return err
+	}
+
+	return nil
+}
+
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	if db.blockWrites.Load() == 1 {
 		return nil, ErrBlockedWrites
