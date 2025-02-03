@@ -896,17 +896,13 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist) error {
 	if !db.opt.managedTxns {
 		panic("Handover Skiplist is only available in managed mode.")
 	}
+
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
 	mt := &memTable{sl: skl}
-
-	if err := db.handleMemTableFlush(mt, nil); err != nil {
-		// Encountered error. Retry indefinitely.
-		db.opt.Errorf("error flushing memtable to disk: %v, retrying", err)
-		return err
-	}
-
+	db.flushChan <- mt
+	db.imm = append(db.imm, mt)
 	return nil
 }
 
