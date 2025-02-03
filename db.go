@@ -1124,6 +1124,7 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 	defer lc.Done()
 
 	for mt := range db.flushChan {
+		fmt.Println("GOT MEMTABLE TO FLUSH")
 		if mt == nil {
 			continue
 		}
@@ -1132,6 +1133,7 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 			if err := db.handleMemTableFlush(mt, nil); err != nil {
 				// Encountered error. Retry indefinitely.
 				db.opt.Errorf("error flushing memtable to disk: %v, retrying", err)
+				fmt.Println("ERROR", err)
 				time.Sleep(time.Second)
 				continue
 			}
