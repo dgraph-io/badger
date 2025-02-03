@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -508,6 +510,93 @@ func dirSize(path string) (int64, error) {
 		return err
 	})
 	return (size >> 20), err
+}
+
+const (
+	totalDataSize   = 5 * 1024 * 1024 * 1024 // 5GB
+	smallValueSize  = 50
+	largeValueSize  = 1000
+	smallValueRatio = 0.8
+	numPredicates   = 10
+	uidLength       = 10
+)
+
+func randomBytes(n int) []byte {
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Fatalf("Failed to generate random bytes: %v", err)
+	}
+	return b
+}
+
+func randomHex(n int) string {
+	return hex.EncodeToString(randomBytes(n))[:n]
+}
+
+func randomUID() string {
+	num := rand.Uint64()
+	return fmt.Sprintf("%010d", num)
+}
+
+func randomValue() []byte {
+	if rand.Float64() < smallValueRatio {
+		return randomBytes(smallValueSize)
+	}
+	return randomBytes(largeValueSize)
+}
+
+func TestIngest(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir).WithSyncWrites(false)
+	opt.DetectConflicts = false
+	opt.RemoveWal = true
+	db, err := OpenManaged(opt)
+	require.NoError(t, err)
+	defer db.Close()
+
+	predicates := make([]string, numPredicates)
+	for i := 0; i < numPredicates; i++ {
+		predicates[i] = randomHex(20)
+	}
+
+	startTime := time.Now()
+	var totalBytes uint64
+	batchCount := 0
+	batchSize := 5000
+
+	ts := uint64(0)
+
+	for totalBytes < totalDataSize {
+		fmt.Println(ts, totalBytes)
+		ts += 1
+		var wg sync.WaitGroup
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		for i := 0; i < batchSize && totalBytes < totalDataSize; i++ {
+			key := predicates[totalBytes%numPredicates] + randomUID()
+			value := randomValue()
+			totalBytes += uint64(len(key) + len(value))
+			if err := txn.Set([]byte(key), value); err != nil {
+				log.Fatalf("Failed to write to Badger: %v", err)
+			}
+		}
+		wg.Add(1)
+		if err := txn.CommitAt(ts, func(err error) {
+			wg.Done()
+		}); err != nil {
+			log.Fatalf("Failed to commit transaction: %v", err)
+		}
+		batchCount++
+		if totalBytes%(100*1024*1024) == 0 { // Print progress every 100MB
+			log.Printf("Ingested: %.2f GB", float64(totalBytes)/(1024*1024*1024))
+		}
+		wg.Wait()
+	}
+	duration := time.Since(startTime)
+	log.Printf("Total time taken: %v", duration)
 }
 
 // BenchmarkDbGrowth ensures DB does not grow with repeated adds and deletes.
@@ -1870,7 +1959,7 @@ func TestMinReadTs(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 		readTxn0 := db.NewTransaction(false)
-		require.Equal(t, uint64(10), readTxn0.readTs)
+		require.Equal(t, uint64(10), readTxn0.ReadTs)
 
 		min := db.orc.readMark.DoneUntil()
 		require.Equal(t, uint64(9), min)
