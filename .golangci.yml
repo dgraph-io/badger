@@ -15,6 +15,7 @@ linters-settings:
       - G204
       - G306
       - G404
+      - G115
 
 linters:
   disable-all: true
