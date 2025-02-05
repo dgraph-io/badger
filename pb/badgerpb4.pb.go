@@ -1,7 +1,7 @@
-/*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
- * SPDX-License-Identifier: Apache-2.0
- */
+//
+// SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+// SPDX-License-Identifier: Apache-2.0
+//
 
 // Use protos/gen.sh to generate .pb.go files.
 
