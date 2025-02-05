@@ -1,18 +1,23 @@
 name: cd-badger
+
 on:
   workflow_dispatch:
     inputs:
       releasetag:
-        description: 'releasetag'
+        description: releasetag
         required: true
         type: string
+
+permissions:
+  contents: read
+
 jobs:
   badger-build-amd64:
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: '${{ github.event.inputs.releasetag }}'
+          ref: "${{ github.event.inputs.releasetag }}"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -36,7 +41,8 @@ jobs:
       - name: Build badger linux/amd64
         run: make badger
       - name: Generate SHA for Linux Build
-        run: cd badger && sha256sum badger-linux-amd64 | cut -c-64 > badger-checksum-linux-amd64.sha256
+        run:
+          cd badger && sha256sum badger-linux-amd64 | cut -c-64 > badger-checksum-linux-amd64.sha256
       - name: Tar Archive for Linux Build
         run: cd badger && tar -zcvf badger-linux-amd64.tar.gz badger-linux-amd64
       - name: Upload Badger Binary Build Artifacts
@@ -46,12 +52,13 @@ jobs:
           path: |
             badger/badger-checksum-linux-amd64.sha256
             badger/badger-linux-amd64.tar.gz
+
   badger-build-arm64:
     runs-on: warp-ubuntu-latest-arm64-4x
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: '${{ github.event.inputs.releasetag }}'
+          ref: "${{ github.event.inputs.releasetag }}"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -75,7 +82,8 @@ jobs:
       - name: Build badger linux/arm64
         run: make badger
       - name: Generate SHA for Linux Build
-        run: cd badger && sha256sum badger-linux-arm64 | cut -c-64 > badger-checksum-linux-arm64.sha256
+        run:
+          cd badger && sha256sum badger-linux-arm64 | cut -c-64 > badger-checksum-linux-arm64.sha256
       - name: Tar Archive for Linux Build
         run: cd badger && tar -zcvf badger-linux-arm64.tar.gz badger-linux-arm64
       - name: List Artifacts

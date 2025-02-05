@@ -1,14 +1,17 @@
 name: ci-dgraph-tests
+
 on:
   push:
     paths-ignore:
-      - '**.md'
-      - '.github/*'
-      - '.github/ISSUE_TEMPLATE/*'
-      - 'docs/**'
-      - 'images/**'
+      - "**.md"
+      - docs/**
+      - images/**
     branches:
       - main
+
+permissions:
+  contents: read
+
 jobs:
   dgraph-tests:
     runs-on: warp-ubuntu-latest-x64-16x
@@ -16,7 +19,7 @@ jobs:
       - name: Checkout Dgraph repo
         uses: actions/checkout@v4
         with:
-          repository: dgraph-io/dgraph
+          repository: hypermodeinc/dgraph
           ref: main
       - name: Set up Go
         uses: actions/setup-go@v5

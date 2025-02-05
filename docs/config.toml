@@ -8,36 +8,36 @@ unsafe = true
 [markup.highlight]
 noClasses = false
 [[menu.main]]
-  name = "Home"
-  url = "/"
-  identifier = "home"
-  weight = -1
+name = "Home"
+url = "/"
+identifier = "home"
+weight = -1
 
 [[menu.main]]
-  name = "Getting Started"
-  url = "/get-started/"
-  identifier = "get-started"
-  weight = 1
+name = "Getting Started"
+url = "/get-started/"
+identifier = "get-started"
+weight = 1
 [[menu.main]]
-  name = "Resources"
-  url = "/resources/"
-  identifier = "resources"
-  weight = 2
+name = "Resources"
+url = "/resources/"
+identifier = "resources"
+weight = 2
 
 [[menu.main]]
-  name = "Design"
-  url = "/design/"
-  identifier = "design"
-  weight = 3
+name = "Design"
+url = "/design/"
+identifier = "design"
+weight = 3
 
 [[menu.main]]
-  name = "Projects using Badger"
-  url = "/projects-using-badger/"
-  identifier = "project-using-badger"
-  weight = 4
+name = "Projects using Badger"
+url = "/projects-using-badger/"
+identifier = "project-using-badger"
+weight = 4
 
 [[menu.main]]
-  name = "Frequently Asked Questions"
-  url = "/faq/"
-  identifier = "faq"
-  weight = 5
+name = "Frequently Asked Questions"
+url = "/faq/"
+identifier = "faq"
+weight = 5

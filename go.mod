@@ -2,7 +2,7 @@ module github.com/dgraph-io/badger/v4
 
 go 1.21
 
-toolchain go1.23.2
+toolchain go1.23.5
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0

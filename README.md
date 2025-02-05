@@ -2,46 +2,44 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v4.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v4)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v4)](https://goreportcard.com/report/github.com/dgraph-io/badger/v4)
-[![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
-[![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
-[![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
-[![ci-golang-lint](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-golang-lint.yml)
-
+[![Sourcegraph](https://sourcegraph.com/github.com/hypermodeinc/badger/-/badge.svg)](https://sourcegraph.com/github.com/hypermodeinc/badger?badge)
+[![ci-badger-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml)
+[![ci-badger-bank-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml)
+[![ci-golang-lint](https://github.com/hypermodeinc/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-golang-lint.yml)
 
 ![Badger mascot](images/diggy-shadow.png)
 
-BadgerDB is an embeddable, persistent and fast key-value (KV) database written
-in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
-fast, distributed graph database. It's meant to be a performant alternative to
-non-Go-based key-value stores like RocksDB.
+BadgerDB is an embeddable, persistent and fast key-value (KV) database written in pure Go. It is the
+underlying database for [Dgraph](https://dgraph.io), a fast, distributed graph database. It's meant
+to be a performant alternative to non-Go-based key-value stores like RocksDB.
 
 ## Project Status
 
-Badger is stable and is being used to serve data sets worth hundreds of
-terabytes. Badger supports concurrent ACID transactions with serializable
-snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
-8h, with `--race` flag and ensures the maintenance of transactional guarantees.
-Badger has also been tested to work with filesystem level anomalies, to ensure
-persistence and consistency. Badger is being used by a number of projects which
-includes Dgraph, Jaeger Tracing, UsenetExpress, and many more.
+Badger is stable and is being used to serve data sets worth hundreds of terabytes. Badger supports
+concurrent ACID transactions with serializable snapshot isolation (SSI) guarantees. A Jepsen-style
+bank test runs nightly for 8h, with `--race` flag and ensures the maintenance of transactional
+guarantees. Badger has also been tested to work with filesystem level anomalies, to ensure
+persistence and consistency. Badger is being used by a number of projects which includes Dgraph,
+Jaeger Tracing, UsenetExpress, and many more.
 
 The list of projects using Badger can be found [here](#projects-using-badger).
 
-Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
-with v1.0 is v1.6.0.
+Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible with v1.0 is
+v1.6.0.
 
-Badger v2.0 was released in Nov 2019 with a new storage format which won't
-be compatible with all of the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
+Badger v2.0 was released in Nov 2019 with a new storage format which won't be compatible with all of
+the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
 
-Badger v3.0 was released in January 2021.  This release improves compaction performance.
+Badger v3.0 was released in January 2021. This release improves compaction performance.
 
 Please consult the [Changelog] for more detailed information on releases.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
-[Changelog]:https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
+[Changelog]: https://github.com/hypermodeinc/badger/blob/main/CHANGELOG.md
 
 ## Table of Contents
+
 - [BadgerDB](#badgerdb)
   - [Project Status](#project-status)
   - [Table of Contents](#table-of-contents)
@@ -62,22 +60,26 @@ For more details on our version naming schema please read [Choosing a version](#
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.21 or above. Badger v3 and above needs go modules. From your project, run the following command
+
+To start using Badger, install Go 1.21 or above. Badger v3 and above needs go modules. From your
+project, run the following command
 
 ```sh
-$ go get github.com/dgraph-io/badger/v4
+go get github.com/dgraph-io/badger/v4
 ```
+
 This will retrieve the library.
 
 #### Installing Badger Command Line Tool
 
-Badger provides a CLI tool which can perform certain operations like offline backup/restore.  To install the Badger CLI,
-retrieve the repository and checkout the desired version.  Then run
+Badger provides a CLI tool which can perform certain operations like offline backup/restore. To
+install the Badger CLI, retrieve the repository and checkout the desired version. Then run
 
 ```sh
-$ cd badger
-$ go install .
+cd badger
+go install .
 ```
+
 This will install the badger command line utility into your $GOBIN path.
 
 #### Choosing a version
@@ -89,18 +91,17 @@ This is why we follow a version naming schema that differs from Semantic Version
 
 - New major versions are released when the data format on disk changes in an incompatible way.
 - New minor versions are released whenever the API changes but data compatibility is maintained.
- Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
+  Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
 - New patch versions are released when there's no changes to the data format nor the API.
 
 Following these rules:
 
 - v1.5.0 and v1.6.0 can be used on top of the same files without any concerns, as their major
- version is the same, therefore the data format on disk is compatible.
+  version is the same, therefore the data format on disk is compatible.
 - v1.6.0 and v2.0.0 are data incompatible as their major version implies, so files created with
- v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
- - v2.x.x and v3.x.x are data incompatible as their major version implies, so files created with
- v2.x.x will need to be converted into the new format before they can be used by v3.0.0.
-
+  v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
+- v2.x.x and v3.x.x are data incompatible as their major version implies, so files created with
+  v2.x.x will need to be converted into the new format before they can be used by v3.0.0.
 
 For a longer explanation on the reasons behind using a new versioning naming schema, you can read
 [VERSIONING](VERSIONING.md).
@@ -112,63 +113,66 @@ Badger Documentation is available at https://dgraph.io/docs/badger
 ## Resources
 
 ### Blog Posts
-1. [Introducing Badger: A fast key-value store written natively in
-Go](https://open.dgraph.io/post/badger/)
+
+1. [Introducing Badger: A fast key-value store written natively in Go](https://open.dgraph.io/post/badger/)
 2. [Make Badger crash resilient with ALICE](https://open.dgraph.io/post/alice/)
 3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://open.dgraph.io/post/badger-lmdb-boltdb/)
 4. [Concurrent ACID Transactions in Badger](https://open.dgraph.io/post/badger-txn/)
 
 ## Design
+
 Badger was written with these design goals in mind:
 
 - Write a key-value database in pure Go.
 - Use latest research to build the fastest KV database for data sets spanning terabytes.
 - Optimize for SSDs.
 
-Badger’s design is based on a paper titled _[WiscKey: Separating Keys from
-Values in SSD-conscious Storage][wisckey]_.
+Badger’s design is based on a paper titled _[WiscKey: Separating Keys from Values in SSD-conscious
+Storage][wisckey]_.
 
 [wisckey]: https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf
 
 ### Comparisons
-| Feature                        | Badger                                     | RocksDB                       | BoltDB    |
-| -------                        | ------                                     | -------                       | ------    |
-| Design                         | LSM tree with value log                    | LSM tree only                 | B+ tree   |
-| High Read throughput           | Yes                                        | No                            | Yes       |
-| High Write throughput          | Yes                                        | Yes                           | No        |
-| Designed for SSDs              | Yes (with latest research <sup>1</sup>)    | Not specifically <sup>2</sup> | No        |
-| Embeddable                     | Yes                                        | Yes                           | Yes       |
-| Sorted KV access               | Yes                                        | Yes                           | Yes       |
-| Pure Go (no Cgo)               | Yes                                        | No                            | Yes       |
-| Transactions                   | Yes, ACID, concurrent with SSI<sup>3</sup> | Yes (but non-ACID)            | Yes, ACID |
-| Snapshots                      | Yes                                        | Yes                           | Yes       |
-| TTL support                    | Yes                                        | Yes                           | No        |
-| 3D access (key-value-version)  | Yes<sup>4</sup>                            | No                            | No        |
 
-<sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big
-wins with separating values from keys, significantly reducing the write
-amplification compared to a typical LSM tree.
+| Feature                       | Badger                                     | RocksDB                       | BoltDB    |
+| ----------------------------- | ------------------------------------------ | ----------------------------- | --------- |
+| Design                        | LSM tree with value log                    | LSM tree only                 | B+ tree   |
+| High Read throughput          | Yes                                        | No                            | Yes       |
+| High Write throughput         | Yes                                        | Yes                           | No        |
+| Designed for SSDs             | Yes (with latest research <sup>1</sup>)    | Not specifically <sup>2</sup> | No        |
+| Embeddable                    | Yes                                        | Yes                           | Yes       |
+| Sorted KV access              | Yes                                        | Yes                           | Yes       |
+| Pure Go (no Cgo)              | Yes                                        | No                            | Yes       |
+| Transactions                  | Yes, ACID, concurrent with SSI<sup>3</sup> | Yes (but non-ACID)            | Yes, ACID |
+| Snapshots                     | Yes                                        | Yes                           | Yes       |
+| TTL support                   | Yes                                        | Yes                           | No        |
+| 3D access (key-value-version) | Yes<sup>4</sup>                            | No                            | No        |
 
-<sup>2</sup> RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
-As such RocksDB's design isn't aimed at SSDs.
+<sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big wins with separating
+values from keys, significantly reducing the write amplification compared to a typical LSM tree.
 
-<sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post [Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
+<sup>2</sup> RocksDB is an SSD optimized version of LevelDB, which was designed specifically for
+rotating disks. As such RocksDB's design isn't aimed at SSDs.
 
-<sup>4</sup> Badger provides direct access to value versions via its Iterator API.
-Users can also specify how many versions to keep per key via Options.
+<sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post
+[Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
+
+<sup>4</sup> Badger provides direct access to value versions via its Iterator API. Users can also
+specify how many versions to keep per key via Options.
 
 ### Benchmarks
-We have run comprehensive benchmarks against RocksDB, Bolt and LMDB. The
-benchmarking code, and the detailed logs for the benchmarks can be found in the
-[badger-bench] repo. More explanation, including graphs can be found the blog posts (linked
-above).
+
+We have run comprehensive benchmarks against RocksDB, Bolt and LMDB. The benchmarking code, and the
+detailed logs for the benchmarks can be found in the [badger-bench] repo. More explanation,
+including graphs can be found the blog posts (linked above).
 
 [badger-bench]: https://github.com/dgraph-io/badger-bench
 
 ## Projects Using Badger
+
 Below is a list of known projects that use Badger:
 
-* [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
+* [Dgraph](https://github.com/hypermodeinc/dgraph) - Distributed graph database.
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
 * [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
@@ -231,6 +235,8 @@ If you are using Badger in a project please send a pull request to add it to the
 If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING.md).
 
 ## Contact
-- Please use [Github issues](https://github.com/dgraph-io/badger/issues) for filing bugs.
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, discussions, and feature requests.
+
+- Please use [Github issues](https://github.com/hypermodeinc/badger/issues) for filing bugs.
+- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, discussions, and feature
+  requests.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
