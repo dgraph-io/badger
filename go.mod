@@ -1,6 +1,6 @@
 module github.com/dgraph-io/badger/v4
 
-go 1.22.11
+go 1.21
 
 toolchain go1.23.5
 
