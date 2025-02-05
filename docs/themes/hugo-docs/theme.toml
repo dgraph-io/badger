@@ -11,10 +11,10 @@ features = ["documentation"]
 min_version = 0.17
 
 [author]
-  name = "Mathieu Cornic"
-  homepage = "http://matcornic.github.io/"
+name = "Mathieu Cornic"
+homepage = "http://matcornic.github.io/"
 
 [original]
-  name = "Grav Learn"
-  homepage = "http://learn.getgrav.org/"
-  repo = "https://github.com/getgrav/grav-learn"
+name = "Grav Learn"
+homepage = "http://learn.getgrav.org/"
+repo = "https://github.com/getgrav/grav-learn"

@@ -1,17 +1,6 @@
 /*
- * Copyright 2018 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -652,7 +641,7 @@ func TestL0GCBug(t *testing.T) {
 	require.NoError(t, db2.Close())
 }
 
-// Regression test for https://github.com/dgraph-io/badger/issues/1126
+// Regression test for https://github.com/hypermodeinc/badger/issues/1126
 //
 // The test has 3 steps
 // Step 1 - Create badger data. It is necessary that the value size is

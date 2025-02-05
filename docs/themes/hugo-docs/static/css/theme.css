@@ -191,19 +191,11 @@ pre.collapsed .showmore {
   padding-bottom: 5px;
   padding-top: 26px;
   cursor: pointer;
-  background: linear-gradient(
-    180deg,
-    hsla(0, 0%, 100%, 0.1),
-    rgba(226, 226, 226, 0.72)
-  );
+  background: linear-gradient(180deg, hsla(0, 0%, 100%, 0.1), rgba(226, 226, 226, 0.72));
   color: #5a5a5a;
 }
 pre.collapsed .showmore:hover {
-  background: linear-gradient(
-    180deg,
-    hsla(0, 0%, 100%, 0.1),
-    rgba(226, 226, 226, 0.91)
-  );
+  background: linear-gradient(180deg, hsla(0, 0%, 100%, 0.1), rgba(226, 226, 226, 0.91));
   font-weight: 600;
 }
 pre.collapsed .showmore span {
@@ -695,7 +687,8 @@ section.toc .section-item {
   font-size: 1rem;
   font-weight: bold;
 }
-.landing .item h3:hover, .landing .item .cta:hover  {
+.landing .item h3:hover,
+.landing .item .cta:hover {
   text-decoration: underline;
 }
 

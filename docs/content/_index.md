@@ -82,7 +82,7 @@ non-Go-based key-value stores like RocksDB.
 
 The [Changelog] is kept fairly up-to-date with each release.
 
-[Changelog]:https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
+[Changelog]: https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
 
 ## Contribute
 
@@ -107,7 +107,8 @@ The [Changelog] is kept fairly up-to-date with each release.
 
 ## Our Community
 
-**Badger is made better every day by the growing community and the contributors all over the world.**
+**Badger is made better every day by the growing community and the contributors all over the
+world.**
 
 <section class="toc">
   <div class="container">
