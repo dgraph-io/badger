@@ -26,6 +26,7 @@ lint:
       paths:
         - "*.pb.go"
   enabled:
+    - trivy@0.59.1
     - renovate@39.161.0
     - actionlint@1.7.7
     - checkov@3.2.365
