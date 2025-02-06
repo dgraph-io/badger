@@ -3,7 +3,7 @@
 version: 0.1
 
 cli:
-  version: 1.22.9
+  version: 1.22.10
 
 # Trunk provides extensibility via plugins. (https://docs.trunk.io/plugins)
 plugins:
@@ -21,6 +21,10 @@ runtimes:
 
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
+  ignore:
+    - linters: [ALL]
+      paths:
+        - "*.pb.go"
   enabled:
     - renovate@39.161.0
     - actionlint@1.7.7
