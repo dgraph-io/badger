@@ -273,6 +273,10 @@ Below is a list of known projects that use Badger:
   local metadata KV store implementation
 - [Goptivum](https://github.com/smegg99/Goptivum) - Goptivum is a better frontend and API for the
   Vulcan Optivum schedule program
+- [ActionManager](https://mftlabs.io/actionmanager) - A dynamic entity manager based on rjsf schema
+  and badger db
+- [MightyMap](https://github.com/thisisdevelopment/mightymap) - Mightymap: Conveys both robustness
+  and high capability, fitting for a powerful concurrent map.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
