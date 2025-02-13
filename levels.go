@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	otrace "go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/table"
@@ -312,9 +314,9 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		if len(tableGroups) == 0 {
 			continue
 		}
-		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-		span.Annotatef(nil, "Compaction level: %v", l.level)
-		span.Annotatef(nil, "Drop Prefixes: %v", prefixes)
+		_, span := otel.Tracer("Badger").Start(context.Background(), "Compaction")
+		span.SetAttributes(attribute.Int("Compaction level", l.level))
+		span.SetAttributes(attribute.String("Drop Prefixes", fmt.Sprintf("%v", prefixes)))
 		defer span.End()
 		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
 		for _, operation := range tableGroups {
@@ -871,8 +873,9 @@ func (s *levelsController) compactBuildTables(
 	y.NumCompactionTablesAdd(s.kv.opt.MetricsEnabled, numTables)
 	defer y.NumCompactionTablesAdd(s.kv.opt.MetricsEnabled, -numTables)
 
-	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
-		len(topTables), len(botTables))
+	cd.span.SetAttributes(
+		attribute.Int("Top tables count", len(topTables)),
+		attribute.Int("Bottom tables clount", len(botTables)))
 
 	keepTable := func(t *table.Table) bool {
 		for _, prefix := range cd.dropPrefixes {
@@ -1025,7 +1028,7 @@ func containsAnyPrefixes(table *table.Table, listOfPrefixes [][]byte) bool {
 }
 
 type compactDef struct {
-	span *otrace.Span
+	span otrace.Span
 
 	compactorId int
 	t           targets
@@ -1512,7 +1515,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 		p.t = s.levelTargets()
 	}
 
-	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+	_, span := otel.Tracer("Badger").Start(context.Background(), "Compaction")
 	defer span.End()
 
 	cd := compactDef{
@@ -1543,7 +1546,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	span.Annotatef(nil, "Compaction: %+v", cd)
+	span.SetAttributes(attribute.String("Compaction", fmt.Sprintf("%+v", cd)))
 	if err := s.runCompactDef(id, l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)

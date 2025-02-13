@@ -17,7 +17,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	otrace "go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
@@ -166,8 +167,8 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 
 	done := lh0.tryAddLevel0Table(t1)
 	require.Equal(t, true, done)
-	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
+	_, span := otel.Tracer("Badger").Start(context.Background(), "Compaction")
+	span.SetAttributes(attribute.Int("Compaction level", lh0.level))
 	cd := compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
@@ -184,8 +185,8 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	require.NoError(t, lc.runCompactDef(-1, 0, cd))
 	span.End()
 
-	_, span = otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
+	_, span = otel.Tracer("Badger").Start(context.Background(), "Compaction")
+	span.SetAttributes(attribute.Int("Compaction level", lh0.level))
 	t2 := buildTestTable(t, "l", 2, opts)
 	defer func() { require.NoError(t, t2.DecrRef()) }()
 	done = lh0.tryAddLevel0Table(t2)
