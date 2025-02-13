@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- chore(deps): Migrate from OpenCensus to OpenTelemetry (#2169)
+
 ## [4.5.1] - 2025-01-21
 
 - chore(deps): bump google.golang.org/protobuf from 1.36.2 to 1.36.3 in the patch group (#2150)
