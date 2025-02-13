@@ -6,7 +6,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -17,8 +16,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
@@ -167,12 +164,9 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 
 	done := lh0.tryAddLevel0Table(t1)
 	require.Equal(t, true, done)
-	_, span := otel.Tracer("Badger").Start(context.Background(), "Compaction")
-	span.SetAttributes(attribute.Int("Compaction level", lh0.level))
 	cd := compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
-		span:      span,
 		t:         kv.lc.levelTargets(),
 	}
 	cd.t.baseLevel = 1
@@ -183,10 +177,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	done = lc.fillTablesL0(&cd)
 	require.Equal(t, true, done)
 	require.NoError(t, lc.runCompactDef(-1, 0, cd))
-	span.End()
 
-	_, span = otel.Tracer("Badger").Start(context.Background(), "Compaction")
-	span.SetAttributes(attribute.Int("Compaction level", lh0.level))
 	t2 := buildTestTable(t, "l", 2, opts)
 	defer func() { require.NoError(t, t2.DecrRef()) }()
 	done = lh0.tryAddLevel0Table(t2)
@@ -195,7 +186,6 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	cd = compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
-		span:      span,
 		t:         kv.lc.levelTargets(),
 	}
 	cd.t.baseLevel = 1
