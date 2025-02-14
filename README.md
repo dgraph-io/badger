@@ -108,7 +108,7 @@ For a longer explanation on the reasons behind using a new versioning naming sch
 
 ## Badger Documentation
 
-Badger Documentation is available at https://dgraph.io/docs/badger
+Badger Documentation is available at https://docs.hypermode.com/badger
 
 ## Resources
 
