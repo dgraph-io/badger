@@ -2,22 +2,22 @@ module github.com/dgraph-io/badger/v4
 
 go 1.22.12
 
-toolchain go1.23.6
+toolchain go1.24.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgraph-io/ristretto/v2 v2.1.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/google/flatbuffers v25.1.24+incompatible
+	github.com/google/flatbuffers v25.2.10+incompatible
 	github.com/klauspost/compress v1.17.11
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/contrib/zpages v0.59.0
 	go.opentelemetry.io/otel v1.34.0
-	golang.org/x/net v0.34.0
+	golang.org/x/net v0.35.0
 	golang.org/x/sys v0.30.0
-	google.golang.org/protobuf v1.36.4
+	google.golang.org/protobuf v1.36.5
 )
 
 require (
