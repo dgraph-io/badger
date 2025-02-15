@@ -334,7 +334,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 			}
 			span.SetAttributes(
 				attribute.Int("Top tables count", len(cd.top)),
-				attribute.Int("Bottom tables clount", len(cd.bot)))
+				attribute.Int("Bottom tables count", len(cd.bot)))
 			span.End()
 		}
 
@@ -1551,7 +1551,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 
 	span.SetAttributes(
 		attribute.Int("Top tables count", len(cd.top)),
-		attribute.Int("Bottom tables clount", len(cd.bot)))
+		attribute.Int("Bottom tables count", len(cd.bot)))
 
 	s.kv.opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
