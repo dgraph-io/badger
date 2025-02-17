@@ -323,7 +323,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 				dropPrefixes: prefixes,
 				t:            s.levelTargets(),
 			}
-			_, span := otel.Tracer("Badger").Start(context.TODO(), "Compaction")
+			_, span := otel.Tracer("").Start(context.TODO(), "Badger.Compaction")
 			span.SetAttributes(attribute.Int("Compaction level", l.level))
 			span.SetAttributes(attribute.String("Drop Prefixes", fmt.Sprintf("%v", prefixes)))
 			cd.t.baseLevel = l.level
@@ -1512,7 +1512,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 		p.t = s.levelTargets()
 	}
 
-	_, span := otel.Tracer("Badger").Start(context.TODO(), "Compaction")
+	_, span := otel.Tracer("").Start(context.TODO(), "Badger.Compaction")
 	defer span.End()
 
 	cd := compactDef{

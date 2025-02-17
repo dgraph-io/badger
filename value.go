@@ -1053,7 +1053,7 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 }
 
 func (vlog *valueLog) doRunGC(lf *logFile) error {
-	_, span := otel.Tracer("Badger").Start(context.TODO(), "GC")
+	_, span := otel.Tracer("").Start(context.TODO(), "Badger.GC")
 	span.SetAttributes(attribute.String("GC rewrite for", lf.path))
 	defer span.End()
 	if err := vlog.rewrite(lf); err != nil {
