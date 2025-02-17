@@ -22,7 +22,8 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-	otrace "go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2/z"
@@ -1052,8 +1053,8 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 }
 
 func (vlog *valueLog) doRunGC(lf *logFile) error {
-	_, span := otrace.StartSpan(context.Background(), "Badger.GC")
-	span.Annotatef(nil, "GC rewrite for: %v", lf.path)
+	_, span := otel.Tracer("").Start(context.TODO(), "Badger.GC")
+	span.SetAttributes(attribute.String("GC rewrite for", lf.path))
 	defer span.End()
 	if err := vlog.rewrite(lf); err != nil {
 		return err
