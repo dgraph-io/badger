@@ -1594,7 +1594,7 @@ func (s *levelsController) close() error {
 	return y.Wrap(err, "levelsController.Close")
 }
 
-func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startLevel int, done []bool) (
+func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startLevel int, keysRead []bool) (
 	[]y.ValueStruct, error) {
 	if s.kv.IsClosed() {
 		return []y.ValueStruct{}, ErrDBClosed
@@ -1609,7 +1609,7 @@ func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startL
 		if h.level < startLevel {
 			continue
 		}
-		vs, err := h.getBatch(keys, done) // Calls h.RLock() and h.RUnlock().
+		vs, err := h.getBatch(keys, keysRead) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
 		}
@@ -1617,7 +1617,7 @@ func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startL
 		for i, v := range vs {
 			// Done is only update by this function or one in db. levelhandler will
 			// not update done. No need to do anything is done is set.
-			if done[i] {
+			if keysRead[i] {
 				continue
 			}
 			if v.Value == nil && v.Meta == 0 {
@@ -1627,7 +1627,7 @@ func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startL
 			version := y.ParseTs(keys[i])
 			if v.Version == version {
 				maxVs[i] = v
-				done[i] = true
+				keysRead[i] = true
 			}
 			if maxVs[i].Version < v.Version {
 				maxVs[i] = v

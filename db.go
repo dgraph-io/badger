@@ -749,7 +749,7 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 // do that. For every get("fooX") call where X is the version, we will search
 // for "fooX" in all the levels of the LSM tree. This is expensive but it
 // removes the overhead of handling move keys completely.
-func (db *DB) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
+func (db *DB) getBatch(keys [][]byte, keysRead []bool) ([]y.ValueStruct, error) {
 	if db.IsClosed() {
 		return []y.ValueStruct{}, ErrDBClosed
 	}
@@ -761,7 +761,7 @@ func (db *DB) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
 	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
 	// For memtable, we need to check every memtable each time
 	for j, key := range keys {
-		if done[j] {
+		if keysRead[j] {
 			continue
 		}
 		version := y.ParseTs(key)
@@ -776,7 +776,7 @@ func (db *DB) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
 			if vs.Version == version {
 				y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
 				maxVs[j] = vs
-				done[j] = true
+				keysRead[j] = true
 				break
 			}
 			if maxVs[j].Version < vs.Version {
@@ -784,7 +784,7 @@ func (db *DB) getBatch(keys [][]byte, done []bool) ([]y.ValueStruct, error) {
 			}
 		}
 	}
-	return db.lc.getBatch(keys, maxVs, 0, done)
+	return db.lc.getBatch(keys, maxVs, 0, keysRead)
 }
 
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
