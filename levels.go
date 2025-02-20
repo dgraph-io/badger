@@ -1594,8 +1594,8 @@ func (s *levelsController) close() error {
 	return y.Wrap(err, "levelsController.Close")
 }
 
-func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startLevel int, keysRead []bool) (
-	[]y.ValueStruct, error) {
+func (s *levelsController) getBatch(keys [][]byte,
+	maxVs []y.ValueStruct, startLevel int, keysRead []bool, version uint64) ([]y.ValueStruct, error) {
 	if s.kv.IsClosed() {
 		return []y.ValueStruct{}, ErrDBClosed
 	}
@@ -1609,13 +1609,13 @@ func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startL
 		if h.level < startLevel {
 			continue
 		}
-		vs, err := h.getBatch(keys, keysRead) // Calls h.RLock() and h.RUnlock().
+		vs, err := h.getBatch(keys, keysRead, version) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
 		}
 
 		for i, v := range vs {
-			// Done is only update by this function or one in db. levelhandler will
+			// keysRead is only update by this function or one in db. levelhandler will
 			// not update done. No need to do anything is done is set.
 			if keysRead[i] {
 				continue
@@ -1624,7 +1624,6 @@ func (s *levelsController) getBatch(keys [][]byte, maxVs []y.ValueStruct, startL
 				continue
 			}
 			y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(v.Value)))
-			version := y.ParseTs(keys[i])
 			if v.Version == version {
 				maxVs[i] = v
 				keysRead[i] = true

@@ -452,7 +452,8 @@ func (txn *Txn) GetBatch(keys [][]byte) (items []*Item, rerr error) {
 			item := items[i]
 			if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
 				if isDeletedOrExpired(e.meta, e.ExpiresAt) {
-					return nil, ErrKeyNotFound
+					items[i] = nil
+					continue
 				}
 				// Fulfill from cache.
 				item.meta = e.meta
@@ -479,7 +480,7 @@ func (txn *Txn) GetBatch(keys [][]byte) (items []*Item, rerr error) {
 	for i, key := range keys {
 		seeks[i] = y.KeyWithTs(key, txn.readTs)
 	}
-	vss, err := txn.db.getBatch(seeks, done)
+	vss, err := txn.db.getBatch(seeks, done, txn.readTs)
 	if err != nil {
 		return nil, y.Wrapf(err, "DB::Get keys: %q", keys)
 	}
