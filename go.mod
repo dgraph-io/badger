@@ -1,8 +1,8 @@
 module github.com/dgraph-io/badger/v4
 
-go 1.22.12
+go 1.23.0
 
-toolchain go1.24.0
+toolchain go1.24.1
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
@@ -16,7 +16,7 @@ require (
 	go.opentelemetry.io/contrib/zpages v0.59.0
 	go.opentelemetry.io/otel v1.34.0
 	golang.org/x/net v0.35.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.31.0
 	google.golang.org/protobuf v1.36.5
 )
 
