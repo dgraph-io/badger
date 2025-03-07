@@ -277,6 +277,7 @@ Below is a list of known projects that use Badger:
   and badger db
 - [MightyMap](https://github.com/thisisdevelopment/mightymap) - Mightymap: Conveys both robustness
   and high capability, fitting for a powerful concurrent map.
+- [FlowG](https://github.com/link-society/flowg) - A low-code log processing facility
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
