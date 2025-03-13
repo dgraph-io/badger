@@ -278,6 +278,10 @@ Below is a list of known projects that use Badger:
 - [MightyMap](https://github.com/thisisdevelopment/mightymap) - Mightymap: Conveys both robustness
   and high capability, fitting for a powerful concurrent map.
 - [FlowG](https://github.com/link-society/flowg) - A low-code log processing facility
+- [Bluefin](https://github.com/blinklabs-io/bluefin) - Bluefin is a TUNA Proof of Work miner for
+  the Fortuna smart contract on the Cardano blockchain
+- [cDNSd](https://github.com/blinklabs-io/cdnsd) - A Cardano blockchain backed DNS server daemon
+- [Dingo](https://github.com/blinklabs-io/dingo) - A Cardano blockchain data node
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
