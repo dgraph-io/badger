@@ -6,12 +6,12 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v4"
@@ -75,7 +75,7 @@ func stream(cmd *cobra.Command, args []string) error {
 
 	// Options for output DB.
 	if so.compressionType > 2 {
-		return errors.Errorf(
+		return errors.New(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
 	inDB, err := badger.OpenManaged(inOpt)
@@ -96,7 +96,7 @@ func stream(cmd *cobra.Command, args []string) error {
 
 			_, err = f.Readdirnames(1)
 			if err != io.EOF {
-				return errors.Errorf(
+				return fmt.Errorf(
 					"cannot run stream tool on non-empty output directory %s", so.outDir)
 			}
 		}

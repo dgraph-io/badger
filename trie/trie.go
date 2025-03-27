@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
-
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
 )
@@ -123,7 +121,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 
 	ignore, err := parseIgnoreBytes(m.IgnoreBytes)
 	if err != nil {
-		return errors.Wrapf(err, "while parsing ignore bytes: %s", m.IgnoreBytes)
+		return fmt.Errorf( "while parsing ignore bytes: %s: %w", m.IgnoreBytes,err)
 	}
 	for len(ignore) < len(m.Prefix) {
 		ignore = append(ignore, false)

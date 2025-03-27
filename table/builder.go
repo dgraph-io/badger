@@ -7,6 +7,7 @@ package table
 
 import (
 	"crypto/aes"
+	"errors"
 	"math"
 	"runtime"
 	"sync"
@@ -15,7 +16,6 @@ import (
 
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/klauspost/compress/s2"
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/fb"

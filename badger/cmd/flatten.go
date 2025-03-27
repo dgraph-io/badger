@@ -6,10 +6,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v4"
@@ -57,7 +57,7 @@ func flatten(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if fo.compressionType > 2 {
-		return errors.Errorf(
+		return errors.New(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
 	opt := badger.DefaultOptions(sstDir).

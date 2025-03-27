@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
@@ -234,10 +232,10 @@ func parseCompression(cStr string) (options.CompressionType, int, error) {
 		y.Check(err)
 		if level <= 0 {
 			return 0, 0,
-				errors.Errorf("ERROR: compression level(%v) must be greater than zero", level)
+				fmt.Errorf("ERROR: compression level(%v) must be greater than zero", level)
 		}
 	} else if len(cStrSplit) > 2 {
-		return 0, 0, errors.Errorf("ERROR: Invalid badger.compression argument")
+		return 0, 0, fmt.Errorf("ERROR: Invalid badger.compression argument")
 	}
 	switch cType {
 	case "zstd":
@@ -247,7 +245,7 @@ func parseCompression(cStr string) (options.CompressionType, int, error) {
 	case "none":
 		return options.None, 0, nil
 	}
-	return 0, 0, errors.Errorf("ERROR: compression type (%s) invalid", cType)
+	return 0, 0, fmt.Errorf("ERROR: compression type (%s) invalid", cType)
 }
 
 // generateSuperFlag generates an identical SuperFlag string from the provided Options.

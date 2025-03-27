@@ -9,7 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -1502,7 +1501,7 @@ func tablesToString(tables []*table.Table) []string {
 	return res
 }
 
-var errFillTables = stderrors.New("Unable to fill tables")
+var errFillTables = errors.New("Unable to fill tables")
 
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(id int, p compactionPriority) error {

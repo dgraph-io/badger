@@ -18,10 +18,9 @@ package y
 // (3) You want to generate a new error with stack trace info. Use x.Errorf.
 
 import (
+	"errors"
 	"fmt"
 	"log"
-
-	"github.com/pkg/errors"
 )
 
 var debugMode = false
@@ -41,14 +40,14 @@ func Check2(_ interface{}, err error) {
 // AssertTrue asserts that b is true. Otherwise, it would log fatal.
 func AssertTrue(b bool) {
 	if !b {
-		log.Fatalf("%+v", errors.Errorf("Assert failed"))
+		log.Fatalf("%+v", errors.New("Assert failed"))
 	}
 }
 
 // AssertTruef is AssertTrue with extra info.
 func AssertTruef(b bool, format string, args ...interface{}) {
 	if !b {
-		log.Fatalf("%+v", errors.Errorf(format, args...))
+		log.Fatalf("%+v", fmt.Errorf(format, args...))
 	}
 }
 
@@ -60,18 +59,12 @@ func Wrap(err error, msg string) error {
 		}
 		return fmt.Errorf("%s err: %+v", msg, err)
 	}
-	return errors.Wrap(err, msg)
+	return fmt.Errorf("%s: %w", msg, err)
 }
 
 // Wrapf is Wrap with extra info.
 func Wrapf(err error, format string, args ...interface{}) error {
-	if !debugMode {
-		if err == nil {
-			return nil
-		}
-		return fmt.Errorf(format+" error: %+v", append(args, err)...)
-	}
-	return errors.Wrapf(err, format, args...)
+	return Wrap(err, fmt.Sprintf(format, args...))
 }
 
 func CombineErrors(one, other error) error {

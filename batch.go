@@ -6,10 +6,11 @@
 package badger
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
@@ -220,7 +221,7 @@ func (wb *WriteBatch) Flush() error {
 
 	if err := wb.throttle.Finish(); err != nil {
 		if wb.Error() != nil {
-			return errors.Errorf("wb.err: %s err: %s", wb.Error(), err)
+			return fmt.Errorf("wb.err: %w err: %w", wb.Error(), err)
 		}
 		return err
 	}

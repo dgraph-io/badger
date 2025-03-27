@@ -7,6 +7,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 
@@ -195,7 +195,7 @@ func getSampleKeys(db *badger.DB, sampleSize int) ([][]byte, error) {
 		return l, nil
 	}
 
-	errStop := errors.Errorf("Stop iterating")
+	errStop := errors.New("Stop iterating")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream.Send = func(buf *z.Buffer) error {
