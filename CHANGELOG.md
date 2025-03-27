@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- chore(deps): Remove dependency on github.com/pkg/errors (#2184)
 - chore(deps): Migrate from OpenCensus to OpenTelemetry (#2169)
 
 ## [4.5.1] - 2025-01-21
