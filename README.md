@@ -10,7 +10,7 @@
 ![Badger mascot](images/diggy-shadow.png)
 
 BadgerDB is an embeddable, persistent and fast key-value (KV) database written in pure Go. It is the
-underlying database for [Dgraph](https://dgraph.io), a fast, distributed graph database. It's meant
+underlying database for [Dgraph](https://github.com/hypermodeinc/dgraph), a fast, distributed graph database. It's meant
 to be a performant alternative to non-Go-based key-value stores like RocksDB.
 
 ## Project Status
@@ -114,10 +114,10 @@ Badger Documentation is available at https://docs.hypermode.com/badger
 
 ### Blog Posts
 
-1. [Introducing Badger: A fast key-value store written natively in Go](https://open.dgraph.io/post/badger/)
-2. [Make Badger crash resilient with ALICE](https://open.dgraph.io/post/alice/)
-3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://open.dgraph.io/post/badger-lmdb-boltdb/)
-4. [Concurrent ACID Transactions in Badger](https://open.dgraph.io/post/badger-txn/)
+1. [Introducing Badger: A fast key-value store written natively in Go](https://hypermode.com/blog/badger/)
+2. [Make Badger crash resilient with ALICE](https://hypermode.com/blog/alice/)
+3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://hypermode.com/blog/badger-lmdb-boltdb/)
+4. [Concurrent ACID Transactions in Badger](https://hypermode.com/blog/badger-txn/)
 
 ## Design
 
@@ -155,7 +155,7 @@ values from keys, significantly reducing the write amplification compared to a t
 rotating disks. As such RocksDB's design isn't aimed at SSDs.
 
 <sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post
-[Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
+[Concurrent ACID Transactions in Badger](https://hypermode.com/blog/badger-txn/)
 
 <sup>4</sup> Badger provides direct access to value versions via its Iterator API. Users can also
 specify how many versions to keep per key via Options.
@@ -292,6 +292,6 @@ If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING
 ## Contact
 
 - Please use [Github issues](https://github.com/hypermodeinc/badger/issues) for filing bugs.
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, discussions, and feature
+- Please use [discuss.hypermode.com](https://discuss.hypermode.com) for questions, discussions, and feature
   requests.
-- Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
+- Follow us on Twitter [@hypermodeinc](https://twitter.com/hypermodeinc).
