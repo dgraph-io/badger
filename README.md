@@ -24,17 +24,7 @@ Jaeger Tracing, UsenetExpress, and many more.
 
 The list of projects using Badger can be found [here](#projects-using-badger).
 
-Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible with v1.0 is
-v1.6.0.
-
-Badger v2.0 was released in Nov 2019 with a new storage format which won't be compatible with all of
-the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
-
-Badger v3.0 was released in January 2021. This release improves compaction performance.
-
 Please consult the [Changelog] for more detailed information on releases.
-
-For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
 [Changelog]: https://github.com/hypermodeinc/badger/blob/main/CHANGELOG.md
 
@@ -81,30 +71,6 @@ go install .
 ```
 
 This will install the badger command line utility into your $GOBIN path.
-
-#### Choosing a version
-
-BadgerDB is a pretty special package from the point of view that the most important change we can
-make to it is not on its API but rather on how data is stored on disk.
-
-This is why we follow a version naming schema that differs from Semantic Versioning.
-
-- New major versions are released when the data format on disk changes in an incompatible way.
-- New minor versions are released whenever the API changes but data compatibility is maintained.
-  Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
-- New patch versions are released when there's no changes to the data format nor the API.
-
-Following these rules:
-
-- v1.5.0 and v1.6.0 can be used on top of the same files without any concerns, as their major
-  version is the same, therefore the data format on disk is compatible.
-- v1.6.0 and v2.0.0 are data incompatible as their major version implies, so files created with
-  v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
-- v2.x.x and v3.x.x are data incompatible as their major version implies, so files created with
-  v2.x.x will need to be converted into the new format before they can be used by v3.0.0.
-
-For a longer explanation on the reasons behind using a new versioning naming schema, you can read
-[VERSIONING](VERSIONING.md).
 
 ## Badger Documentation
 
