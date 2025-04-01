@@ -5,7 +5,6 @@
 [![Sourcegraph](https://sourcegraph.com/github.com/hypermodeinc/badger/-/badge.svg)](https://sourcegraph.com/github.com/hypermodeinc/badger?badge)
 [![ci-badger-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml)
 [![ci-badger-bank-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml)
-[![ci-golang-lint](https://github.com/hypermodeinc/badger/actions/workflows/ci-golang-lint.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-golang-lint.yml)
 
 ![Badger mascot](images/diggy-shadow.png)
 
