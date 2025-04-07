@@ -10,9 +10,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
@@ -61,7 +61,7 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 				return list, nil
 			}
 			if item.Version() < since {
-				return nil, errors.Errorf("Backup: Item Version: %d less than sinceTs: %d",
+				return nil, fmt.Errorf("Backup: Item Version: %d less than sinceTs: %d",
 					item.Version(), since)
 			}
 

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/klauspost/compress/snappy"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/fb"
@@ -250,7 +250,7 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 	} else if err != nil {
 		return nil, y.Wrapf(err, "while creating table: %s", fname)
 	} else {
-		return nil, errors.Errorf("file already exists: %s", fname)
+		return nil, fmt.Errorf("file already exists: %s", fname)
 	}
 
 	written := bd.Copy(mf.Data)
@@ -281,7 +281,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	id, ok := ParseFileID(filename)
 	if !ok {
 		mf.Close(-1)
-		return nil, errors.Errorf("Invalid filename: %s", filename)
+		return nil, fmt.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
 		MmapFile:   mf,

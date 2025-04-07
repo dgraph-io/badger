@@ -22,8 +22,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
-
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/skl"
 	"github.com/dgraph-io/badger/v4/y"
@@ -147,7 +145,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
 		return nil, y.Wrapf(err, "newMemTable")
 	}
-	return nil, errors.Errorf("File %s already exists", mt.wal.Fd.Name())
+	return nil, fmt.Errorf("File %s already exists", mt.wal.Fd.Name())
 }
 
 func (db *DB) mtFilePath(fid int) string {

@@ -9,7 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/options"
@@ -342,8 +341,8 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 }
 
 var (
-	errBadMagic    = stderrors.New("manifest has bad magic")
-	errBadChecksum = stderrors.New("manifest has checksum mismatch")
+	errBadMagic    = errors.New("manifest has bad magic")
+	errBadChecksum = errors.New("manifest has checksum mismatch")
 )
 
 // ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
@@ -399,7 +398,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 		length := y.BytesToU32(lenCrcBuf[0:4])
 		// Sanity check to ensure we don't over-allocate memory.
 		if length > uint32(stat.Size()) {
-			return Manifest{}, 0, errors.Errorf(
+			return Manifest{}, 0, fmt.Errorf(
 				"Buffer length: %d greater than file size: %d. Manifest file might be corrupted",
 				length, stat.Size())
 		}

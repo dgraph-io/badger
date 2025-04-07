@@ -17,7 +17,6 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v4"
@@ -198,7 +197,7 @@ func lookup(db *badger.DB) error {
 
 	itr.Rewind()
 	if !itr.Valid() {
-		return errors.Errorf("Unable to rewind to key:\n%s", hex.Dump(key))
+		return fmt.Errorf("Unable to rewind to key:\n%s", hex.Dump(key))
 	}
 	fmt.Println()
 	item := itr.Item()

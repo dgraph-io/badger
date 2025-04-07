@@ -7,11 +7,10 @@ package badger
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"os"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
@@ -37,11 +36,11 @@ func (s *levelHandler) validate() error {
 	numTables := len(s.tables)
 	for j := 1; j < numTables; j++ {
 		if j >= len(s.tables) {
-			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
+			return fmt.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
 		}
 
 		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
-			return errors.Errorf(
+			return fmt.Errorf(
 				"Inter: Biggest(j-1)[%d] \n%s\n vs Smallest(j)[%d]: \n%s\n: "+
 					"level=%d j=%d numTables=%d",
 				s.tables[j-1].ID(), hex.Dump(s.tables[j-1].Biggest()), s.tables[j].ID(),
@@ -49,7 +48,7 @@ func (s *levelHandler) validate() error {
 		}
 
 		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
-			return errors.Errorf(
+			return fmt.Errorf(
 				"Intra: \n%s\n vs \n%s\n: level=%d j=%d numTables=%d",
 				hex.Dump(s.tables[j].Smallest()), hex.Dump(s.tables[j].Biggest()), s.level, j, numTables)
 		}

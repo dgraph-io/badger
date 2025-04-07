@@ -9,13 +9,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2/z"
@@ -344,7 +344,7 @@ func (txn *Txn) checkSize(e *Entry) error {
 }
 
 func exceedsSize(prefix string, max int64, key []byte) error {
-	return errors.Errorf("%s with size %d exceeded %d limit. %s:\n%s",
+	return fmt.Errorf("%s with size %d exceeded %d limit. %s:\n%s",
 		prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
 }
 

@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
@@ -119,7 +118,7 @@ func (sw *StreamWriter) PrepareIncremental() error {
 		// on the tree, all the data will go to Lmax. All the levels above will be empty
 		// after flatten call. Now, we should be able to use incremental stream writer again.
 		if err := sw.db.Flatten(3); err != nil {
-			return errors.Wrapf(err, "error during flatten in StreamWriter")
+			return fmt.Errorf("error during flatten in StreamWriter: %w", err)
 		}
 		sw.prevLevel = len(sw.db.Levels()) - 1
 	}
@@ -417,7 +416,7 @@ func (w *sortedWriter) handleRequests() {
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
-		return errors.Errorf("keys not in sorted order (last key: %s, key: %s)",
+		return fmt.Errorf("keys not in sorted order (last key: %s, key: %s)",
 			hex.Dump(w.lastKey), hex.Dump(key))
 	}
 
