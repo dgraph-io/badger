@@ -445,10 +445,13 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 	case pb.ManifestChange_DELETE:
 		tm, ok := build.Tables[tc.Id]
 		if !ok {
-			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
+			for _, level := range build.Levels {
+				delete(level.Tables, tc.Id)
+			}
+		} else {
+			delete(build.Levels[tm.Level].Tables, tc.Id)
+			delete(build.Tables, tc.Id)
 		}
-		delete(build.Levels[tm.Level].Tables, tc.Id)
-		delete(build.Tables, tc.Id)
 		build.Deletions++
 	default:
 		return fmt.Errorf("MANIFEST file has invalid manifestChange op")
