@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"github.com/dgraph-io/badger/v4/pb"
 	"os"
 	"reflect"
 	"strconv"
@@ -106,6 +107,9 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
+	//ChecksumAlgorithm decides which algorithm calculate checksums
+	ChecksumAlgorithm pb.Checksum_Algorithm
+
 	// DetectConflicts determines whether the transactions would be checked for
 	// conflicts. The transactions can be processed at a higher rate when
 	// conflict detection is disabled.
@@ -187,6 +191,7 @@ func DefaultOptions(path string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
+		ChecksumAlgorithm:             pb.Checksum_CRC32C,
 	}
 }
 
@@ -201,6 +206,7 @@ func buildTableOptions(db *DB) table.Options {
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
 		ChkMode:              opt.ChecksumVerificationMode,
+		ChkAlgo:              opt.ChecksumAlgorithm,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
 		BlockCache:           db.blockCache,
@@ -679,6 +685,16 @@ func (opt Options) WithVerifyValueChecksum(val bool) Options {
 // The default value of VerifyValueChecksum is options.NoVerification.
 func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
 	opt.ChecksumVerificationMode = cvMode
+	return opt
+}
+
+// WithChecksumAlgorithm return a new Options value with ChecksumAlgorithm set to the given value
+//
+// ChecksumAlgorithm decides which algorithm calculate checksums.
+//
+// The default value of ChecksumAlgorithm is pb.Checksum_CRC32C.
+func (opt Options) WithChecksumAlgorithm(ct pb.Checksum_Algorithm) Options {
+	opt.ChecksumAlgorithm = ct
 	return opt
 }
 

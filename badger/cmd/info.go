@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/dgraph-io/badger/v4/pb"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -52,6 +53,7 @@ type flagOptions struct {
 	checksumVerificationMode string
 	discard                  bool
 	externalMagicVersion     uint16
+	checksumAlgorithm        string
 }
 
 var (
@@ -81,6 +83,7 @@ func init() {
 	infoCmd.Flags().StringVar(&opt.encryptionKey, "enc-key", "", "Use the provided encryption key")
 	infoCmd.Flags().StringVar(&opt.checksumVerificationMode, "cv-mode", "none",
 		"[none, table, block, tableAndBlock] Specifies when the db should verify checksum for SST.")
+	infoCmd.Flags().StringVar(&opt.checksumAlgorithm, "ct", "crc32c", "[crc32c,xxhash64] Specifies the checksum algorithm for SST.")
 	infoCmd.Flags().BoolVar(&opt.discard, "discard", false,
 		"Parse and print DISCARD file from value logs.")
 	infoCmd.Flags().Uint16Var(&opt.externalMagicVersion, "external-magic", 0,
@@ -101,6 +104,7 @@ to the Dgraph team.
 
 func handleInfo(cmd *cobra.Command, args []string) error {
 	cvMode := checksumVerificationMode(opt.checksumVerificationMode)
+	ct := checksumAlgorithm(opt.checksumAlgorithm)
 	bopt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
@@ -108,7 +112,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey([]byte(opt.encryptionKey)).
 		WithChecksumVerificationMode(cvMode).
-		WithExternalMagic(opt.externalMagicVersion)
+		WithExternalMagic(opt.externalMagicVersion).
+		WithChecksumAlgorithm(ct)
 
 	if opt.discard {
 		ds, err := badger.InitDiscardStats(bopt)
@@ -522,6 +527,18 @@ func pluralFiles(count int) string {
 	return "files"
 }
 
+func checksumAlgorithm(ct string) pb.Checksum_Algorithm {
+	switch ct {
+	case "crc32c":
+		return pb.Checksum_CRC32C
+	case "xxhash64":
+		return pb.Checksum_XXHash64
+	default:
+		fmt.Printf("Invalid checksum algorithm : %s\n", ct)
+		os.Exit(1)
+	}
+	return pb.Checksum_CRC32C
+}
 func checksumVerificationMode(cvMode string) options.ChecksumVerificationMode {
 	switch cvMode {
 	case "none":

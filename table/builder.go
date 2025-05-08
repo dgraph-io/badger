@@ -278,7 +278,7 @@ func (b *Builder) finishBlock() {
 	b.append(y.U32SliceToBytes(b.curBlock.entryOffsets))
 	b.append(y.U32ToBytes(uint32(len(b.curBlock.entryOffsets))))
 
-	checksum := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
+	checksum := b.calculateChecksum(b.curBlock.data[:b.curBlock.end], b.opts.ChkAlgo)
 
 	// Append the block checksum and its length.
 	b.append(checksum)
@@ -454,7 +454,7 @@ func (b *Builder) Done() buildData {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
-	checksum := b.calculateChecksum(index)
+	checksum := b.calculateChecksum(index, b.opts.ChkAlgo)
 
 	bd.index = index
 	bd.checksum = checksum
@@ -462,19 +462,18 @@ func (b *Builder) Done() buildData {
 	return bd
 }
 
-func (b *Builder) calculateChecksum(data []byte) []byte {
+func (b *Builder) calculateChecksum(data []byte, ct pb.Checksum_Algorithm) []byte {
 	// Build checksum for the index.
 	checksum := pb.Checksum{
-		// TODO: The checksum type should be configurable from the
-		// options.
+
 		// We chose to use CRC32 as the default option because
 		// it performed better compared to xxHash64.
 		// See the BenchmarkChecksum in table_test.go file
 		// Size     =>   1024 B        2048 B
 		// CRC32    => 63.7 ns/op     112 ns/op
 		// xxHash64 => 87.5 ns/op     158 ns/op
-		Sum:  y.CalculateChecksum(data, pb.Checksum_CRC32C),
-		Algo: pb.Checksum_CRC32C,
+		Sum:  y.CalculateChecksum(data, ct),
+		Algo: ct,
 	}
 
 	// Write checksum to the file.
