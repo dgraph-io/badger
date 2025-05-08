@@ -1,17 +1,6 @@
 /*
- * Copyright 2020 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -32,8 +21,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/skl"
@@ -158,7 +145,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
 		return nil, y.Wrapf(err, "newMemTable")
 	}
-	return nil, errors.Errorf("File %s already exists", mt.wal.Fd.Name())
+	return nil, fmt.Errorf("File %s already exists", mt.wal.Fd.Name())
 }
 
 func (db *DB) mtFilePath(fid int) string {

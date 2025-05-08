@@ -1,29 +1,26 @@
-<!--
- Change Github PR Title 
+**Description**
 
- Your title must be in the following format: 
- - `topic(Area): Feature`
- - `Topic` must be one of `build|ci|docs|feat|fix|perf|refactor|chore|test`
+Please explain the changes you made here.
 
- Sample Titles:
- - `feat(Enterprise)`: Backups can now get credentials from IAM
- - `fix(Query)`: Skipping floats that cannot be Marshalled in JSON
- - `perf: [Breaking]` json encoding is now 35% faster if SIMD is present
- - `chore`: all chores/tests will be excluded from the CHANGELOG
- -->
+**Checklist**
 
-## Problem
- <!--
- Please add a description with these things:
- 1. Explain the problem by providing a good description.
- 2. If it fixes any GitHub issues, say "Fixes #GitHubIssue".
- 3. If it corresponds to a Jira issue, say "Fixes DGRAPH-###".
- 4. If this is a breaking change, please prefix `[Breaking]` in the title. In the description, please put a note with exactly who these changes are breaking for.
- -->
+- [ ] Code compiles correctly and linting passes locally
+- [ ] For all _code_ changes, an entry added to the `CHANGELOG.md` file describing and linking to
+      this PR
+- [ ] Tests added for new functionality, or regression tests for bug fixes added as applicable
+- [ ] For public APIs, new features, etc., PR on [docs repo](https://github.com/hypermodeinc/docs)
+      staged and linked here
 
-## Solution
- <!--
- Please add a description with these things:
- 1. Explain the solution to make it easier to review the PR.
- 2. Make it easier for the reviewer by describing complex sections with comments.
- -->
+**Instructions**
+
+- The PR title should follow the [Conventional Commits](https://www.conventionalcommits.org/)
+  syntax, leading with `fix:`, `feat:`, `chore:`, `ci:`, etc.
+- The description should briefly explain what the PR is about. In the case of a bugfix, describe or
+  link to the bug.
+- In the checklist section, check the boxes in that are applicable, using `[x]` syntax.
+  - If not applicable, remove the entire line. Only leave the box unchecked if you intend to come
+    back and check the box later.
+- Delete the `Instructions` line and everything below it, to indicate you have read and are
+  following these instructions. 🙂
+
+Thank you for your contribution to Badger!

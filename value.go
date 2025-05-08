@@ -1,17 +1,6 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -19,7 +8,7 @@ package badger
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -32,8 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
-	otrace "go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2/z"
@@ -64,8 +53,8 @@ const (
 	vlogHeaderSize = 20
 )
 
-var errStop = stderrors.New("Stop iteration")
-var errTruncate = stderrors.New("Do truncate")
+var errStop = errors.New("Stop iteration")
+var errTruncate = errors.New("Do truncate")
 
 type logEntry func(e Entry, vp valuePointer) error
 
@@ -175,7 +164,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	for _, fid := range vlog.filesToBeDeleted {
 		if fid == f.fid {
 			vlog.filesLock.RUnlock()
-			return errors.Errorf("value log file already marked for deletion fid: %d", fid)
+			return fmt.Errorf("value log file already marked for deletion fid: %d", fid)
 		}
 	}
 	maxFid := vlog.maxFid
@@ -204,7 +193,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 		// Value is still present in value log.
 		if len(vs.Value) == 0 {
-			return errors.Errorf("Empty value: %+v", vs)
+			return fmt.Errorf("Empty value: %+v", vs)
 		}
 		var vp valuePointer
 		vp.Decode(vs.Value)
@@ -344,7 +333,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		// Just a sanity-check.
 		if _, ok := vlog.filesMap[f.fid]; !ok {
 			vlog.filesLock.Unlock()
-			return errors.Errorf("Unable to find fid: %d", f.fid)
+			return fmt.Errorf("Unable to find fid: %d", f.fid)
 		}
 		if vlog.iteratorCount() == 0 {
 			delete(vlog.filesMap, f.fid)
@@ -764,7 +753,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 		size := estimateRequestSize(req)
 		estimatedVlogOffset := vlogOffset + size
 		if estimatedVlogOffset > uint64(maxVlogFileSize) {
-			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
+			return fmt.Errorf("Request size offset %d is bigger than maximum offset %d",
 				estimatedVlogOffset, maxVlogFileSize)
 		}
 
@@ -916,7 +905,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 	ret, ok := vlog.filesMap[vp.Fid]
 	if !ok {
 		// log file has gone away, we can't do anything. Return.
-		return nil, errors.Errorf("file with ID: %d not found", vp.Fid)
+		return nil, fmt.Errorf("file with ID: %d not found", vp.Fid)
 	}
 
 	// Check for valid offset if we are reading from writable log.
@@ -926,7 +915,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 	if !vlog.opt.ReadOnly && vp.Fid == maxFid {
 		currentOffset := vlog.woffset()
 		if vp.Offset >= currentOffset {
-			return nil, errors.Errorf(
+			return nil, fmt.Errorf(
 				"Invalid value pointer offset: %d greater than current offset: %d",
 				vp.Offset, currentOffset)
 		}
@@ -971,7 +960,7 @@ func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) 
 	}
 	if uint32(len(kv)) < h.klen+h.vlen {
 		vlog.db.opt.Errorf("Invalid read: vp: %+v", vp)
-		return nil, nil, errors.Errorf("Invalid read: Len: %d read at:[%d:%d]",
+		return nil, nil, fmt.Errorf("Invalid read: Len: %d read at:[%d:%d]",
 			len(kv), h.klen, h.klen+h.vlen)
 	}
 	return kv[h.klen : h.klen+h.vlen], cb, nil
@@ -1063,8 +1052,8 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 }
 
 func (vlog *valueLog) doRunGC(lf *logFile) error {
-	_, span := otrace.StartSpan(context.Background(), "Badger.GC")
-	span.Annotatef(nil, "GC rewrite for: %v", lf.path)
+	_, span := otel.Tracer("").Start(context.TODO(), "Badger.GC")
+	span.SetAttributes(attribute.String("GC rewrite for", lf.path))
 	defer span.End()
 	if err := vlog.rewrite(lf); err != nil {
 		return err

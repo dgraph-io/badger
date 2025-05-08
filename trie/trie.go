@@ -1,17 +1,6 @@
 /*
- * Copyright 2019 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package trie
@@ -20,8 +9,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
@@ -134,7 +121,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 
 	ignore, err := parseIgnoreBytes(m.IgnoreBytes)
 	if err != nil {
-		return errors.Wrapf(err, "while parsing ignore bytes: %s", m.IgnoreBytes)
+		return fmt.Errorf( "while parsing ignore bytes: %s: %w", m.IgnoreBytes,err)
 	}
 	for len(ignore) < len(m.Prefix) {
 		ignore = append(ignore, false)

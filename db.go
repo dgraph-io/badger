@@ -1,17 +1,6 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -20,7 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	stderrors "errors"
+	"errors"
 	"expvar"
 	"fmt"
 	"math"
@@ -33,7 +22,6 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"
@@ -156,14 +144,14 @@ func checkAndSetOptions(opt *Options) error {
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
-		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+		return fmt.Errorf("Invalid ValueThreshold, must be less or equal to %d",
 			maxValueThreshold)
 	}
 
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if opt.ValueThreshold > opt.maxBatchSize {
-		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
+		return fmt.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.BaseTableSize.",
 			opt.ValueThreshold, opt.maxBatchSize)
 	}
@@ -384,7 +372,7 @@ func Open(opt Options) (*DB, error) {
 	go db.threshold.listenForValueThresholdUpdate()
 
 	if err := db.initBannedNamespaces(); err != nil {
-		return db, errors.Wrapf(err, "While setting banned keys")
+		return db, fmt.Errorf("While setting banned keys: %w", err)
 	}
 
 	db.closers.writes = z.NewCloser(1)
@@ -798,7 +786,7 @@ func (db *DB) writeToLSM(b *request) error {
 	// running in InMemory mode. In InMemory mode, we don't write anything to the
 	// value log and that's why the length of b.Ptrs will always be zero.
 	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
-		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
+		return fmt.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
 	for i, entry := range b.Entries {
@@ -1016,7 +1004,7 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 	return nil
 }
 
-var errNoRoom = stderrors.New("No room for write")
+var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
@@ -1974,7 +1962,7 @@ func createDirs(opt Options) error {
 		}
 		if !dirExists {
 			if opt.ReadOnly {
-				return errors.Errorf("Cannot find directory %q for read-only open", path)
+				return fmt.Errorf("Cannot find directory %q for read-only open", path)
 			}
 			// Try to create the directory
 			err = os.MkdirAll(path, 0700)
@@ -2046,7 +2034,7 @@ func (db *DB) CacheMaxCost(cache CacheType, maxCost int64) (int64, error) {
 		case IndexCache:
 			return db.indexCache.MaxCost(), nil
 		default:
-			return 0, errors.Errorf("invalid cache type")
+			return 0, errors.New("invalid cache type")
 		}
 	}
 
@@ -2058,7 +2046,7 @@ func (db *DB) CacheMaxCost(cache CacheType, maxCost int64) (int64, error) {
 		db.indexCache.UpdateMaxCost(maxCost)
 		return maxCost, nil
 	default:
-		return 0, errors.Errorf("invalid cache type")
+		return 0, errors.New("invalid cache type")
 	}
 }
 

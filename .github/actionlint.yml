@@ -1,0 +1,6 @@
+self-hosted-runner:
+  # Labels of self-hosted runner in array of string
+  labels:
+    - warp-ubuntu-latest-x64-4x
+    - warp-ubuntu-latest-arm64-4x
+    - warp-ubuntu-latest-x64-16x
