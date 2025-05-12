@@ -45,7 +45,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	}
 	if err := db.manifest.addChanges([]*pb.ManifestChange{
 		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
-	}); err != nil {
+	}, db.opt); err != nil {
 		panic(err)
 	}
 	db.lc.levels[level].Lock()
@@ -1193,7 +1193,7 @@ func TestFillTableCleanup(t *testing.T) {
 				tab := buildTable(i)
 				require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
 					newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
-				}))
+				}, db.opt))
 				tab.CreatedAt = time.Now().Add(-10 * time.Hour)
 				// Add table to the given level.
 				lh.addTable(tab)
@@ -1270,7 +1270,7 @@ func TestStaleDataCleanup(t *testing.T) {
 			tab := buildStaleTable(i)
 			require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
 				newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
-			}))
+			}, db.opt))
 			tab.CreatedAt = time.Now().Add(-10 * time.Hour)
 			// Add table to the given level.
 			lh.addTable(tab)
