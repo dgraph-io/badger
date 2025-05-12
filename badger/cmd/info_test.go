@@ -18,9 +18,10 @@ package cmd
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestStrToChecksumAlgorithm(t *testing.T) {

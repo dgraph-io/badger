@@ -8,7 +8,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/hex"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,8 +48,8 @@ type flagOptions struct {
 var (
 	opt flagOptions
 
-	// ErrInvalidChecksumAlgorithm is returned if the checksum algorithm is invalid.
-	ErrInvalidChecksumAlgorithm = stderrors.New("Invalid checksum algorithm. Supported values: crc32c, xxhash64.")
+	// errInvalidChecksumAlgorithm is returned if the checksum algorithm is invalid.
+	errInvalidChecksumAlgorithm = errors.New("Invalid checksum algorithm. Supported values: crc32c, xxhash64.")
 )
 
 func init() {
@@ -98,9 +98,7 @@ to the Dgraph team.
 func handleInfo(cmd *cobra.Command, args []string) error {
 	cvMode := checksumVerificationMode(opt.checksumVerificationMode)
 	ct, err := strToChecksumAlgorithm(opt.checksumAlgorithm)
-	if err != nil {
-		y.Check(err)
-	}
+	y.Check(err)
 
 	bopt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
@@ -537,7 +535,7 @@ func strToChecksumAlgorithm(ct string) (pb.Checksum_Algorithm, error) {
 	case "xxhash64":
 		return pb.Checksum_XXHash64, nil
 	default:
-		return pb.Checksum_CRC32C, y.Wrap(ErrInvalidChecksumAlgorithm,
+		return pb.Checksum_CRC32C, y.Wrap(errInvalidChecksumAlgorithm,
 			"InvalidChecksumAlgorithm")
 	}
 }
