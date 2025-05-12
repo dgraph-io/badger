@@ -1,5 +1,18 @@
-p/
-badger-test*/
-.idea/
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+badger/badger-*
 
-vendor
+# Test binary, build with `go test -c`
+*.test
+badger-test*/
+
+# Output of the go coverage tool
+*.out
+
+#darwin
+.DS_Store
+

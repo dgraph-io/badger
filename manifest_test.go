@@ -1,23 +1,11 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -28,7 +16,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
@@ -177,12 +164,9 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 
 	done := lh0.tryAddLevel0Table(t1)
 	require.Equal(t, true, done)
-	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
 	cd := compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
-		span:      span,
 		t:         kv.lc.levelTargets(),
 	}
 	cd.t.baseLevel = 1
@@ -193,10 +177,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	done = lc.fillTablesL0(&cd)
 	require.Equal(t, true, done)
 	require.NoError(t, lc.runCompactDef(-1, 0, cd))
-	span.End()
 
-	_, span = otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", lh0)
 	t2 := buildTestTable(t, "l", 2, opts)
 	defer func() { require.NoError(t, t2.DecrRef()) }()
 	done = lh0.tryAddLevel0Table(t2)
@@ -205,7 +186,6 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	cd = compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
-		span:      span,
 		t:         kv.lc.levelTargets(),
 	}
 	cd.t.baseLevel = 1

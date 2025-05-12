@@ -1,17 +1,6 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package table
@@ -20,6 +9,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -33,7 +23,6 @@ import (
 
 	"github.com/klauspost/compress/snappy"
 	"github.com/klauspost/compress/zstd"
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/fb"
@@ -264,7 +253,7 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 	} else if err != nil {
 		return nil, y.Wrapf(err, "while creating table: %s", fname)
 	} else {
-		return nil, errors.Errorf("file already exists: %s", fname)
+		return nil, fmt.Errorf("file already exists: %s", fname)
 	}
 
 	written := bd.Copy(mf.Data)
@@ -295,7 +284,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	id, ok := ParseFileID(filename)
 	if !ok {
 		mf.Close(-1)
-		return nil, errors.Errorf("Invalid filename: %s", filename)
+		return nil, fmt.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
 		MmapFile:   mf,

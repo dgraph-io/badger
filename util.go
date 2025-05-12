@@ -1,28 +1,16 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"os"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
@@ -48,11 +36,11 @@ func (s *levelHandler) validate() error {
 	numTables := len(s.tables)
 	for j := 1; j < numTables; j++ {
 		if j >= len(s.tables) {
-			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
+			return fmt.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
 		}
 
 		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
-			return errors.Errorf(
+			return fmt.Errorf(
 				"Inter: Biggest(j-1)[%d] \n%s\n vs Smallest(j)[%d]: \n%s\n: "+
 					"level=%d j=%d numTables=%d",
 				s.tables[j-1].ID(), hex.Dump(s.tables[j-1].Biggest()), s.tables[j].ID(),
@@ -60,7 +48,7 @@ func (s *levelHandler) validate() error {
 		}
 
 		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
-			return errors.Errorf(
+			return fmt.Errorf(
 				"Intra: \n%s\n vs \n%s\n: level=%d j=%d numTables=%d",
 				hex.Dump(s.tables[j].Smallest()), hex.Dump(s.tables[j].Biggest()), s.level, j, numTables)
 		}

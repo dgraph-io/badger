@@ -1,17 +1,6 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -117,7 +106,7 @@ func (item *Item) Value(fn func(val []byte) error) error {
 // returned. Tip: It might make sense to reuse the returned slice as dst argument for the next call.
 //
 // This function is useful in long running iterate/update transactions to avoid a write deadlock.
-// See Github issue: https://github.com/dgraph-io/badger/issues/315
+// See Github issue: https://github.com/hypermodeinc/badger/issues/315
 func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {

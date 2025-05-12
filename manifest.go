@@ -1,17 +1,6 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package badger
@@ -20,7 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -29,7 +18,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/options"
@@ -353,8 +341,8 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 }
 
 var (
-	errBadMagic    = stderrors.New("manifest has bad magic")
-	errBadChecksum = stderrors.New("manifest has checksum mismatch")
+	errBadMagic    = errors.New("manifest has bad magic")
+	errBadChecksum = errors.New("manifest has checksum mismatch")
 )
 
 // ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
@@ -380,7 +368,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 		return Manifest{}, 0,
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
-				"Please see https://dgraph.io/docs/badger/faq/#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
+				"Please see https://docs.hypermode.com/badger/troubleshooting#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
 				" on how to fix this.",
 				version, badgerMagicVersion)
 	}
@@ -410,7 +398,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 		length := y.BytesToU32(lenCrcBuf[0:4])
 		// Sanity check to ensure we don't over-allocate memory.
 		if length > uint32(stat.Size()) {
-			return Manifest{}, 0, errors.Errorf(
+			return Manifest{}, 0, fmt.Errorf(
 				"Buffer length: %d greater than file size: %d. Manifest file might be corrupted",
 				length, stat.Size())
 		}
