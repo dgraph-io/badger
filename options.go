@@ -18,7 +18,6 @@ package badger
 
 import (
 	"fmt"
-	"github.com/dgraph-io/badger/v4/pb"
 	"os"
 	"reflect"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v4/options"
+	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2/z"
@@ -107,7 +107,7 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
-	//ChecksumAlgorithm decides which algorithm calculate checksums
+	// ChecksumAlgorithm decides which algorithm calculate checksums
 	ChecksumAlgorithm pb.Checksum_Algorithm
 
 	// DetectConflicts determines whether the transactions would be checked for

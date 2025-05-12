@@ -62,7 +62,7 @@ type Options struct {
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
 
-	//ChkAlgo is the checksum algorithm mode for Table.
+	// ChkAlgo is the checksum algorithm mode for Table.
 	ChkAlgo pb.Checksum_Algorithm
 
 	// Options for Table builder.
