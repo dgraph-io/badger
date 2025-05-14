@@ -105,10 +105,10 @@ func (m *Manifest) asChanges() []*pb.ManifestChange {
 	return changes
 }
 
-func (m *Manifest) clone() Manifest {
+func (m *Manifest) clone(opt Options) Manifest {
 	changeSet := pb.ManifestChangeSet{Changes: m.asChanges()}
 	ret := createManifest()
-	y.Check(applyChangeSet(&ret, &changeSet))
+	y.Check(applyChangeSet(&ret, &changeSet, opt))
 	return ret
 }
 
@@ -120,11 +120,11 @@ func openOrCreateManifestFile(opt Options) (
 		return &manifestFile{inMemory: true}, Manifest{}, nil
 	}
 	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.ExternalMagicVersion,
-		manifestDeletionsRewriteThreshold)
+		manifestDeletionsRewriteThreshold, opt)
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
-	deletionsThreshold int) (*manifestFile, Manifest, error) {
+	deletionsThreshold int, opt Options) (*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
 	var flags y.Flags
@@ -149,13 +149,13 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
 			fp:                        fp,
 			directory:                 dir,
 			externalMagic:             extMagic,
-			manifest:                  m.clone(),
+			manifest:                  m.clone(opt),
 			deletionsRewriteThreshold: deletionsThreshold,
 		}
 		return mf, m, nil
 	}
 
-	manifest, truncOffset, err := ReplayManifestFile(fp, extMagic)
+	manifest, truncOffset, err := ReplayManifestFile(fp, extMagic, opt)
 	if err != nil {
 		_ = fp.Close()
 		return nil, Manifest{}, err
@@ -177,7 +177,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, extMagic uint16,
 		fp:                        fp,
 		directory:                 dir,
 		externalMagic:             extMagic,
-		manifest:                  manifest.clone(),
+		manifest:                  manifest.clone(opt),
 		deletionsRewriteThreshold: deletionsThreshold,
 	}
 	return mf, manifest, nil
@@ -194,7 +194,7 @@ func (mf *manifestFile) close() error {
 // we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
-func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
+func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange, opt Options) error {
 	if mf.inMemory {
 		return nil
 	}
@@ -207,7 +207,7 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 	// Maybe we could use O_APPEND instead (on certain file systems)
 	mf.appendLock.Lock()
 	defer mf.appendLock.Unlock()
-	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
+	if err := applyChangeSet(&mf.manifest, &changes, opt); err != nil {
 		return err
 	}
 	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
@@ -350,7 +350,7 @@ var (
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
+func ReplayManifestFile(fp *os.File, extMagic uint16, opt Options) (Manifest, int64, error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	var magicBuf [8]byte
@@ -418,7 +418,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 			return Manifest{}, 0, err
 		}
 
-		if err := applyChangeSet(&build, &changeSet); err != nil {
+		if err := applyChangeSet(&build, &changeSet, opt); err != nil {
 			return Manifest{}, 0, err
 		}
 	}
@@ -426,7 +426,7 @@ func ReplayManifestFile(fp *os.File, extMagic uint16) (Manifest, int64, error) {
 	return build, offset, nil
 }
 
-func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
+func applyManifestChange(build *Manifest, tc *pb.ManifestChange, opt Options) error {
 	switch tc.Op {
 	case pb.ManifestChange_CREATE:
 		if _, ok := build.Tables[tc.Id]; ok {
@@ -445,10 +445,14 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 	case pb.ManifestChange_DELETE:
 		tm, ok := build.Tables[tc.Id]
 		if !ok {
-			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
+			opt.Warningf("MANIFEST delete: table %d has already been removed", tc.Id)
+			for _, level := range build.Levels {
+				delete(level.Tables, tc.Id)
+			}
+		} else {
+			delete(build.Levels[tm.Level].Tables, tc.Id)
+			delete(build.Tables, tc.Id)
 		}
-		delete(build.Levels[tm.Level].Tables, tc.Id)
-		delete(build.Tables, tc.Id)
 		build.Deletions++
 	default:
 		return fmt.Errorf("MANIFEST file has invalid manifestChange op")
@@ -458,9 +462,9 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 
 // This is not a "recoverable" error -- opening the KV store fails because the MANIFEST file is
 // just plain broken.
-func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
+func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet, opt Options) error {
 	for _, change := range changeSet.Changes {
-		if err := applyManifestChange(build, change); err != nil {
+		if err := applyManifestChange(build, change, opt); err != nil {
 			return err
 		}
 	}
