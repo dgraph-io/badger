@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sync"
 
-	humanize "github.com/dustin/go-humanize"
+	"github.com/dustin/go-humanize"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
@@ -504,7 +504,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		Level:       uint32(lhandler.level),
 		Compression: uint32(tbl.CompressionType()),
 	}
-	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
+	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}, w.db.opt); err != nil {
 		return err
 	}
 

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	humanize "github.com/dustin/go-humanize"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v4"
@@ -121,7 +121,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := printInfo(sstDir, vlogDir); err != nil {
+	if err := printInfo(sstDir, vlogDir, bopt); err != nil {
 		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
@@ -332,7 +332,7 @@ func readDir(dir string) ([]fs.FileInfo, error) {
 	return infos, err
 }
 
-func printInfo(dir, valueDir string) error {
+func printInfo(dir, valueDir string, bopt badger.Options) error {
 	if dir == "" {
 		return fmt.Errorf("--dir not supplied")
 	}
@@ -348,7 +348,7 @@ func printInfo(dir, valueDir string) error {
 			fp.Close()
 		}
 	}()
-	manifest, truncOffset, err := badger.ReplayManifestFile(fp, opt.externalMagicVersion)
+	manifest, truncOffset, err := badger.ReplayManifestFile(fp, opt.externalMagicVersion, bopt)
 	if err != nil {
 		return err
 	}
