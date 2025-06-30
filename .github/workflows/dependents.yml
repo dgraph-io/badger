@@ -1,0 +1,16 @@
+name: Dependents Action
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+
+jobs:
+  dependents:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: gouravkhunger/dependents.info@0.1.4

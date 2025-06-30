@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v4.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v4)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v4)](https://goreportcard.com/report/github.com/dgraph-io/badger/v4)
-[![Sourcegraph](https://sourcegraph.com/github.com/hypermodeinc/badger/-/badge.svg)](https://sourcegraph.com/github.com/hypermodeinc/badger?badge)
+[![Network Dependents](https://dependents.info/hypermodeinc/badger/badge?logo=ripple&label=used%20by)](https://dependents.info/hypermodeinc/badger)
 [![ci-badger-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml)
 [![ci-badger-bank-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml)
 [![ci-badger-bank-tests-nightly](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests-nightly.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests-nightly.yml)
@@ -36,7 +36,6 @@ Please consult the [Changelog] for more detailed information on releases.
   - [Getting Started](#getting-started)
     - [Installing](#installing)
       - [Installing Badger Command Line Tool](#installing-badger-command-line-tool)
-      - [Choosing a version](#choosing-a-version)
   - [Badger Documentation](#badger-documentation)
   - [Resources](#resources)
     - [Blog Posts](#blog-posts)
@@ -248,6 +247,8 @@ Below is a list of known projects that use Badger:
   the Fortuna smart contract on the Cardano blockchain
 - [cDNSd](https://github.com/blinklabs-io/cdnsd) - A Cardano blockchain backed DNS server daemon
 - [Dingo](https://github.com/blinklabs-io/dingo) - A Cardano blockchain data node
+- [dependents.info](https://github.com/gouravkhunger/dependents.info) - generate images of github
+  network dependents to showcase in your project's readme
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
