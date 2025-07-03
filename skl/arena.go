@@ -6,6 +6,7 @@
 package skl
 
 import (
+	"fmt"
 	"sync/atomic"
 	"unsafe"
 
@@ -101,6 +102,7 @@ func (s *Arena) getNode(offset uint32) *node {
 
 // getKey returns byte slice at offset.
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
+	fmt.Println("GET KEY", offset, size)
 	return s.buf[offset : offset+uint32(size)]
 }
 
