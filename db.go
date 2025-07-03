@@ -102,7 +102,7 @@ type DB struct {
 	lc        *levelsController
 	vlog      valueLog
 	writeCh   chan *request
-	flushChan chan *memTable // For flushing memtables.
+	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
 	blockWrites atomic.Int32
@@ -233,7 +233,7 @@ func Open(opt Options) (*DB, error) {
 
 	db := &DB{
 		imm:              make([]*memTable, 0, opt.NumMemtables),
-		flushChan:        make(chan *memTable, opt.NumMemtables),
+		flushChan:        make(chan flushTask, opt.NumMemtables),
 		writeCh:          make(chan *request, kvWriteChCapacity),
 		opt:              opt,
 		manifest:         manifestFile,
@@ -347,11 +347,11 @@ func Open(opt Options) (*DB, error) {
 
 		db.closers.memtable = z.NewCloser(1)
 		go func() {
-			db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
+			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 		// Flush them to disk asap.
 		for _, mt := range db.imm {
-			db.flushChan <- mt
+			db.flushChan <- flushTask{mt: mt}
 		}
 	}
 	// We do increment nextTxnTs below. So, no need to do it here.
@@ -565,12 +565,12 @@ func (db *DB) close() (err error) {
 		} else {
 			db.opt.Debugf("Flushing memtable")
 			for {
-				pushedMemTable := func() bool {
+				pushedFlushTask := func() bool {
 					db.lock.Lock()
 					defer db.lock.Unlock()
 					y.AssertTrue(db.mt != nil)
 					select {
-					case db.flushChan <- db.mt:
+					case db.flushChan <- flushTask{mt: db.mt}:
 						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 						db.mt = nil                    // Will segfault if we try writing!
 						db.opt.Debugf("pushed to flush chan\n")
@@ -583,7 +583,7 @@ func (db *DB) close() (err error) {
 					}
 					return false
 				}()
-				if pushedMemTable {
+				if pushedFlushTask {
 					break
 				}
 				time.Sleep(10 * time.Millisecond)
@@ -852,7 +852,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 		count += len(b.Entries)
 		var i uint64
-		var err error
 		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
 			if i%100 == 0 {
@@ -1019,7 +1018,7 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 
 	select {
-	case db.flushChan <- db.mt:
+	case db.flushChan <- flushTask{mt: db.mt}:
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
@@ -1041,12 +1040,12 @@ func arenaSize(opt Options) int64 {
 }
 
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *table.Builder {
+func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
+	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
-
 	b := table.NewTableBuilder(bopts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		if len(dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), dropPrefixes) {
+	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
 		}
 		vs := iter.Value()
@@ -1056,15 +1055,23 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-
 	return b
 }
 
-// handleMemTableFlush must be run serially.
-func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
+type flushTask struct {
+	mt           *memTable
+	dropPrefixes [][]byte
+}
+
+// handleFlushTask must be run serially.
+func (db *DB) handleFlushTask(ft flushTask) error {
+	// There can be a scenario, when empty memtable is flushed.
+	if ft.mt.sl.Empty() {
+		return nil
+	}
+
 	bopts := buildTableOptions(db)
-	itr := mt.sl.NewUniIterator(false)
-	builder := buildL0Table(itr, nil, bopts)
+	builder := buildL0Table(ft, bopts)
 	defer builder.Close()
 
 	// buildL0Table can return nil if the none of the items in the skiplist are
@@ -1093,39 +1100,39 @@ func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	return err
 }
 
-// flushMemtable must keep running until we send it an empty memtable. If there
-// are errors during handling the memtable flush, we'll retry indefinitely.
-func (db *DB) flushMemtable(lc *z.Closer) {
+// flushMemtable must keep running until we send it an empty flushTask. If there
+// are errors during handling the flush task, we'll retry indefinitely.
+func (db *DB) flushMemtable(lc *z.Closer) error {
 	defer lc.Done()
 
-	for mt := range db.flushChan {
-		if mt == nil {
+	for ft := range db.flushChan {
+		if ft.mt == nil {
+			// We close db.flushChan now, instead of sending a nil ft.mt.
 			continue
 		}
-
 		for {
-			if err := db.handleMemTableFlush(mt, nil); err != nil {
-				// Encountered error. Retry indefinitely.
-				db.opt.Errorf("error flushing memtable to disk: %v, retrying", err)
-				time.Sleep(time.Second)
-				continue
-			}
+			err := db.handleFlushTask(ft)
+			if err == nil {
+				// Update s.imm. Need a lock.
+				db.lock.Lock()
+				// This is a single-threaded operation. ft.mt corresponds to the head of
+				// db.imm list. Once we flush it, we advance db.imm. The next ft.mt
+				// which would arrive here would match db.imm[0], because we acquire a
+				// lock over DB when pushing to flushChan.
+				// TODO: This logic is dirty AF. Any change and this could easily break.
+				y.AssertTrue(ft.mt == db.imm[0])
+				db.imm = db.imm[1:]
+				ft.mt.DecrRef() // Return memory.
+				db.lock.Unlock()
 
-			// Update s.imm. Need a lock.
-			db.lock.Lock()
-			// This is a single-threaded operation. mt corresponds to the head of
-			// db.imm list. Once we flush it, we advance db.imm. The next mt
-			// which would arrive here would match db.imm[0], because we acquire a
-			// lock over DB when pushing to flushChan.
-			// TODO: This logic is dirty AF. Any change and this could easily break.
-			y.AssertTrue(mt == db.imm[0])
-			db.imm = db.imm[1:]
-			mt.DecrRef() // Return memory.
-			// unlock
-			db.lock.Unlock()
-			break
+				break
+			}
+			// Encountered error. Retry indefinitely.
+			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
+			time.Sleep(time.Second)
 		}
 	}
+	return nil
 }
 
 func exists(path string) (bool, error) {
@@ -1545,10 +1552,10 @@ func (db *DB) startCompactions() {
 func (db *DB) startMemoryFlush() {
 	// Start memory fluhser.
 	if db.closers.memtable != nil {
-		db.flushChan = make(chan *memTable, db.opt.NumMemtables)
+		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
 		db.closers.memtable = z.NewCloser(1)
 		go func() {
-			db.flushMemtable(db.closers.memtable)
+			_ = db.flushMemtable(db.closers.memtable)
 		}()
 	}
 }
@@ -1651,7 +1658,7 @@ func (db *DB) prepareToDrop() (func(), error) {
 		panic("Attempting to drop data in read-only mode.")
 	}
 	// In order prepare for drop, we need to block the incoming writes and
-	// write it to db. Then, flush all the pending memtable. So that, we
+	// write it to db. Then, flush all the pending flushtask. So that, we
 	// don't miss any entries.
 	if err := db.blockWrite(); err != nil {
 		return func() {}, err
@@ -1700,7 +1707,7 @@ func (db *DB) dropAll() (func(), error) {
 	if err != nil {
 		return f, err
 	}
-	// prepareToDrop will stop all the incoming write and flushes any pending memtables.
+	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
 	// Before we drop, we'll stop the compaction because anyways all the datas are going to
 	// be deleted.
 	db.stopCompactions()
@@ -1782,8 +1789,13 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 			memtable.DecrRef()
 			continue
 		}
+		task := flushTask{
+			mt: memtable,
+			// Ensure that the head of value log gets persisted to disk.
+			dropPrefixes: filtered,
+		}
 		db.opt.Debugf("Flushing memtable")
-		if err := db.handleMemTableFlush(memtable, filtered); err != nil {
+		if err := db.handleFlushTask(task); err != nil {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
 		}
