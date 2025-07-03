@@ -923,7 +923,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 	reqLen := new(expvar.Int)
 	y.PendingWritesSet(db.opt.MetricsEnabled, db.opt.Dir, reqLen)
 
-	reqs := make([]*request, 0, 10)
+	reqs := make([]*request, 0, 5)
 	for {
 		var r *request
 		select {
@@ -936,7 +936,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 			reqs = append(reqs, r)
 			reqLen.Set(int64(len(reqs)))
 
-			if len(reqs) >= 3*kvWriteChCapacity {
+			if len(reqs) >= 5 {
 				pendingCh <- struct{}{} // blocking.
 				goto writeCase
 			}
@@ -967,7 +967,7 @@ func (db *DB) doWrites(lc *z.Closer) {
 
 	writeCase:
 		go writeRequests(reqs)
-		reqs = make([]*request, 0, 10)
+		reqs = make([]*request, 0, 5)
 		reqLen.Set(0)
 	}
 }
