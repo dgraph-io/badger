@@ -1,0 +1,47 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    gosec:
+      excludes:
+        - G114
+        - G204
+        - G306
+        - G404
+        - G115
+    lll:
+      line-length: 120
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
