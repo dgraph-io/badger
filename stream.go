@@ -219,12 +219,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			item := itr.Item()
 			if bytes.Equal(item.Key(), prevKey) {
 				itr.Next()
+				fmt.Println("NEXT", time.Since(t1), t1, threadId)
 				continue
 			}
 			prevKey = append(prevKey[:0], item.Key()...)
 
 			// Check if we reached the end of the key range.
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
+				fmt.Println("EXIT", time.Since(t1), t1, threadId)
 				break
 			}
 
