@@ -143,7 +143,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // keyRange is [start, end), including start, excluding end. Do ensure that the start,
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
-	ranges := st.db.Ranges(st.Prefix, 16)
+	ranges := st.db.Ranges(st.Prefix, st.NumGo)
 	y.AssertTrue(len(ranges) > 0)
 	y.AssertTrue(ranges[0].left == nil)
 	y.AssertTrue(ranges[len(ranges)-1].right == nil)
