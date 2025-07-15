@@ -201,6 +201,11 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		var scanned int
 
 		sendIt := func() error {
+			fmt.Println("*****BADGER SENDING*****", threadId)
+			t1 := time.Now()
+			defer func() {
+				fmt.Println("*****BADGER SENT*****", time.Since(t1), threadId)
+			}()
 			select {
 			case st.kvChan <- outList:
 				outList = z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
@@ -219,14 +224,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			item := itr.Item()
 			if bytes.Equal(item.Key(), prevKey) {
 				itr.Next()
-				fmt.Println("NEXT", time.Since(t1), t1, threadId)
+				fmt.Println("*****BADGER NEXT*****", time.Since(t1), t1, threadId)
 				continue
 			}
 			prevKey = append(prevKey[:0], item.Key()...)
 
 			// Check if we reached the end of the key range.
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
-				fmt.Println("EXIT", time.Since(t1), t1, threadId)
+				fmt.Println("*****BADGER EXIT*****", time.Since(t1), t1, threadId)
 				break
 			}
 
@@ -255,8 +260,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 					return err
 				}
 			}
-			fmt.Println("DONE FOR KEY", time.Since(t1), t1, threadId)
+			fmt.Println("*****BADGER DONE FOR KEY*****", time.Since(t1), t1, threadId)
 		}
+		fmt.Println("*****BADGER DONE FOR RANGE*****", threadId)
 		// Mark the stream as done.
 		if st.doneMarkers {
 			kv := &pb.KV{
@@ -279,7 +285,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if err := iterate(kr); err != nil {
 				return err
 			}
-			fmt.Println("DONE FOR RANGE, took", time.Since(t1), kr)
+			fmt.Println("*****BADGER DONE FOR RANGE*****", time.Since(t1), kr, threadId)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
