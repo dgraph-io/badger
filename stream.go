@@ -8,6 +8,7 @@ package badger
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -184,9 +185,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
-		iterOpts.AllVersions = true
+		iterOpts.AllVersions = false
 		iterOpts.Prefix = st.Prefix
-		iterOpts.PrefetchValues = false
+		iterOpts.PrefetchValues = true
 		iterOpts.SinceTs = st.SinceTs
 		itr := txn.NewIterator(iterOpts)
 		itr.ThreadId = threadId
@@ -270,9 +271,11 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				// Done with the keys.
 				return nil
 			}
+			t1 := time.Now()
 			if err := iterate(kr); err != nil {
 				return err
 			}
+			fmt.Println("DONE FOR RANGE, took", time.Since(t1), kr)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
