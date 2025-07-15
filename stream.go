@@ -253,7 +253,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 					return err
 				}
 			}
-			fmt.Println("DONE FOR KEY", time.Since(t1), t1)
+			fmt.Println("DONE FOR KEY", time.Since(t1), t1, threadId)
 		}
 		// Mark the stream as done.
 		if st.doneMarkers {
