@@ -8,7 +8,6 @@ package badger
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -76,6 +75,8 @@ type Stream struct {
 	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
+	KeyToListWithThreadId func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
+	UseKeyToListWithThreadId bool
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
@@ -201,11 +202,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		var scanned int
 
 		sendIt := func() error {
-			fmt.Println("*****BADGER SENDING*****", threadId)
-			t1 := time.Now()
-			defer func() {
-				fmt.Println("*****BADGER SENT*****", time.Since(t1), threadId)
-			}()
 			select {
 			case st.kvChan <- outList:
 				outList = z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
@@ -219,19 +215,16 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
-			t1 := time.Now()
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
 			item := itr.Item()
 			if bytes.Equal(item.Key(), prevKey) {
 				itr.Next()
-				fmt.Println("*****BADGER NEXT*****", time.Since(t1), t1, threadId)
 				continue
 			}
 			prevKey = append(prevKey[:0], item.Key()...)
 
 			// Check if we reached the end of the key range.
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
-				fmt.Println("*****BADGER EXIT*****", time.Since(t1), t1, threadId)
 				break
 			}
 
@@ -242,7 +235,13 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 			// Now convert to key value.
 			itr.Alloc.Reset()
-			list, err := st.KeyToList(item.KeyCopy(nil), itr)
+			var list *pb.KVList
+			var err error
+			if st.UseKeyToListWithThreadId {
+				list, err = st.KeyToListWithThreadId(item.KeyCopy(nil), itr, threadId)
+			} else {
+				list, err = st.KeyToList(item.KeyCopy(nil), itr)
+			}
 			if err != nil {
 				st.db.opt.Warningf("While reading key: %x, got error: %v", item.Key(), err)
 				continue
@@ -260,9 +259,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 					return err
 				}
 			}
-			fmt.Println("*****BADGER DONE FOR KEY*****", time.Since(t1), t1, threadId)
 		}
-		fmt.Println("*****BADGER DONE FOR RANGE*****", threadId)
 		// Mark the stream as done.
 		if st.doneMarkers {
 			kv := &pb.KV{
@@ -281,11 +278,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				// Done with the keys.
 				return nil
 			}
-			t1 := time.Now()
 			if err := iterate(kr); err != nil {
 				return err
 			}
-			fmt.Println("*****BADGER DONE FOR RANGE*****", time.Since(t1), kr, threadId)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
