@@ -74,10 +74,10 @@ type Stream struct {
 	// instead using the allocator assigned to that thread id.
 	//
 	// Note: Calls to KeyToList are concurrent.
-	KeyToList                func(key []byte, itr *Iterator) (*pb.KVList, error)
+	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 	// UseKeyToListWithThreadId is used to indicate that KeyToListWithThreadId should be used
 	// instead of KeyToList. This is a new api that can be used to figure out parallelism
-	// of the stream. Each threadId would be run serially. KeyToList being concurrent makes you 
+	// of the stream. Each threadId would be run serially. KeyToList being concurrent makes you
 	// take care of concurrency in KeyToList. Here threadId could be used to do some things serially.
 	// Once a thread finishes FinishThread() would be called.
 	UseKeyToListWithThreadId bool
