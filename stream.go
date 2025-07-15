@@ -75,9 +75,14 @@ type Stream struct {
 	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList                func(key []byte, itr *Iterator) (*pb.KVList, error)
+	// UseKeyToListWithThreadId is used to indicate that KeyToListWithThreadId should be used
+	// instead of KeyToList. This is a new api that can be used to figure out parallelism
+	// of the stream. Each threadId would be run serially. KeyToList being concurrent makes you 
+	// take care of concurrency in KeyToList. Here threadId could be used to do some things serially.
+	// Once a thread finishes FinishThread() would be called.
+	UseKeyToListWithThreadId bool
 	KeyToListWithThreadId    func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
 	FinishThread             func(threadId int) (*pb.KVList, error)
-	UseKeyToListWithThreadId bool
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
