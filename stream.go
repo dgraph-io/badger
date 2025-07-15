@@ -74,9 +74,9 @@ type Stream struct {
 	// instead using the allocator assigned to that thread id.
 	//
 	// Note: Calls to KeyToList are concurrent.
-	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
-	KeyToListWithThreadId func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
-	FinishThread func(threadId int) (*pb.KVList, error)
+	KeyToList                func(key []byte, itr *Iterator) (*pb.KVList, error)
+	KeyToListWithThreadId    func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
+	FinishThread             func(threadId int) (*pb.KVList, error)
 	UseKeyToListWithThreadId bool
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
@@ -187,7 +187,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
-		iterOpts.AllVersions = false
+		iterOpts.AllVersions = true
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = true
 		iterOpts.SinceTs = st.SinceTs
