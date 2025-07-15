@@ -214,6 +214,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
+			t1 := time.Now()
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
 			item := itr.Item()
 			if bytes.Equal(item.Key(), prevKey) {
@@ -252,6 +253,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 					return err
 				}
 			}
+			fmt.Println("DONE FOR KEY", time.Since(t1), t1)
 		}
 		// Mark the stream as done.
 		if st.doneMarkers {
