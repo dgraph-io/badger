@@ -75,6 +75,14 @@ type Stream struct {
 	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
+	// UseKeyToListWithThreadId is used to indicate that KeyToListWithThreadId should be used
+	// instead of KeyToList. This is a new api that can be used to figure out parallelism
+	// of the stream. Each threadId would be run serially. KeyToList being concurrent makes you
+	// take care of concurrency in KeyToList. Here threadId could be used to do some things serially.
+	// Once a thread finishes FinishThread() would be called.
+	UseKeyToListWithThreadId bool
+	KeyToListWithThreadId    func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
+	FinishThread             func(threadId int) (*pb.KVList, error)
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
@@ -143,7 +151,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // keyRange is [start, end), including start, excluding end. Do ensure that the start,
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
-	ranges := st.db.Ranges(st.Prefix, 16)
+	ranges := st.db.Ranges(st.Prefix, st.NumGo)
 	y.AssertTrue(len(ranges) > 0)
 	y.AssertTrue(ranges[0].left == nil)
 	y.AssertTrue(ranges[len(ranges)-1].right == nil)
@@ -186,7 +194,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
 		iterOpts.Prefix = st.Prefix
-		iterOpts.PrefetchValues = false
+		iterOpts.PrefetchValues = true
 		iterOpts.SinceTs = st.SinceTs
 		itr := txn.NewIterator(iterOpts)
 		itr.ThreadId = threadId
@@ -233,7 +241,13 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 			// Now convert to key value.
 			itr.Alloc.Reset()
-			list, err := st.KeyToList(item.KeyCopy(nil), itr)
+			var list *pb.KVList
+			var err error
+			if st.UseKeyToListWithThreadId {
+				list, err = st.KeyToListWithThreadId(item.KeyCopy(nil), itr, threadId)
+			} else {
+				list, err = st.KeyToList(item.KeyCopy(nil), itr)
+			}
 			if err != nil {
 				st.db.opt.Warningf("While reading key: %x, got error: %v", item.Key(), err)
 				continue
@@ -249,6 +263,23 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				}
 				if err := sendIt(); err != nil {
 					return err
+				}
+			}
+		}
+
+		if st.UseKeyToListWithThreadId {
+			if kvs, err := st.FinishThread(threadId); err != nil {
+				return err
+			} else {
+				for _, kv := range kvs.Kv {
+					kv.StreamId = streamId
+					KVToBuffer(kv, outList)
+					if outList.LenNoPadding() < batchSize {
+						continue
+					}
+					if err := sendIt(); err != nil {
+						return err
+					}
 				}
 			}
 		}
