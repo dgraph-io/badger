@@ -76,6 +76,7 @@ type Stream struct {
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 	KeyToListWithThreadId func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
+	FinishThread func(threadId int) (*pb.KVList, error)
 	UseKeyToListWithThreadId bool
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
@@ -257,6 +258,23 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				}
 				if err := sendIt(); err != nil {
 					return err
+				}
+			}
+		}
+
+		if st.UseKeyToListWithThreadId {
+			if kvs, err := st.FinishThread(threadId); err != nil {
+				return err
+			} else {
+				for _, kv := range kvs.Kv {
+					kv.StreamId = streamId
+					KVToBuffer(kv, outList)
+					if outList.LenNoPadding() < batchSize {
+						continue
+					}
+					if err := sendIt(); err != nil {
+						return err
+					}
 				}
 			}
 		}
