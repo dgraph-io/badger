@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- chore(deps): Upgrade to Go 1.24.5
 - chore(deps): Remove dependency on github.com/pkg/errors (#2184)
 - chore(deps): Migrate from OpenCensus to OpenTelemetry (#2169)
 
