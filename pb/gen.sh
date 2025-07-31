@@ -5,7 +5,7 @@
 
 # Check if protoc version matches expected version first
 EXPECTED_PROTOC_VERSION="3.21.12"
-ACTUAL_PROTOC_VERSION=$(protoc --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+ACTUAL_PROTOC_VERSION=$(protoc --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' || true)
 
 if [[ ${ACTUAL_PROTOC_VERSION} != "${EXPECTED_PROTOC_VERSION}" ]]; then
 	echo "Warning: protoc version mismatch"
