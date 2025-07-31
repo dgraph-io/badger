@@ -9,6 +9,11 @@ permissions:
   checks: write
 
 jobs:
+  install-jq:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
   trunk-code-quality:
     name: Trunk Code Quality
     uses: hypermodeinc/.github/.github/workflows/trunk.yml@main
