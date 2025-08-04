@@ -3,19 +3,19 @@
 version: 0.1
 
 cli:
-  version: 1.22.10
+  version: 1.24.0
 
 # Trunk provides extensibility via plugins. (https://docs.trunk.io/plugins)
 plugins:
   sources:
     - id: trunk
-      ref: v1.6.7
+      ref: v1.7.1
       uri: https://github.com/trunk-io/plugins
 
 # Many linters and tools depend on runtimes - configure them here. (https://docs.trunk.io/runtimes)
 runtimes:
   enabled:
-    - go@1.23.5
+    - go@1.24.5
     - node@18.20.5
     - python@3.10.8
 
@@ -26,23 +26,24 @@ lint:
       paths:
         - "*.pb.go"
   enabled:
-    - trivy@0.59.1
-    - renovate@39.169.3
+    - golangci-lint2@2.3.1
+    - trivy@0.64.1
+    - renovate@41.51.2
     - actionlint@1.7.7
-    - checkov@3.2.369
+    - checkov@3.2.457
     - git-diff-check
     - gofmt@1.20.4
-    - golangci-lint@1.63.4
-    - markdownlint@0.44.0
-    - osv-scanner@1.9.2
-    - oxipng@9.1.3
-    - prettier@3.5.0
+    - golangci-lint@1.64.8
+    - markdownlint@0.45.0
+    - osv-scanner@2.0.3
+    - oxipng@9.1.5
+    - prettier@3.6.2
     - shellcheck@0.10.0
     - shfmt@3.6.0
-    - svgo@3.3.2
+    - svgo@4.0.0
     - taplo@0.9.3
-    - trufflehog@3.88.7
-    - yamllint@1.35.1
+    - trufflehog@3.90.2
+    - yamllint@1.37.1
 actions:
   enabled:
     - trunk-announce
