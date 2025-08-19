@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- chore(deps): Upgrade to Go 1.24.5 and downstream indirect packages dependencies
+- chore(test): Adapt the test.sh script to run on OS-X (as well as Linux)
+- chore: skip protoc generation if protoc is missing or not correct version
 - chore(deps): Remove dependency on github.com/pkg/errors (#2184)
 - chore(deps): Migrate from OpenCensus to OpenTelemetry (#2169)
 

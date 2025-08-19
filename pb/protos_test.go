@@ -15,10 +15,11 @@ import (
 func Exec(argv ...string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 
-	if err := cmd.Start(); err != nil {
-		return err
+	output, err := cmd.CombinedOutput()
+	if len(output) > 0 {
+		print(string(output))
 	}
-	return cmd.Wait()
+	return err
 }
 
 func TestProtosRegenerate(t *testing.T) {

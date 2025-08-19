@@ -41,7 +41,7 @@ manual() {
 	rm -rf p
 	set -e
 	go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose$' -failfast --manual=true && write_coverage || return 1
-	truncate --size=4096 p/000000.vlog
+	dd if=/dev/null of=p/000000.vlog bs=1 seek=4096 count=0 2>/dev/null
 	go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose2$' -failfast --manual=true && write_coverage || return 1
 	go test $tags $timeout $covermode $coverprofile -run='TestTruncateVlogNoClose3$' -failfast --manual=true && write_coverage || return 1
 	rm -rf p
@@ -78,9 +78,9 @@ stream() {
 	pushd badger
 	baseDir=$(mktemp -d -p .)
 	./badger benchmark write -s --dir=$baseDir/test | tee $baseDir/log.txt
-	./badger benchmark read --dir=$baseDir/test --full-scan | tee --append $baseDir/log.txt
-	./badger benchmark read --dir=$baseDir/test -d=30s | tee --append $baseDir/log.txt
-	./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee --append $baseDir/log.txt
+	./badger benchmark read --dir=$baseDir/test --full-scan | tee -a $baseDir/log.txt
+	./badger benchmark read --dir=$baseDir/test -d=30s | tee -a $baseDir/log.txt
+	./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee -a $baseDir/log.txt
 	count=$(cat "$baseDir/log.txt" | grep "at program end: 0 B" | wc -l)
 	rm -rf $baseDir
 	if [ $count -ne 4 ]; then

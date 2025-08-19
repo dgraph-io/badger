@@ -743,7 +743,6 @@ func TestStreamWriterIncremental(t *testing.T) {
 	t.Run("multiple incremental with older data first", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			buf := z.NewBuffer(10<<20, "test")
-			defer func() { require.NoError(t, buf.Release()) }()
 			KVToBuffer(&pb.KV{
 				Key:     []byte("a1"),
 				Value:   []byte("val1"),
@@ -755,7 +754,6 @@ func TestStreamWriterIncremental(t *testing.T) {
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			buf = z.NewBuffer(10<<20, "test")
-			defer func() { require.NoError(t, buf.Release()) }()
 			KVToBuffer(&pb.KV{
 				Key:     []byte("a2"),
 				Value:   []byte("val2"),
@@ -765,6 +763,9 @@ func TestStreamWriterIncremental(t *testing.T) {
 			require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
 			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+			// Single defer at the end to release the final buffer
+			defer func() { require.NoError(t, buf.Release()) }()
 
 			// This will move the maxTs to 10 (earlier, without the fix)
 			require.NoError(t, db.Update(func(txn *Txn) error {
