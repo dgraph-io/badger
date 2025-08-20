@@ -15,7 +15,7 @@ jobs:
   badger-build-amd64:
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "${{ github.event.inputs.releasetag }}"
       - name: Set up Go
@@ -56,7 +56,7 @@ jobs:
   badger-build-arm64:
     runs-on: warp-ubuntu-latest-arm64-4x
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: "${{ github.event.inputs.releasetag }}"
       - name: Set up Go

@@ -17,7 +17,7 @@ jobs:
     runs-on: warp-ubuntu-latest-x64-16x
     steps:
       - name: Checkout Dgraph repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: hypermodeinc/dgraph
           ref: main
