@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   badger-build-amd64:
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,7 +54,7 @@ jobs:
             badger/badger-linux-amd64.tar.gz
 
   badger-build-arm64:
-    runs-on: warp-ubuntu-latest-arm64-4x
+    runs-on: ubuntu-latest-arm
     steps:
       - uses: actions/checkout@v5
         with:

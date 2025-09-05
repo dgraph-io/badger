@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   badger-tests:
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Setup Go
