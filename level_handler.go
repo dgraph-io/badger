@@ -262,6 +262,95 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 	return []*table.Table{tbl}, tbl.DecrRef
 }
 
+// checkInsideIteator checks if the key is present in the iterator or not. It updates maxVs if the value is
+// found.
+func (s *levelHandler) checkInsideIterator(key []byte, it *table.Iterator, maxVs *y.ValueStruct) {
+	y.NumLSMGetsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
+	it.Seek(key)
+	if !it.Valid() {
+		return
+	}
+	if !y.SameKey(key, it.Key()) {
+		return
+	}
+	if version := y.ParseTs(it.Key()); maxVs.Version < version {
+		*maxVs = it.ValueCopy()
+		maxVs.Version = version
+	}
+}
+
+func (s *levelHandler) getBatch(keys [][]byte, keysRead []bool) ([]y.ValueStruct, error) {
+	// Find the table for which the key is in, and then seek it. There's a good chance that they next key to be
+	// searched, is in the same table as well. Hence, we store the iterators found. If we don't find the results
+	// in the given table, we would need to search again. Worst case, this function could be a little worse than
+	// getting the n keys, in n different get calls.
+	createIteratorsForEachTable := func(key []byte) (y.ValueStruct, func() error, []*table.Iterator) {
+		tables, decr := s.getTableForKey(key)
+		keyNoTs := y.ParseKey(key)
+		itrs := make([]*table.Iterator, 0)
+
+		hash := y.Hash(keyNoTs)
+		var maxVs y.ValueStruct
+		for _, th := range tables {
+			if th.DoesNotHave(hash) {
+				y.NumLSMBloomHitsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
+				continue
+			}
+
+			it := th.NewIterator(0)
+			itrs = append(itrs, it)
+			s.checkInsideIterator(key, it, &maxVs)
+		}
+
+		return maxVs, decr, itrs
+	}
+
+	// Use old results from createIteratorsForEachTable and find in those tables.
+	findInIterators := func(key []byte, itrs []*table.Iterator) y.ValueStruct {
+		var maxVs y.ValueStruct
+		for _, it := range itrs {
+			s.checkInsideIterator(key, it, &maxVs)
+		}
+		return maxVs
+	}
+
+	results := make([]y.ValueStruct, len(keys))
+
+	decr := func() error { return nil }
+	var itrs []*table.Iterator
+
+	close_iters := func() {
+		for _, itr := range itrs {
+			itr.Close()
+		}
+	}
+
+	defer close_iters()
+
+	for i := 0; i < len(keys); i++ {
+		if keysRead[i] {
+			continue
+		}
+		// If there are no iterators present, create new iterators
+		if len(itrs) == 0 {
+			results[i], decr, itrs = createIteratorsForEachTable(keys[i])
+		} else {
+			results[i] = findInIterators(keys[i], itrs)
+			// If we can't find in the current tables, then data is there in other tables. We would
+			// then need to close iterators, call decr() and then recreate new iterators.
+			if len(results[i].Value) == 0 {
+				close_iters()
+				if err := decr(); err != nil {
+					return nil, err
+				}
+				results[i], decr, itrs = createIteratorsForEachTable(keys[i])
+			}
+		}
+	}
+
+	return results, decr()
+}
+
 // get returns value for a given key or the key after that. If not found, return nil.
 func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
@@ -278,17 +367,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		it := th.NewIterator(0)
 		defer it.Close()
 
-		y.NumLSMGetsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
-		it.Seek(key)
-		if !it.Valid() {
-			continue
-		}
-		if y.SameKey(key, it.Key()) {
-			if version := y.ParseTs(it.Key()); maxVs.Version < version {
-				maxVs = it.ValueCopy()
-				maxVs.Version = version
-			}
-		}
+		s.checkInsideIterator(key, it, &maxVs)
 	}
 	return maxVs, decr()
 }
