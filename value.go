@@ -252,7 +252,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			//
 			// NOTE: moveKeyi is the gc'ed version of the original key with version i
 			// We're calling the gc'ed keys as moveKey to simplify the
-			// explanantion. We used to add move keys but we no longer do that.
+			// explanation. We used to add move keys but we no longer do that.
 			//
 			// Assume we have 3 move keys in L0.
 			// - moveKey1 (points to vlog file 10),

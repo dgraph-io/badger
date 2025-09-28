@@ -458,7 +458,7 @@ func TestSendOnClosedStream(t *testing.T) {
 
 	// Defer for panic.
 	defer func() {
-		require.NotNil(t, recover(), "should have paniced")
+		require.NotNil(t, recover(), "should have panicked")
 		require.NoError(t, sw.Flush())
 		require.NoError(t, db.Close())
 	}()
@@ -514,7 +514,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 
 	// Defer for panic.
 	defer func() {
-		require.NotNil(t, recover(), "should have paniced")
+		require.NotNil(t, recover(), "should have panicked")
 		require.NoError(t, sw.Flush())
 		require.NoError(t, db.Close())
 	}()

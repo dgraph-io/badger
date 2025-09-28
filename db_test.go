@@ -34,7 +34,7 @@ import (
 // have occurred on the channel `ch`. We log messages or generate errors using `t`.
 func waitForMessage(ch chan string, expected string, count int, timeout int, t *testing.T) {
 	if count <= 0 {
-		t.Logf("Will skip waiting for %s since exected count <= 0.",
+		t.Logf("Will skip waiting for %s since expected count <= 0.",
 			expected)
 		return
 	}
@@ -504,7 +504,7 @@ func dirSize(path string) (int64, error) {
 // New keys are created with each for-loop iteration. During each
 // iteration, the previous for-loop iteration's keys are deleted.
 //
-// To reproduce continous growth problem due to `badgerMove` keys,
+// To reproduce continuous growth problem due to `badgerMove` keys,
 // update `value.go` `discardEntry` line 1628 to return false
 //
 // Also with PR #1303, the delete keys are properly cleaned which
@@ -2169,7 +2169,7 @@ func TestForceFlushMemtable(t *testing.T) {
 	ops.ValueLogMaxEntries = 1
 
 	db, err := Open(ops)
-	require.NoError(t, err, "error while openning db")
+	require.NoError(t, err, "error while opening db")
 	defer func() { require.NoError(t, db.Close()) }()
 
 	for i := 0; i < 3; i++ {

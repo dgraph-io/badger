@@ -356,7 +356,7 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, 
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity() bool {
-	// If encryption/compression is enabled then use the compresssed size.
+	// If encryption/compression is enabled then use the compressed size.
 	sumBlockSizes := b.compressedSize.Load()
 	if b.opts.Compression == options.None && b.opts.DataKey == nil {
 		sumBlockSizes = b.uncompressedSize.Load()
