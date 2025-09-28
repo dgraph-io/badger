@@ -45,7 +45,7 @@ type testOnlyDBExtensions struct {
 // logToSyncChan sends a message to the DB's syncChan. Note that we expect
 // that the DB never closes this channel; the responsibility for
 // allocating and closing the channel belongs to the test module.
-// if db.syncChan is nil or has never been initialized, ths will be
+// if db.syncChan is nil or has never been initialized, this will be
 // silently ignored.
 func (db *DB) logToSyncChan(msg string) {
 	if db.syncChan != nil {
@@ -55,7 +55,7 @@ func (db *DB) logToSyncChan(msg string) {
 
 // captureDiscardStats will copy the contents of the discardStats file
 // maintained by vlog to the onCloseDiscardCapture map specified by
-// db.opt. Of couse, if db.opt.onCloseDiscardCapture is nil (as expected
+// db.opt. Of course, if db.opt.onCloseDiscardCapture is nil (as expected
 // for a production system as opposed to a test system), this is a no-op.
 func (db *DB) captureDiscardStats() {
 	if db.onCloseDiscardCapture != nil {

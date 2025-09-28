@@ -1573,7 +1573,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	}
 
 	for !s.levels[0].tryAddLevel0Table(t) {
-		// Before we unstall, we need to make sure that level 0 is healthy.
+		// Before we uninstall, we need to make sure that level 0 is healthy.
 		timeStart := time.Now()
 		for s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTablesStall {
 			time.Sleep(10 * time.Millisecond)

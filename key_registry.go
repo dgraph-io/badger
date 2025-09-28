@@ -246,7 +246,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt KeyRegistryOptions) error {
 		var err error
 		eSanity, err = y.XORBlockAllocate(eSanity, opt.EncryptionKey, iv)
 		if err != nil {
-			return y.Wrapf(err, "Error while encrpting sanity text in WriteKeyRegistry")
+			return y.Wrapf(err, "Error while encrypting sanity text in WriteKeyRegistry")
 		}
 	}
 	y.Check2(buf.Write(iv))
@@ -310,7 +310,7 @@ func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
 	// validKey return datakey if the last generated key duration less than
 	// rotation duration.
 	validKey := func() (*pb.DataKey, bool) {
-		// Time diffrence from the last generated time.
+		// Time difference from the last generated time.
 		diff := time.Since(time.Unix(kr.lastCreated, 0))
 		if diff < kr.opt.EncryptionKeyRotationDuration {
 			return kr.dataKeys[kr.nextKeyID], true

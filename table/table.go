@@ -214,7 +214,7 @@ func (b *Block) decrRef() {
 		return
 	}
 
-	// Insert the []byte into pool only if the block is resuable. When a block
+	// Insert the []byte into pool only if the block is reusable. When a block
 	// is reusable a new []byte is used for decompression and this []byte can
 	// be reused.
 	// In case of an uncompressed block, the []byte is a reference to the
@@ -332,7 +332,7 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 }
 
 func (t *Table) initBiggestAndSmallest() error {
-	// This defer will help gathering debugging info incase initIndex crashes.
+	// This defer will help gathering debugging info in case initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
 			// Use defer for printing info because there may be an intermediate panic.

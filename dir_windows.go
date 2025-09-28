@@ -74,7 +74,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	// FILE_ATTRIBUTE_TEMPORARY is used to tell Windows to try to create the handle in memory.
 	// FILE_FLAG_DELETE_ON_CLOSE is not specified in syscall_windows.go but tells Windows to delete
 	// the file when all processes holding the handler are closed.
-	// XXX: this works but it's a bit klunky. i'd prefer to use LockFileEx but it needs unsafe pkg.
+	// XXX: this works but it's a bit clunky. i'd prefer to use LockFileEx but it needs unsafe pkg.
 	h, err := syscall.CreateFile(
 		syscall.StringToUTF16Ptr(absLockFilePath), 0, 0, nil,
 		syscall.OPEN_ALWAYS,
