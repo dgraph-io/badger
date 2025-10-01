@@ -22,14 +22,14 @@ jobs:
           repository: hypermodeinc/dgraph
           ref: main
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Fetch latest Badger version
         run: |
           go get github.com/dgraph-io/badger/v4@main
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 16 || 22
       - name: Install protobuf-compiler
