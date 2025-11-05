@@ -3,8 +3,7 @@
 We wrote Badger with these design goals in mind:
 
 - Write a key-value database in pure Go
-- Use latest research to build the fastest KV database for data sets spanning
-  terabytes
+- Use latest research to build the fastest KV database for data sets spanning terabytes
 - Optimize for modern storage devices
 
 Badger’s design is based on a paper titled
@@ -12,8 +11,8 @@ Badger’s design is based on a paper titled
 
 ## References
 
-The following blog posts are a great starting point for learning more about
-Badger and the underlying design principles:
+The following blog posts are a great starting point for learning more about Badger and the
+underlying design principles:
 
 - [Introducing Badger: A fast key-value store written natively in Go](https://hypermode.com/blog/badger/)
 - [Make Badger crash resilient with ALICE](https://hypermode.com/blog/alice/)
@@ -37,22 +36,19 @@ Badger and the underlying design principles:
 | TTL support                   | Yes                                    | Yes                          | No      |
 | 3D access (key-value-version) | Yes<sup>4</sup>                        | No                           | No      |
 
-<sup>1</sup> The WiscKey paper (on which Badger is based) saw big wins with
-separating values from keys, significantly reducing the write amplification
-compared to a typical LSM tree.
+<sup>1</sup> The WiscKey paper (on which Badger is based) saw big wins with separating values from
+keys, significantly reducing the write amplification compared to a typical LSM tree.
 
-<sup>2</sup> RocksDB is an SSD-optimized version of LevelDB, which was designed
-specifically for rotating disks. As such RocksDB's design isn't aimed at SSDs.
+<sup>2</sup> RocksDB is an SSD-optimized version of LevelDB, which was designed specifically for
+rotating disks. As such RocksDB's design isn't aimed at SSDs.
 
-<sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the
-blog post [Concurrent ACID Transactions in
-Badger](https://hypermode.com/blog/badger-txn/)
+<sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post
+[Concurrent ACID Transactions in Badger](https://hypermode.com/blog/badger-txn/)
 
-<sup>4</sup> Badger provides direct access to value versions via its Iterator
-API. Users can also specify how many versions to keep per key via Options.
+<sup>4</sup> Badger provides direct access to value versions via its Iterator API. Users can also
+specify how many versions to keep per key via Options.
 
 ## Benchmarks
 
-We've run comprehensive benchmarks against RocksDB, BoltDB, and LMDB. The
-benchmarking code with detailed logs are in the
-[badger-bench](https://github.com/dgraph-io/badger-bench) repo.
+We've run comprehensive benchmarks against RocksDB, BoltDB, and LMDB. The benchmarking code with
+detailed logs are in the [badger-bench](https://github.com/dgraph-io/badger-bench) repo.
