@@ -206,7 +206,7 @@ func get(txn *badger.Txn, k []byte) (*badger.Item, error) {
 	return nil, badger.ErrKeyNotFound
 }
 
-// seekTotal retrives the total of all accounts by seeking for each account key.
+// seekTotal retrieves the total of all accounts by seeking for each account key.
 func seekTotal(txn *badger.Txn) ([]account, error) {
 	expected := uint64(numAccounts) * initialBal
 	var accounts []account
@@ -298,7 +298,7 @@ func compareTwo(db *badger.DB, before, after uint64) {
 
 func runDisect(cmd *cobra.Command, args []string) error {
 	// The total did not match up. So, let's disect the DB to find the
-	// transction which caused the total mismatch.
+	// transaction which caused the total mismatch.
 	db, err := badger.OpenManaged(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(true).
