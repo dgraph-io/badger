@@ -1,5 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["local>hypermodeinc/renovate-config"],
-  "rangeStrategy": "widen"
+  "rangeStrategy": "widen",
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "enabled": false
+    }
+  ]
 }
