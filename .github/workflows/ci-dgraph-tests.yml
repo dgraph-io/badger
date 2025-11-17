@@ -25,6 +25,8 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
       - name: Fetch latest Badger version
         run: |
           go get github.com/dgraph-io/badger/v4@main
