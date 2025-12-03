@@ -15,4 +15,6 @@ with each release.
 
 [Design](design.md)
 
+[Encryption at rest](encryption-at-rest.md)
+
 [Troubleshooting](troubleshooting.md)
