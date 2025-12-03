@@ -261,5 +261,5 @@ If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING
 ## Contact
 
 - Please use [Github issues](https://github.com/dgraph-io/badger/issues) for filing bugs.
-- Please use [Discussions](https://github.com/orgs/dgraph-io/discussions) for questions, discussions, and
-  feature requests.
+- Please use [Discussions](https://github.com/orgs/dgraph-io/discussions) for questions,
+  discussions, and feature requests.
