@@ -22,7 +22,7 @@ lint:
   ignore:
     - linters: [ALL]
       paths:
-        - "*.pb.go"
+        - pb/*.pb.go
   enabled:
     - golangci-lint2@2.4.0
     - trivy@0.64.1
