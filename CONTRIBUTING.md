@@ -25,8 +25,8 @@ Please make sure to read and observe our [Code of Conduct](./CODE_OF_CONDUCT.md)
 ### Find a good first topic
 
 You can start by finding an existing issue with the
-[good first issue](https://github.com/hypermodeinc/badger/labels/good%20first%20issue) or
-[help wanted](https://github.com/hypermodeinc/badger/labels/help%20wanted) labels. These issues are
+[good first issue](https://github.com/dgraph-io/badger/labels/good%20first%20issue) or
+[help wanted](https://github.com/dgraph-io/badger/labels/help%20wanted) labels. These issues are
 well suited for new contributors.
 
 ## Setting up your development environment
@@ -36,7 +36,7 @@ version of Go should be **1.12** or above.
 
 ### Fork the project
 
-- Visit https://github.com/hypermodeinc/badger
+- Visit https://github.com/dgraph-io/badger
 - Click the `Fork` button (top right) to create a fork of the repository
 
 ### Clone the project
@@ -44,7 +44,7 @@ version of Go should be **1.12** or above.
 ```sh
 git clone https://github.com/$GITHUB_USER/badger
 cd badger
-git remote add upstream git@github.com:hypermodeinc/badger.git
+git remote add upstream git@github.com:dgraph-io/badger.git
 
 # Never push to the upstream master
 git remote set-url --push upstream no_push
@@ -98,7 +98,7 @@ description.
 ### Sign the CLA
 
 Click the **Sign in with Github to agree** button to sign the CLA.
-[An example](https://cla-assistant.io/hypermodeinc/badger?pullRequest=1377).
+[An example](https://cla-assistant.io/dgraph-io/badger?pullRequest=1377).
 
 ### Get a code review
 

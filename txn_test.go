@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -867,7 +867,7 @@ func TestArmV7Issue311Fix(t *testing.T) {
 
 // This test tries to perform a GetAndSet operation using multiple concurrent
 // transaction and only one of the transactions should be successful.
-// Regression test for https://github.com/hypermodeinc/badger/issues/1289
+// Regression test for https://github.com/dgraph-io/badger/issues/1289
 func TestConflict(t *testing.T) {
 	key := []byte("foo")
 	var setCount atomic.Uint32

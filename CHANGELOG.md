@@ -26,48 +26,46 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - docs: Add pagination explanation to docs (#2134)
 - Fix build for GOARCH=wasm with GOOS=js or GOOS=wasip1 (#2048)
 
-**Full Changelog**: https://github.com/hypermodeinc/badger/compare/v4.5.0...v4.5.1
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.5.0...v4.5.1
 
 ## [4.5.0] - 2024-11-29
 
-- fix the cd pipeline by @mangalaman93 in https://github.com/hypermodeinc/badger/pull/2127
+- fix the cd pipeline by @mangalaman93 in https://github.com/dgraph-io/badger/pull/2127
 - chore(deps): bump the minor group with 2 updates by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2128
+  https://github.com/dgraph-io/badger/pull/2128
 - chore(deps): bump github.com/stretchr/testify from 1.9.0 to 1.10.0 in the minor group by
-  @dependabot in https://github.com/hypermodeinc/badger/pull/2130
-- upgrade protobuf library by @shivaji-kharse in https://github.com/hypermodeinc/badger/pull/2131
+  @dependabot in https://github.com/dgraph-io/badger/pull/2130
+- upgrade protobuf library by @shivaji-kharse in https://github.com/dgraph-io/badger/pull/2131
 
-**Full Changelog**: https://github.com/hypermodeinc/badger/compare/v4.4.0...v4.5.0
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.4.0...v4.5.0
 
 ## [4.4.0] - 2024-10-26
 
 - retract v4.3.0 due to #2121 and #2113, upgrade to Go v1.23, use ristretto v2 in
-  https://github.com/hypermodeinc/badger/pull/2122
-- Allow stream custom maxsize per batch in https://github.com/hypermodeinc/badger/pull/2063
+  https://github.com/dgraph-io/badger/pull/2122
+- Allow stream custom maxsize per batch in https://github.com/dgraph-io/badger/pull/2063
 - chore(deps): bump github.com/klauspost/compress from 1.17.10 to 1.17.11 in the patch group in
-  https://github.com/hypermodeinc/badger/pull/2120
-- fix: sentinel errors should not have stack traces in
-  https://github.com/hypermodeinc/badger/pull/2042
-- chore(deps): bump the minor group with 2 updates in
-  https://github.com/hypermodeinc/badger/pull/2119
+  https://github.com/dgraph-io/badger/pull/2120
+- fix: sentinel errors should not have stack traces in https://github.com/dgraph-io/badger/pull/2042
+- chore(deps): bump the minor group with 2 updates in https://github.com/dgraph-io/badger/pull/2119
 
-**Full Changelog**: https://github.com/hypermodeinc/badger/compare/v4.3.1...v4.4.0
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.3.1...v4.4.0
 
 ## [4.3.1] - 2024-10-06
 
-- chore: update docs links by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2097
+- chore: update docs links by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2097
 - chore(deps): bump golang.org/x/sys from 0.24.0 to 0.25.0 in the minor group by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2100
+  https://github.com/dgraph-io/badger/pull/2100
 - chore(deps): bump golang.org/x/net from 0.28.0 to 0.29.0 in the minor group by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2106
+  https://github.com/dgraph-io/badger/pull/2106
 - fix: fix reverse iterator broken by seek by @harshil-goel in
-  https://github.com/hypermodeinc/badger/pull/2109
+  https://github.com/dgraph-io/badger/pull/2109
 - chore(deps): bump github.com/klauspost/compress from 1.17.9 to 1.17.10 in the patch group by
-  @dependabot in https://github.com/hypermodeinc/badger/pull/2114
-- chore(deps): bump github.com/hypermodeinc/ristretto from 0.1.2-0.20240116140435-c67e07994f91 to
-  1.0.0 by @dependabot in https://github.com/hypermodeinc/badger/pull/2112
+  @dependabot in https://github.com/dgraph-io/badger/pull/2114
+- chore(deps): bump github.com/dgraph-io/ristretto from 0.1.2-0.20240116140435-c67e07994f91 to 1.0.0
+  by @dependabot in https://github.com/dgraph-io/badger/pull/2112
 
-**Full Changelog**: https://github.com/hypermodeinc/badger/compare/v4.3.0...v4.3.1
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.3.0...v4.3.1
 
 ## [4.3.0] - 2024-08-29
 
@@ -77,75 +75,75 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 **Fixes**
 
 - chore(changelog): add a missed entry in CHANGELOG for v4.2.0 by @mangalaman93 in
-  https://github.com/hypermodeinc/badger/pull/1988
+  https://github.com/dgraph-io/badger/pull/1988
 - update README with project KVS using badger by @tauraamui in
-  https://github.com/hypermodeinc/badger/pull/1989
+  https://github.com/dgraph-io/badger/pull/1989
 - fix edge case for watermark when index is zero by @mangalaman93 in
-  https://github.com/hypermodeinc/badger/pull/1999
+  https://github.com/dgraph-io/badger/pull/1999
 - upgrade spf13/cobra to version v1.7.0 by @mangalaman93 in
-  https://github.com/hypermodeinc/badger/pull/2001
-- chore: update readme by @joshua-goldstein in https://github.com/hypermodeinc/badger/pull/2011
+  https://github.com/dgraph-io/badger/pull/2001
+- chore: update readme by @joshua-goldstein in https://github.com/dgraph-io/badger/pull/2011
 - perf: upgrade compress package test and benchmark. by @siddhant2001 in
-  https://github.com/hypermodeinc/badger/pull/2009
+  https://github.com/dgraph-io/badger/pull/2009
 - fix(Transactions): Fix resource consumption on empty write transaction by @Zach-Johnson in
-  https://github.com/hypermodeinc/badger/pull/2018
+  https://github.com/dgraph-io/badger/pull/2018
 - chore(deps): bump golang.org/x/net from 0.7.0 to 0.17.0 by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2017
+  https://github.com/dgraph-io/badger/pull/2017
 - perf(compactor): optimize allocations: use buffer for priorities by @deff7 in
-  https://github.com/hypermodeinc/badger/pull/2006
+  https://github.com/dgraph-io/badger/pull/2006
 - fix(Transaction): discard empty transactions on CommitWith by @Wondertan in
-  https://github.com/hypermodeinc/badger/pull/2031
+  https://github.com/dgraph-io/badger/pull/2031
 - fix(levelHandler): use lock for levelHandler sort tables instead of rlock by @xgzlucario in
-  https://github.com/hypermodeinc/badger/pull/2034
+  https://github.com/dgraph-io/badger/pull/2034
 - Docs: update README with project LLS using badger by @Boc-chi-no in
-  https://github.com/hypermodeinc/badger/pull/2032
+  https://github.com/dgraph-io/badger/pull/2032
 - chore: MaxTableSize has been renamed to BaseTableSize by @mitar in
-  https://github.com/hypermodeinc/badger/pull/2038
-- Update CODEOWNERS by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2043
-- Chore(): add Stale Action by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2070
+  https://github.com/dgraph-io/badger/pull/2038
+- Update CODEOWNERS by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2043
+- Chore(): add Stale Action by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2070
 - Update ristretto and refactor for use of generics by @paralin in
-  https://github.com/hypermodeinc/badger/pull/2047
-- chore: Remove obsolete comment by @mitar in https://github.com/hypermodeinc/badger/pull/2039
+  https://github.com/dgraph-io/badger/pull/2047
+- chore: Remove obsolete comment by @mitar in https://github.com/dgraph-io/badger/pull/2039
 - chore(Docs): Update jQuery 3.2.1 to 3.7.1 by @kokizzu in
-  https://github.com/hypermodeinc/badger/pull/2023
+  https://github.com/dgraph-io/badger/pull/2023
 - chore(deps): bump the go_modules group with 3 updates by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2074
-- docs(): update docs path by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2076
-- perf: fix operation in seek by @harshil-goel in https://github.com/hypermodeinc/badger/pull/2077
-- Add lakeFS to README.md by @N-o-Z in https://github.com/hypermodeinc/badger/pull/2078
-- chore(): add Dependabot by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2080
+  https://github.com/dgraph-io/badger/pull/2074
+- docs(): update docs path by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2076
+- perf: fix operation in seek by @harshil-goel in https://github.com/dgraph-io/badger/pull/2077
+- Add lakeFS to README.md by @N-o-Z in https://github.com/dgraph-io/badger/pull/2078
+- chore(): add Dependabot by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2080
 - chore(deps): bump golangci/golangci-lint-action from 4 to 6 by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2083
+  https://github.com/dgraph-io/badger/pull/2083
 - chore(deps): bump actions/upload-artifact from 3 to 4 by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2081
+  https://github.com/dgraph-io/badger/pull/2081
 - chore(deps): bump github/codeql-action from 2 to 3 by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2082
+  https://github.com/dgraph-io/badger/pull/2082
 - chore(deps): bump the minor group with 7 updates by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2089
-- Action Manager by @madhu72 in https://github.com/hypermodeinc/badger/pull/2050
+  https://github.com/dgraph-io/badger/pull/2089
+- Action Manager by @madhu72 in https://github.com/dgraph-io/badger/pull/2050
 - chore(deps): bump golang.org/x/sys from 0.23.0 to 0.24.0 in the minor group by @dependabot in
-  https://github.com/hypermodeinc/badger/pull/2091
+  https://github.com/dgraph-io/badger/pull/2091
 - chore(deps): bump github.com/golang/protobuf from 1.5.3 to 1.5.4 in the patch group by @dependabot
-  in https://github.com/hypermodeinc/badger/pull/2090
-- chore: fix some comments by @dufucun in https://github.com/hypermodeinc/badger/pull/2092
+  in https://github.com/dgraph-io/badger/pull/2090
+- chore: fix some comments by @dufucun in https://github.com/dgraph-io/badger/pull/2092
 - chore(deps): bump github.com/google/flatbuffers from 1.12.1 to 24.3.25+incompatible by @dependabot
-  in https://github.com/hypermodeinc/badger/pull/2084
+  in https://github.com/dgraph-io/badger/pull/2084
 
 **CI**
 
 - ci: change cron frequency to fix ghost jobs by @joshua-goldstein in
-  https://github.com/hypermodeinc/badger/pull/2010
+  https://github.com/dgraph-io/badger/pull/2010
 - fix(CI): Update to pull_request trigger by @ryanfoxtyler in
-  https://github.com/hypermodeinc/badger/pull/2056
-- ci/cd optimization by @ryanfoxtyler in https://github.com/hypermodeinc/badger/pull/2051
-- fix(cd): fixed cd pipeline by @harshil-goel in https://github.com/hypermodeinc/badger/pull/2093
-- fix(cd): change name by @harshil-goel in https://github.com/hypermodeinc/badger/pull/2094
+  https://github.com/dgraph-io/badger/pull/2056
+- ci/cd optimization by @ryanfoxtyler in https://github.com/dgraph-io/badger/pull/2051
+- fix(cd): fixed cd pipeline by @harshil-goel in https://github.com/dgraph-io/badger/pull/2093
+- fix(cd): change name by @harshil-goel in https://github.com/dgraph-io/badger/pull/2094
 - fix(cd): added more debug things to cd by @harshil-goel in
-  https://github.com/hypermodeinc/badger/pull/2095
+  https://github.com/dgraph-io/badger/pull/2095
 - fix(cd): removing some debug items by @harshil-goel in
-  https://github.com/hypermodeinc/badger/pull/2096
+  https://github.com/dgraph-io/badger/pull/2096
 
-**Full Changelog**: https://github.com/hypermodeinc/badger/compare/v4.2.0...v4.3.0
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.2.0...v4.3.0
 
 ## [4.2.0] - 2023-08-03
 
@@ -182,7 +180,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 This release adds support for incremental stream writer. We also do some cleanup in the docs and
 resolve some CI issues for community PR's. We resolve high and medium CVE's and fix
-[#1833](https://github.com/hypermodeinc/badger/issues/1833).
+[#1833](https://github.com/dgraph-io/badger/issues/1833).
 
 **Features**
 
@@ -191,7 +189,7 @@ resolve some CI issues for community PR's. We resolve high and medium CVE's and 
 **Fixes**
 
 - chore: upgrade xxhash from v1.1.0 to v2.1.2 (#1910) (fixes
-  [#1833](https://github.com/hypermodeinc/badger/issues/1833))
+  [#1833](https://github.com/dgraph-io/badger/issues/1833))
 
 **Security**
 
@@ -199,13 +197,13 @@ resolve some CI issues for community PR's. We resolve high and medium CVE's and 
 
 **CVEs**
 
-- [CVE-2021-31525](https://github.com/hypermodeinc/badger/security/dependabot/7)
-- [CVE-2022-41723](https://github.com/hypermodeinc/badger/security/dependabot/4)
-- [CVE-2022-27664](https://github.com/hypermodeinc/badger/security/dependabot/5)
-- [CVE-2021-33194](https://github.com/hypermodeinc/badger/security/dependabot/9)
-- [CVE-2022-41723](https://github.com/hypermodeinc/badger/security/dependabot/13)
-- [CVE-2021-33194](https://github.com/hypermodeinc/badger/security/dependabot/16)
-- [CVE-2021-38561](https://github.com/hypermodeinc/badger/security/dependabot/8)
+- [CVE-2021-31525](https://github.com/dgraph-io/badger/security/dependabot/7)
+- [CVE-2022-41723](https://github.com/dgraph-io/badger/security/dependabot/4)
+- [CVE-2022-27664](https://github.com/dgraph-io/badger/security/dependabot/5)
+- [CVE-2021-33194](https://github.com/dgraph-io/badger/security/dependabot/9)
+- [CVE-2022-41723](https://github.com/dgraph-io/badger/security/dependabot/13)
+- [CVE-2021-33194](https://github.com/dgraph-io/badger/security/dependabot/16)
+- [CVE-2021-38561](https://github.com/dgraph-io/badger/security/dependabot/8)
 
 **Chores**
 
@@ -674,7 +672,6 @@ This sections lists the changes which were reverted because of non-reproducible 
 **New APIs**
 
 - badger.Options
-
   - WithInMemory (f5b6321)
   - WithZSTDCompressionLevel (3eb4e72)
 
@@ -706,7 +703,6 @@ This sections lists the changes which were reverted because of non-reproducible 
 **New APIs**
 
 - badger.DB
-
   - NewWriteBatchAt (7f43769)
   - CacheMetrics (b9056f1)
 
@@ -784,7 +780,6 @@ _Note_: The hashes in parentheses correspond to the commits that impacted the gi
 **New APIs**
 
 - badger.DB
-
   - DropPrefix (291295e)
   - Flatten (7e41bba)
   - KeySplits (4751ef1)
@@ -795,30 +790,25 @@ _Note_: The hashes in parentheses correspond to the commits that impacted the gi
   - Sync (851e462)
 
 - badger.DefaultOptions() and badger.LSMOnlyOptions() (91ce687)
-
   - badger.Options.WithX methods
 
 - badger.Entry (e9447c9)
-
   - NewEntry
   - WithMeta
   - WithDiscard
   - WithTTL
 
 - badger.Item
-
   - KeySize (fd59907)
   - ValueSize (5242a99)
 
 - badger.IteratorOptions
-
   - PickTable (7d46029, 49a49e3)
   - Prefix (7d46029)
 
 - badger.Logger (fbb2778)
 
 - badger.Options
-
   - CompactL0OnClose (7e41bba)
   - Logger (3f66663)
   - LogRotatesToFlush (2237832)
@@ -890,7 +880,7 @@ Bug Fixes:
 
 - Fix for infinite yieldItemValue recursion. #503
 - Fix recursive addition of `badgerMove` prefix.
-  https://github.com/hypermodeinc/badger/commit/2e3a32f0ccac3066fb4206b28deb39c210c5266f
+  https://github.com/dgraph-io/badger/commit/2e3a32f0ccac3066fb4206b28deb39c210c5266f
 - Use file size based window size for sampling, instead of fixing it to 10MB. #501
 
 Cleanup:
@@ -957,23 +947,23 @@ Bug fix:
 
 - Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/hypermodeinc/badger/compare/v2.2007.2...HEAD
-[2.2007.2]: https://github.com/hypermodeinc/badger/compare/v2.2007.1...v2.2007.2
-[2.2007.1]: https://github.com/hypermodeinc/badger/compare/v2.2007.0...v2.2007.1
-[2.2007.0]: https://github.com/hypermodeinc/badger/compare/v2.0.3...v2.2007.0
-[2.0.3]: https://github.com/hypermodeinc/badger/compare/v2.0.2...v2.0.3
-[2.0.2]: https://github.com/hypermodeinc/badger/compare/v2.0.1...v2.0.2
-[2.0.1]: https://github.com/hypermodeinc/badger/compare/v2.0.0...v2.0.1
-[2.0.0]: https://github.com/hypermodeinc/badger/compare/v1.6.0...v2.0.0
-[1.6.0]: https://github.com/hypermodeinc/badger/compare/v1.5.5...v1.6.0
-[1.5.5]: https://github.com/hypermodeinc/badger/compare/v1.5.3...v1.5.5
-[1.5.3]: https://github.com/hypermodeinc/badger/compare/v1.5.2...v1.5.3
-[1.5.2]: https://github.com/hypermodeinc/badger/compare/v1.5.1...v1.5.2
-[1.5.1]: https://github.com/hypermodeinc/badger/compare/v1.5.0...v1.5.1
-[1.5.0]: https://github.com/hypermodeinc/badger/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/hypermodeinc/badger/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/hypermodeinc/badger/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/hypermodeinc/badger/compare/v1.1.1...v1.2.0
-[1.1.1]: https://github.com/hypermodeinc/badger/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/hypermodeinc/badger/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/hypermodeinc/badger/compare/v1.0.0...v1.0.1
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.2...HEAD
+[2.2007.2]: https://github.com/dgraph-io/badger/compare/v2.2007.1...v2.2007.2
+[2.2007.1]: https://github.com/dgraph-io/badger/compare/v2.2007.0...v2.2007.1
+[2.2007.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v2.2007.0
+[2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
+[1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
+[1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5
+[1.5.3]: https://github.com/dgraph-io/badger/compare/v1.5.2...v1.5.3
+[1.5.2]: https://github.com/dgraph-io/badger/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/dgraph-io/badger/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/dgraph-io/badger/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/dgraph-io/badger/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/dgraph-io/badger/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/dgraph-io/badger/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/dgraph-io/badger/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/dgraph-io/badger/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/dgraph-io/badger/compare/v1.0.0...v1.0.1

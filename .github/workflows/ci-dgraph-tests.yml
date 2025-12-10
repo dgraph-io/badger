@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Dgraph repo
         uses: actions/checkout@v5
         with:
-          repository: hypermodeinc/dgraph
+          repository: dgraph-io/dgraph
           ref: main
       - name: Set up Go
         uses: actions/setup-go@v6

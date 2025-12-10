@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -368,14 +368,14 @@ func ReplayManifestFile(fp *os.File, extMagic uint16, opt Options) (Manifest, in
 		return Manifest{}, 0,
 			//nolint:lll
 			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
-				"Please see https://docs.hypermode.com/badger/troubleshooting#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
-				" on how to fix this.",
+				"Please see https://github.com/dgraph-io/badger/blob/main/docs/troubleshooting.md#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
+				" on how to fix this",
 				version, badgerMagicVersion)
 	}
 	if extVersion != extMagic {
 		return Manifest{}, 0,
-			fmt.Errorf("Cannot open DB because the external magic number doesn't match. "+
-				"Expected: %d, version present in manifest: %d\n", extMagic, extVersion)
+			fmt.Errorf("cannot open DB because the external magic number doesn't match, "+
+				"expected: %d, version present in manifest: %d", extMagic, extVersion)
 	}
 
 	stat, err := fp.Stat()

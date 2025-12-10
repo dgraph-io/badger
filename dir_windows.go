@@ -2,7 +2,7 @@
 // +build windows
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -96,5 +96,5 @@ func (g *directoryLockGuard) release() error {
 }
 
 // Windows doesn't support syncing directories to the file system. See
-// https://github.com/hypermodeinc/badger/issues/699#issuecomment-504133587 for more details.
+// https://github.com/dgraph-io/badger/issues/699#issuecomment-504133587 for more details.
 func syncDir(dir string) error { return nil }

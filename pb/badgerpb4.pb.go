@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+// SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 // Use protos/gen.sh to generate .pb.go files.
@@ -13,10 +13,11 @@
 package pb
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (

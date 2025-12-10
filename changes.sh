@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-GHORG=${GHORG:-hypermodeinc}
+GHORG=${GHORG:-dgraph-io}
 GHREPO=${GHREPO:-badger}
 cat <<EOF
 This description was generated using this script:
