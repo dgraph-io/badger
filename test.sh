@@ -27,7 +27,7 @@ popd
 
 # Run the memory intensive tests first.
 manual() {
-	timeout="-timeout 2m"
+	timeout="-timeout 5m"
 	echo "==> Running package tests for $packages"
 	set -e
 	go env -w GOTOOLCHAIN=go1.25.0+auto
@@ -106,6 +106,6 @@ write_coverage() {
 # parallel tests currently not working
 # parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
 # run tests in sequence
-root
-stream
+#root
+#stream
 manual

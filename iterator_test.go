@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -51,7 +51,7 @@ func TestPickTables(t *testing.T) {
 	within([]byte("abc"), []byte("abb123"), []byte("ad"))
 	within([]byte("abc"), []byte("abc123"), []byte("abd234"))
 	within([]byte("abc"), []byte("abc123"), []byte("abc456"))
-	// Regression test for https://github.com/hypermodeinc/badger/issues/992
+	// Regression test for https://github.com/dgraph-io/badger/issues/992
 	within([]byte{0, 0, 1}, []byte{0}, []byte{0, 0, 1})
 
 	outside("abd", "abe", "ad")

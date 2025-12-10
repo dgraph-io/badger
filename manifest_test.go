@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -204,7 +204,7 @@ func TestManifestRewrite(t *testing.T) {
 		require.NoError(t, db.Close())
 		removeDir(dir)
 	}()
-	
+
 	deletionsThreshold := 10
 
 	mf, m, err := helpOpenOrCreateManifestFile(dir, false, 0, deletionsThreshold, db.opt)

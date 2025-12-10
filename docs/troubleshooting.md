@@ -11,8 +11,8 @@ call is made internally in the loop. That causes Badger to acquire read locks ov
 files to avoid value log GC removing the file from underneath. As a side effect, this also blocks a
 new value log GC file from being created, when the value log file boundary is hit.
 
-Please see GitHub issues [#293](https://github.com/hypermodeinc/badger/issues/293) and
-[#315](https://github.com/hypermodeinc/badger/issues/315).
+Please see GitHub issues [#293](https://github.com/dgraph-io/badger/issues/293) and
+[#315](https://github.com/dgraph-io/badger/issues/315).
 
 There are multiple workarounds during iteration:
 
@@ -60,8 +60,8 @@ Just like forward iteration goes to the first key which is equal or greater than
 reverse iteration goes to the first key which is equal or lesser than the SEEK key. Therefore, SEEK
 key would not be part of the results. You can typically add a `0xff` byte as a suffix to the SEEK
 key to include it in the results. See the following issues:
-[#436](https://github.com/hypermodeinc/badger/issues/436) and
-[#347](https://github.com/hypermodeinc/badger/issues/347).
+[#436](https://github.com/dgraph-io/badger/issues/436) and
+[#347](https://github.com/dgraph-io/badger/issues/347).
 
 ## Which instances should I use for Badger?
 
@@ -133,9 +133,9 @@ compression and the library requires [`gcc/cgo`](https://pkg.go.dev/cmd/cgo). Yo
 without Cgo by running `CGO_ENABLED=0 go build`. This builds Badger without the support for ZSTD
 compression algorithm.
 
-As of Badger versions [v2.2007.4](https://github.com/hypermodeinc/badger/releases/tag/v2.2007.4) and
-[v3.2103.1](https://github.com/hypermodeinc/badger/releases/tag/v3.2103.1) the DataDog ZSTD library
-was replaced by pure Golang version and Cgo is no longer required. The new library is
+As of Badger versions [v2.2007.4](https://github.com/dgraph-io/badger/releases/tag/v2.2007.4) and
+[v3.2103.1](https://github.com/dgraph-io/badger/releases/tag/v3.2103.1) the DataDog ZSTD library was
+replaced by pure Golang version and Cgo is no longer required. The new library is
 [backwards compatible in nearly all cases](https://discuss.hypermode.com/t/use-pure-go-zstd-implementation/8670/10):
 
 <Note>

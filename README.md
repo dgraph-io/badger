@@ -2,10 +2,10 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/dgraph-io/badger/v4.svg)](https://pkg.go.dev/github.com/dgraph-io/badger/v4)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger/v4)](https://goreportcard.com/report/github.com/dgraph-io/badger/v4)
-[![Sourcegraph](https://sourcegraph.com/github.com/hypermodeinc/badger/-/badge.svg)](https://sourcegraph.com/github.com/hypermodeinc/badger?badge)
-[![ci-badger-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-tests.yml)
-[![ci-badger-bank-tests](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests.yml)
-[![ci-badger-bank-tests-nightly](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests-nightly.yml/badge.svg)](https://github.com/hypermodeinc/badger/actions/workflows/ci-badger-bank-tests-nightly.yml)
+[![Sourcegraph](https://sourcegraph.com/github.com/dgraph-io/badger/-/badge.svg)](https://sourcegraph.com/github.com/dgraph-io/badger?badge)
+[![ci-badger-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-tests.yml)
+[![ci-badger-bank-tests](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests.yml)
+[![ci-badger-bank-tests-nightly](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests-nightly.yml/badge.svg)](https://github.com/dgraph-io/badger/actions/workflows/ci-badger-bank-tests-nightly.yml)
 
 ![Badger mascot](images/diggy-shadow.png)
 
@@ -29,7 +29,7 @@ Please consult the [Changelog] for more detailed information on releases.
 Note: Badger is built with go 1.23 and we refrain from bumping this version to minimize downstream
 effects of those using Badger in applications built with older versions of Go.
 
-[Changelog]: https://github.com/hypermodeinc/badger/blob/main/CHANGELOG.md
+[Changelog]: https://github.com/dgraph-io/badger/blob/main/CHANGELOG.md
 
 ## Table of Contents
 
@@ -77,7 +77,7 @@ This will install the badger command line utility into your $GOBIN path.
 
 ## Badger Documentation
 
-Badger Documentation is available at https://docs.hypermode.com/badger
+Badger Documentation is available at [https://badger.dgraph.io](https://badger.dgraph.io)
 
 ## Resources
 
@@ -141,7 +141,7 @@ including graphs can be found the blog posts (linked above).
 
 Below is a list of known projects that use Badger:
 
-- [Dgraph](https://github.com/hypermodeinc/dgraph) - Distributed graph database.
+- [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 - [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
 - [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS),
   a new hypermedia distribution protocol.
@@ -260,7 +260,6 @@ If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING
 
 ## Contact
 
-- Please use [Github issues](https://github.com/hypermodeinc/badger/issues) for filing bugs.
-- Please use [discuss.hypermode.com](https://discuss.hypermode.com) for questions, discussions, and
-  feature requests.
-- Follow us on Twitter [@hypermodeinc](https://twitter.com/hypermodeinc).
+- Please use [Github issues](https://github.com/dgraph-io/badger/issues) for filing bugs.
+- Please use [Discussions](https://github.com/orgs/dgraph-io/discussions) for questions,
+  discussions, and feature requests.

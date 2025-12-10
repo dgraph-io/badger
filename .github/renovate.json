@@ -1,12 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>hypermodeinc/renovate-config"],
+  "extends": ["local>dgraph-io/renovate-config"],
   "rangeStrategy": "widen",
   "packageRules": [
-    {
-      "matchManagers": ["gomod"],
-      "matchDepNames": ["go"],
-      "enabled": false
-    }
-  ]
+    { "matchManagers": ["gomod"], "matchPackageNames": ["go"], "enabled": false },
+    { "matchManagers": ["gomod"], "matchDepNames": ["go"], "enabled": false }
+  ],
+  "ignoreDeps": ["go"]
 }

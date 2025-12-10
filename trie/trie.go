@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -121,7 +121,7 @@ func (t *Trie) fix(m pb.Match, id uint64, op int) error {
 
 	ignore, err := parseIgnoreBytes(m.IgnoreBytes)
 	if err != nil {
-		return fmt.Errorf( "while parsing ignore bytes: %s: %w", m.IgnoreBytes,err)
+		return fmt.Errorf("while parsing ignore bytes: %s: %w", m.IgnoreBytes, err)
 	}
 	for len(ignore) < len(m.Prefix) {
 		ignore = append(ignore, false)

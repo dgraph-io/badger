@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -641,7 +641,7 @@ func TestL0GCBug(t *testing.T) {
 	require.NoError(t, db2.Close())
 }
 
-// Regression test for https://github.com/hypermodeinc/badger/issues/1126
+// Regression test for https://github.com/dgraph-io/badger/issues/1126
 //
 // The test has 3 steps
 // Step 1 - Create badger data. It is necessary that the value size is
