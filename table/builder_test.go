@@ -38,7 +38,7 @@ func TestTableIndex(t *testing.T) {
 		opts Options
 	}{
 		{
-			name: "No encyption/compression",
+			name: "No encryption/compression",
 			opts: Options{
 				BlockSize:          4 * 1024,
 				BloomFalsePositive: 0.01,

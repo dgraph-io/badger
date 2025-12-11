@@ -102,7 +102,7 @@ func init() {
 		"If it is true, badger will encrypt all the data stored on the disk.")
 	writeBenchCmd.Flags().BoolVar(&wo.loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
-	writeBenchCmd.Flags().BoolVar(&wo.detectConflicts, "conficts", false,
+	writeBenchCmd.Flags().BoolVar(&wo.detectConflicts, "conflicts", false,
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&wo.zstdComp, "zstd", false,
 		"If true, badger will use ZSTD mode. Otherwise, use default.")

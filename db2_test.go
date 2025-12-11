@@ -605,7 +605,7 @@ func TestL0GCBug(t *testing.T) {
 			t.Fatalf(err.Error())
 		}
 	}
-	// Ensure alteast one GC call was successful.
+	// Ensure at least one GC call was successful.
 	require.NotZero(t, success)
 	// CheckKeys reads all the keys previously stored.
 	checkKeys := func(db *DB) {
@@ -700,7 +700,7 @@ func TestWindowsDataLoss(t *testing.T) {
 		require.NoError(t, db.valueDirGuard.release())
 	}
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
-	// the data so that we can truncate the file durning the next vlog.Open.
+	// the data so that we can truncate the file during the next vlog.Open.
 	require.NoError(t, z.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
 	for _, f := range db.vlog.filesMap {
 		require.NoError(t, f.Fd.Close())

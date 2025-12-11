@@ -1050,7 +1050,7 @@ func TestValueLogTruncate(t *testing.T) {
 	fileCountAfterCorruption := len(db.Tables()) + len(db.imm) + 1 // +1 for db.mt
 	// We should have one memtable and one sst file.
 	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
-	// maxFid will be 2 because we increment the max fid on DB open everytime.
+	// maxFid will be 2 because we increment the max fid on DB open every time.
 	require.Equal(t, 2, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
 }

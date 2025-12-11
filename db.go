@@ -1700,7 +1700,7 @@ func (db *DB) dropAll() (func(), error) {
 		return f, err
 	}
 	// prepareToDrop will stop all the incoming write and flushes any pending memtables.
-	// Before we drop, we'll stop the compaction because anyways all the datas are going to
+	// Before we drop, we'll stop the compaction because anyways all the data are going to
 	// be deleted.
 	db.stopCompactions()
 	resume := func() {
