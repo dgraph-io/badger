@@ -5,7 +5,7 @@ set -eo pipefail
 go version
 
 # Check if Github Actions is running
-if [ $CI = "true" ]; then
+if [ "$CI" = "true" ]; then
 	# Enable code coverage
 	# export because tests run in a subprocess
 	export covermode="-covermode=atomic"
