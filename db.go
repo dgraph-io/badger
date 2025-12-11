@@ -732,9 +732,28 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	}
 }
 
-// get returns the value in memtable or disk for given key.
-// Note that value will include meta byte.
-//
+func (db *DB) checkKeyInMemtables(tables []*memTable, key []byte, maxVs *y.ValueStruct, version uint64) bool {
+	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
+	for i := 0; i < len(tables); i++ {
+		vs := tables[i].sl.Get(key)
+		y.NumMemtableGetsAdd(db.opt.MetricsEnabled, 1)
+		if vs.Meta == 0 && vs.Value == nil {
+			continue
+		}
+		// Found the required version of the key, mark as done, no need to process
+		// it further
+		if vs.Version == version {
+			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
+			*maxVs = vs
+			return true
+		}
+		if maxVs.Version < vs.Version {
+			*maxVs = vs
+		}
+	}
+	return false
+}
+
 // IMPORTANT: We should never write an entry with an older timestamp for the same key, We need to
 // maintain this invariant to search for the latest value of a key, or else we need to search in all
 // tables and find the max version among them.  To maintain this invariant, we also need to ensure
@@ -746,7 +765,42 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 // do that. For every get("fooX") call where X is the version, we will search
 // for "fooX" in all the levels of the LSM tree. This is expensive but it
 // removes the overhead of handling move keys completely.
+//
+// getBatch would return the values of list of keys in order
+// Note that value will include meta byte.
+func (db *DB) getBatch(keys [][]byte, keysRead []bool, version uint64) ([]y.ValueStruct, error) {
+	if db.IsClosed() {
+		return nil, ErrDBClosed
+	}
+	tables, decr := db.getMemTables() // Lock should be released.
+	defer decr()
+
+	maxVs := make([]y.ValueStruct, len(keys))
+
+	// For memtable, we need to check every memtable each time
+	for j, key := range keys {
+		if keysRead[j] {
+			continue
+		}
+		if db.checkKeyInMemtables(tables, key, &maxVs[j], version) {
+			keysRead[j] = true
+		}
+	}
+	return db.lc.getBatch(keys, maxVs, 0, keysRead, version)
+}
+
+// get returns the value in memtable or disk for given key.
+// Note that value will include meta byte.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
+	if db.opt.useGetBatch {
+		done := make([]bool, 1)
+		vals, err := db.getBatch([][]byte{key}, done)
+		if len(vals) != 0 {
+			return vals[0], err
+		}
+		return y.ValueStruct{}, err
+	}
+
 	if db.IsClosed() {
 		return y.ValueStruct{}, ErrDBClosed
 	}
@@ -755,22 +809,8 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 
 	var maxVs y.ValueStruct
 	version := y.ParseTs(key)
-
-	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
-	for i := 0; i < len(tables); i++ {
-		vs := tables[i].sl.Get(key)
-		y.NumMemtableGetsAdd(db.opt.MetricsEnabled, 1)
-		if vs.Meta == 0 && vs.Value == nil {
-			continue
-		}
-		// Found the required version of the key, return immediately.
-		if vs.Version == version {
-			y.NumGetsWithResultsAdd(db.opt.MetricsEnabled, 1)
-			return vs, nil
-		}
-		if maxVs.Version < vs.Version {
-			maxVs = vs
-		}
+	if db.checkKeyInMemtables(tables, key, &maxVs, version) {
+		return maxVs, nil
 	}
 	return db.lc.get(key, maxVs, 0)
 }
