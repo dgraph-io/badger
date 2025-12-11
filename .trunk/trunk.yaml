@@ -5,19 +5,16 @@ version: 0.1
 cli:
   version: 1.25.0
 
-# Trunk provides extensibility via plugins. (https://docs.trunk.io/plugins)
 plugins:
   sources:
     - id: trunk
       ref: v1.7.4
       uri: https://github.com/trunk-io/plugins
 
-# Many linters and tools depend on runtimes - configure them here. (https://docs.trunk.io/runtimes)
 runtimes:
   enabled:
     - go@1.25.5
 
-# This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
   ignore:
     - linters: [ALL]
