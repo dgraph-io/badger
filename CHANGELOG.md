@@ -4,12 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [4.8.1] - 2025-12-15
+## [4.9.0] - 2025-12-15
 
 **Fixed**
 
-- fix(y): shall always return empty slice rather than nil (#2245)
-- fix(docs): fix typos (#2227)
+- fix(y): y.SafeCopy shall always return empty slice rather than nil (#2245)
+  > **WARNING** SafeCopy now returns an empty slice rather than nil. For those using our `y` utility
+  > package, this could be a breaking change. This has implications for empty slices stored in
+  > badger, specifically, upon retrieval the value stored with the key will be equal to what was set
+  > (an empty []byte). See #2067 for more details.
 - fix: test.sh error (#2225)
 - fix: typo of abandoned (#2222)
 
