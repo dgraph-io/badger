@@ -31,8 +31,10 @@ well suited for new contributors.
 
 ## Setting up your development environment
 
-Badger uses [`Go Modules`](https://github.com/golang/go/wiki/Modules) to manage dependencies. The
-version of Go should be **1.12** or above.
+- [Install Go 1.25.0 or above](https://golang.org/doc/install).
+- Install
+  [trunk](https://docs.trunk.io/code-quality/overview/getting-started/install#install-the-launcher).
+  Our CI uses trunk to lint and check code, having it installed locally will save you time.
 
 ### Fork the project
 
