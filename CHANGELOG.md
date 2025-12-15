@@ -1076,7 +1076,7 @@ Bug fix:
 
 - Fix an uint16 overflow when resizing key slice
 
-[4.8.1]: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.8.1
+[4.9.0]: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.9.0
 [4.8.0]: https://github.com/dgraph-io/badger/compare/v4.7.0...v4.8.0
 [4.7.0]: https://github.com/dgraph-io/badger/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/dgraph-io/badger/compare/v4.5.2...v4.6.0
