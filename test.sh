@@ -106,6 +106,6 @@ write_coverage() {
 # parallel tests currently not working
 # parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
 # run tests in sequence
-#root
-#stream
+root
+stream
 manual
