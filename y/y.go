@@ -95,7 +95,11 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 
 // SafeCopy does append(a[:0], src...).
 func SafeCopy(a, src []byte) []byte {
-	return append(a[:0], src...)
+	b := append(a[:0], src...)
+	if b == nil {
+		return []byte{}
+	}
+	return b
 }
 
 // Copy copies a byte slice and returns the copied slice.
@@ -134,7 +138,7 @@ func CompareKeys(key1, key2 []byte) int {
 
 // ParseKey parses the actual key from the key bytes.
 func ParseKey(key []byte) []byte {
-	if key == nil {
+	if len(key) < 8 {
 		return nil
 	}
 

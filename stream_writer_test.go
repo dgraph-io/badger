@@ -754,16 +754,16 @@ func TestStreamWriterIncremental(t *testing.T) {
 			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
-			buf = z.NewBuffer(10<<20, "test")
-			defer func() { require.NoError(t, buf.Release()) }()
+			buf2 := z.NewBuffer(10<<20, "test")
+			defer func() { require.NoError(t, buf2.Release()) }()
 			KVToBuffer(&pb.KV{
 				Key:     []byte("a2"),
 				Value:   []byte("val2"),
 				Version: 9,
-			}, buf)
+			}, buf2)
 			sw = db.NewStreamWriter()
 			require.NoError(t, sw.PrepareIncremental(), "sw.PrepareIncremental() failed")
-			require.NoError(t, sw.Write(buf), "sw.Write() failed")
+			require.NoError(t, sw.Write(buf2), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			// This will move the maxTs to 10 (earlier, without the fix)
