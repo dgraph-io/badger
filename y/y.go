@@ -138,7 +138,7 @@ func CompareKeys(key1, key2 []byte) int {
 
 // ParseKey parses the actual key from the key bytes.
 func ParseKey(key []byte) []byte {
-	if key == nil {
+	if len(key) < 8 {
 		return nil
 	}
 
