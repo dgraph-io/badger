@@ -4,10 +4,139 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [4.9.0] - 2025-12-15
 
-- chore(deps): Remove dependency on github.com/pkg/errors (#2184)
+**Fixed**
+
+- fix(y): y.SafeCopy shall always return empty slice rather than nil (#2245)
+  > **WARNING** SafeCopy now returns an empty slice rather than nil. For those using our `y` utility
+  > package, this could be a breaking change. This has implications for empty slices stored in
+  > badger, specifically, upon retrieval the value stored with the key will be equal to what was set
+  > (an empty []byte). See #2067 for more details.
+- fix: test.sh error (#2225)
+- fix: typo of abandoned (#2222)
+
+**Docs**
+
+- add doc for encryption at rest (#2240)
+- move docs pages in the repo (#2232)
+
+**Chores**
+
+- chore(ci): restrict Dgraph test to core packages only (#2242)
+- chore: update README.md with correct links and badges (#2239)
+- chore: change renovate to maintain backwards compatible go version (#2236)
+- chore: configure renovate to leave go version as declared (#2235)
+- chore(deps): Update actions (major) (#2229)
+- chore(deps): Update actions/checkout action to v5 (#2221)
+- chore(deps): Update go minor and patch (#2218)
+- chore: update the trunk conf file (#2217)
+- chore(deps): Update dependency node to v22 (#2219)
+- chore(deps): Update go minor and patch (#2212)
+
+**CI**
+
+- move to GitHub Actions runners
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.8.1
+
+## [4.8.0] - 2025-07-15
+
+**Features**
+
+- feat(stream): Update stream framework with new alternate keyToList function (#2211)
+
+**Fixed**
+
+- fix: crash loop on missing manifest tables (#2198)
+
+**Chores**
+
+- chore(deps): Update module golang.org/x/sys to v0.34.0 (#2210)
+- chore(deps): Update go minor and patch (#2208)
+- chore(deps): Update go minor and patch (#2204)
+- chore(deps): Update go minor and patch (#2202)
+- chore(deps): Update go minor and patch (#2200)
+- chore(deps): Update module golang.org/x/sys to v0.33.0 (#2195)
+- chore(deps): Update go minor and patch (#2189)
+- Compile with jemalloc v5.3.0 (#2191)
+
+**CI**
+
+- Update trunk.yml
+- move Trunk to action
+
+**Docs**
+
+- docs: add new badge (#2194)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.7.0...v4.8.0
+
+## [4.7.0] - 2025-04-08
+
+**Chores**
+
+- chore(deps): remove dependency on github.com/pkg/errors (#2184)
+- chore(deps): Update go minor and patch (#2187)
+- chore(deps): Update go minor and patch (#2181)
+- chore(deps): Update module golang.org/x/sys to v0.31.0 (#2179)
+
+**Fixed**
+
+- fix broken badge (#2186)
+
+**Docs**
+
+- Update README.md
+- doc: add Blink Labs projects to the using Badger list (#2183)
+- doc: add FlowG to "Projects Using Badger" section of the README (#2180)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.6.0...v4.7.0
+
+## [4.6.0] - 2025-02-26
+
+**Chores**
+
 - chore(deps): Migrate from OpenCensus to OpenTelemetry (#2169)
+- chore(deps): Update go minor and patch (#2177)
+- chore(deps): Update module github.com/spf13/cobra to v1.9.0 (#2174)
+- chore: add editor config
+- update .gitignore (#2176)
+
+**Fixed**
+
+- fix: remove accidentally uploaded binary `badger-darwin-arm64` (#2175)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.5.2...v4.6.0
+
+## [4.5.2] - 2025-02-14
+
+**Chores**
+
+- chore(deps): Update go minor and patch (#2168)
+- chore(deps): bump minimum Go support to 1.22 (#2171)
+- chore: migrate docs to centralized docs repo (#2166)
+- chore: align repo conventions (#2158)
+- chore(deps): bump the patch group with 2 updates (#2156)
+- chore(deps): bump github.com/google/flatbuffers from 24.12.23+incompatible to 25.1.21+incompatible
+  (#2153)
+- chore(deps): bump golangci/golangci-lint-action from 6.1.1 to 6.2.0 in the actions group (#2154)
+- Update renovate.json
+- Update trunk.yaml
+- enable Trivy
+
+**Fixed**
+
+- update docs link in error message (#2170)
+- Revert "Update badgerpb4.pb.go" (#2172)
+
+**Docs**
+
+- Update README.md
+- Added my project that uses Badger database (#2157)
+- Create SECURITY.md
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.5.1...v4.5.2
 
 ## [4.5.1] - 2025-01-21
 
@@ -947,7 +1076,30 @@ Bug fix:
 
 - Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.2...HEAD
+[4.9.0]: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.9.0
+[4.8.0]: https://github.com/dgraph-io/badger/compare/v4.7.0...v4.8.0
+[4.7.0]: https://github.com/dgraph-io/badger/compare/v4.6.0...v4.7.0
+[4.6.0]: https://github.com/dgraph-io/badger/compare/v4.5.2...v4.6.0
+[4.5.2]: https://github.com/dgraph-io/badger/compare/v4.5.1...v4.5.2
+[4.5.1]: https://github.com/dgraph-io/badger/compare/v4.5.0...v4.5.1
+[4.5.0]: https://github.com/dgraph-io/badger/compare/v4.4.0...v4.5.0
+[4.4.0]: https://github.com/dgraph-io/badger/compare/v4.3.1...v4.4.0
+[4.3.1]: https://github.com/dgraph-io/badger/compare/v4.3.0...v4.3.1
+[4.3.0]: https://github.com/dgraph-io/badger/compare/v4.2.0...v4.3.0
+[4.2.0]: https://github.com/dgraph-io/badger/compare/v4.1.0...v4.2.0
+[4.1.0]: https://github.com/dgraph-io/badger/compare/v4.0.1...v4.1.0
+[4.0.1]: https://github.com/dgraph-io/badger/compare/v4.0.0...v4.0.1
+[4.0.0]: https://github.com/dgraph-io/badger/compare/v3.2103.5...v4.0.0
+[3.2103.5]: https://github.com/dgraph-io/badger/compare/v3.2103.4...v3.2103.5
+[3.2103.4]: https://github.com/dgraph-io/badger/compare/v3.2103.3...v3.2103.4
+[3.2103.3]: https://github.com/dgraph-io/badger/compare/v3.2103.2...v3.2103.3
+[3.2103.2]: https://github.com/dgraph-io/badger/compare/v3.2103.1...v3.2103.2
+[3.2103.1]: https://github.com/dgraph-io/badger/compare/v3.2103.0...v3.2103.1
+[3.2103.0]: https://github.com/dgraph-io/badger/compare/v3.2011.1...v3.2103.0
+[3.2011.1]: https://github.com/dgraph-io/badger/compare/v3.2011.0...v3.2011.1
+[3.2011.0]: https://github.com/dgraph-io/badger/compare/v2.2007.4...v3.2011.0
+[2.2007.4]: https://github.com/dgraph-io/badger/compare/v2.2007.3...v2.2007.4
+[2.2007.3]: https://github.com/dgraph-io/badger/compare/v2.2007.2...v2.2007.3
 [2.2007.2]: https://github.com/dgraph-io/badger/compare/v2.2007.1...v2.2007.2
 [2.2007.1]: https://github.com/dgraph-io/badger/compare/v2.2007.0...v2.2007.1
 [2.2007.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v2.2007.0

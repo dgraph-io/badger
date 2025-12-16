@@ -6,6 +6,7 @@ on:
       - "**.md"
       - docs/**
       - images/**
+      - contrib/**
     branches:
       - main
       - release/v*
