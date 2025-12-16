@@ -54,7 +54,7 @@ jobs:
             badger/badger-linux-amd64.tar.gz
 
   badger-build-arm64:
-    runs-on: ubuntu-latest-arm
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
         with:
