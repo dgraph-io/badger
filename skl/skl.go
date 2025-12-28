@@ -42,7 +42,7 @@ type node struct {
 	// Multiple parts of the value are encoded as a single uint64 so that it
 	// can be atomically loaded and stored:
 	//   value offset: uint32 (bits 0-31)
-	//   value size  : uint16 (bits 32-63)
+	//   value size  : uint32 (bits 32-63)
 	value atomic.Uint64
 
 	// A byte slice is 24 bytes. We are trying to save space here.
