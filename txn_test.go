@@ -21,6 +21,45 @@ import (
 	"github.com/dgraph-io/ristretto/v2/z"
 )
 
+func TestTxnSimpleTsRead(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+	opts := getTestOptions(dir)
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	opts.managedTxns = true
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	for i := 0; i < 10; i++ {
+		txn := db.NewTransactionAt(uint64(i)+1, true)
+		k := []byte(fmt.Sprintf("key=%d", 1))
+		v := []byte(fmt.Sprintf("val=%d", i))
+		require.NoError(t, txn.SetEntry(NewEntry(k, v)))
+		err = txn.CommitAt(uint64(i)*3+1, nil)
+		require.NoError(t, err)
+	}
+
+	for i := 7; i < 10; i++ {
+		txn := db.NewTransactionAt(uint64(i), false)
+		item, err := txn.Get([]byte("key=1"))
+		require.NoError(t, err)
+
+		require.NoError(t, item.Value(func(val []byte) error {
+			require.Equal(t, []byte("val=2"), val)
+			return nil
+		}))
+
+		txn.Discard()
+	}
+}
+
 func TestTxnSimple(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
