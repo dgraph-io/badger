@@ -875,7 +875,9 @@ func TestDoesNotHaveRace(t *testing.T) {
 	wg.Add(5)
 	for i := 0; i < 5; i++ {
 		go func() {
-			require.True(t, table.DoesNotHave(uint32(1237882)))
+			// With learned index, DoesNotHave always returns false (meaning "might be here")
+			// because we use the index for position prediction, not filtering.
+			require.False(t, table.DoesNotHave(uint32(1237882)))
 			wg.Done()
 		}()
 	}

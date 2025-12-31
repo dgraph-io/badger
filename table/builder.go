@@ -72,12 +72,13 @@ type Builder struct {
 	compressedSize   atomic.Uint32
 	uncompressedSize atomic.Uint32
 
-	lenOffsets    uint32
-	keyHashes     []uint32 // Used for building the bloomfilter.
-	opts          *Options
-	maxVersion    uint64
-	onDiskSize    uint32
-	staleDataSize int
+	lenOffsets      uint32
+	keyHashes       []uint32 // Used for building the learned index.
+	keyBlockIndices []uint32 // Block index for each key (for learned index training).
+	opts            *Options
+	maxVersion      uint64
+	onDiskSize      uint32
+	staleDataSize   int
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -208,6 +209,8 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
+	// Track which block this key belongs to (for learned index training)
+	b.keyBlockIndices = append(b.keyBlockIndices, uint32(len(b.blockList)))
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
@@ -431,12 +434,14 @@ func (b *Builder) Done() buildData {
 		alloc:     b.alloc,
 	}
 
-	var f y.Filter
+	// Train learned index instead of creating Bloom filter
+	var learnedIndexData []byte
 	if b.opts.BloomFalsePositive > 0 {
-		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
-		f = y.NewFilter(b.keyHashes, bits)
+		// BloomFalsePositive > 0 means filtering is enabled, use learned index
+		li := y.TrainLearnedIndex(b.keyHashes, b.keyBlockIndices, len(b.blockList))
+		learnedIndexData = li.Serialize()
 	}
-	index, dataSize := b.buildIndex(f)
+	index, dataSize := b.buildIndex(learnedIndexData)
 
 	var err error
 	if b.shouldEncrypt() {

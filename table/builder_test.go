@@ -257,9 +257,11 @@ func TestBloomfilter(t *testing.T) {
 		}
 		require.Equal(t, keyCount, c)
 
-		// Ensure tab.DoesNotHave works
+		// Note: With learned index, DoesNotHave always returns false because
+		// the learned index is used for position prediction, not for filtering.
+		// This is different from Bloom filters which can definitively say "not here".
 		hash := y.Hash([]byte("foo"))
-		require.Equal(t, withBlooms, tab.DoesNotHave(hash))
+		require.False(t, tab.DoesNotHave(hash)) // Learned index says "might be here"
 	}
 
 	t.Run("build with bloom filter", func(t *testing.T) {

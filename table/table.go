@@ -102,7 +102,8 @@ type Table struct {
 	CreatedAt      time.Time
 	indexStart     int
 	indexLen       int
-	hasBloomFilter bool
+	hasBloomFilter bool            // kept for compatibility, true if learned index exists
+	learnedIndex   *y.LearnedIndex // Learned index for key position prediction
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -466,7 +467,15 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		BloomFilterLength: index.BloomFilterLength(),
 	}
 
-	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
+	// Parse learned index from bloom filter bytes
+	// (we reuse the bloom_filter field to store our learned index)
+	bfBytes := index.BloomFilterBytes()
+	if len(bfBytes) >= y.LearnedIndexSize {
+		t.learnedIndex = y.DeserializeLearnedIndex(bfBytes)
+		t.hasBloomFilter = true
+	} else {
+		t.hasBloomFilter = false
+	}
 
 	var bo fb.BlockOffset
 	y.AssertTrue(index.Offsets(&bo, 0))
@@ -665,20 +674,37 @@ func (t *Table) Filename() string { return t.Fd.Name() }
 func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if and only if the table does not have the key hash.
-// It does a bloom filter lookup.
+// It uses a learned index to predict if the key might be in the table.
+// Note: With learned index, we always return false (meaning "might have")
+// because the learned index is used for position prediction, not filtering.
 func (t *Table) DoesNotHave(hash uint32) bool {
 	if !t.hasBloomFilter {
 		return false
 	}
 
 	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_ALL", 1)
-	index := t.fetchIndex()
-	bf := index.BloomFilterBytes()
-	mayContain := y.Filter(bf).MayContain(hash)
-	if !mayContain {
-		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
+
+	// With learned index, we don't filter tables - we use it for position hints
+	// The learned index helps narrow down the search range within a table,
+	// but doesn't tell us if a key definitely doesn't exist.
+	// Always return false (key might be present) to maintain correctness.
+	return false
+}
+
+// GetLearnedIndex returns the learned index for this table, or nil if not available.
+func (t *Table) GetLearnedIndex() *y.LearnedIndex {
+	return t.learnedIndex
+}
+
+// PredictBlockRange returns the predicted block range for a key hash.
+// Returns (minBlock, maxBlock) where the key should be searched.
+// If no learned index is available, returns (0, numBlocks-1).
+func (t *Table) PredictBlockRange(hash uint32) (minBlock, maxBlock int) {
+	if t.learnedIndex == nil {
+		return 0, t.offsetsLength() - 1
 	}
-	return !mayContain
+	_, minBlock, maxBlock = t.learnedIndex.Predict(hash)
+	return minBlock, maxBlock
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
