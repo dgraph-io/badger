@@ -44,6 +44,7 @@ func init() {
 func doBackup(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
+		WithMaxLevels(vMaxLevels).
 		WithNumVersionsToKeep(math.MaxInt32)
 
 	if bo.numVersions > 0 {

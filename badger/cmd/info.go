@@ -40,6 +40,9 @@ type flagOptions struct {
 	checksumVerificationMode string
 	discard                  bool
 	externalMagicVersion     uint16
+
+	maxLevels int
+	memTableSize int64
 }
 
 var (
@@ -73,6 +76,10 @@ func init() {
 		"Parse and print DISCARD file from value logs.")
 	infoCmd.Flags().Uint16Var(&opt.externalMagicVersion, "external-magic", 0,
 		"External magic number")
+	infoCmd.Flags().IntVar(&opt.maxLevels, "max-levels", 7,
+		"Maximum number of levels in the LSM tree")
+	infoCmd.Flags().Int64Var(&opt.memTableSize, "memtable-size", 128<<20,
+		"Size of memtable in bytes.")
 }
 
 var infoCmd = &cobra.Command{
@@ -92,6 +99,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	bopt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
+		WithMaxLevels(opt.maxLevels).
+		WithMemTableSize(opt.memTableSize).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey([]byte(opt.encryptionKey)).
