@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -38,6 +39,11 @@ var (
 )
 
 func main() {
+
+	start := time.Now()
+	defer func() {
+		fmt.Fprintf(os.Stderr, "Total execution time: %s\n", time.Since(start))
+	}()
 	flag.Parse()
 
 	if *filePath == "" {
@@ -102,7 +108,7 @@ func main() {
 
 		// Progress indicator for large files
 		if lineCount%100000 == 0 {
-			fmt.Fprintf(os.Stderr, "Processed %d lines, found %d matches...\n", lineCount, matchCount)
+			fmt.Fprintf(os.Stderr, "%s Processed %d lines, found %d matches in %s...\n", time.Now().Format(time.RFC3339), lineCount, matchCount, time.Since(start))
 		}
 	}
 
