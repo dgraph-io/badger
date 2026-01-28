@@ -41,11 +41,11 @@ var (
 	printOnly  = flag.Bool("print", false, "Print decoded keys to stdout")
 	workers    = flag.Int("workers", runtime.NumCPU(), "Number of worker goroutines")
 	batchSize  = flag.Int("batch-size", 1000, "Number of lines to process per batch")
+
+	start = time.Now()
 )
 
 func main() {
-
-	start := time.Now()
 	defer func() {
 		fmt.Fprintf(os.Stderr, "Total execution time: %s\n", time.Since(start))
 	}()
@@ -190,7 +190,7 @@ func worker(id int, lineChan <-chan LineBatch, db *sql.DB, lineCount *int64, mat
 		total := atomic.LoadInt64(lineCount)
 		if total%100000 < int64(*batchSize) {
 			matches := atomic.LoadInt64(matchCount)
-			fmt.Fprintf(os.Stderr, "Processed %d lines, found %d matches...\n", total, matches)
+			fmt.Fprintf(os.Stderr, "%s Processed %d lines, found %d matches in %s...\n", total, matches, time.Now().Format(time.RFC3339), time.Since(start))
 		}
 	}
 }
