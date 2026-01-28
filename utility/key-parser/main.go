@@ -190,7 +190,7 @@ func worker(id int, lineChan <-chan LineBatch, db *sql.DB, lineCount *int64, mat
 		total := atomic.LoadInt64(lineCount)
 		if total%100000 < int64(*batchSize) {
 			matches := atomic.LoadInt64(matchCount)
-			fmt.Fprintf(os.Stderr, "%s Processed %d lines, found %d matches in %s...\n", total, matches, time.Now().Format(time.RFC3339), time.Since(start))
+			fmt.Fprintf(os.Stderr, "%s Processed %d lines, found %d matches in %s...\n", time.Now().Format(time.RFC3339), total, matches, time.Since(start))
 		}
 	}
 }
