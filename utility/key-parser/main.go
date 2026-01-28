@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -36,6 +39,8 @@ var (
 	dbName     = flag.String("db-name", "badger_keys", "PostgreSQL database name")
 	writeToDB  = flag.Bool("write-db", true, "Write to PostgreSQL database")
 	printOnly  = flag.Bool("print", false, "Print decoded keys to stdout")
+	workers    = flag.Int("workers", runtime.NumCPU(), "Number of worker goroutines")
+	batchSize  = flag.Int("batch-size", 1000, "Number of lines to process per batch")
 )
 
 func main() {
@@ -69,46 +74,62 @@ func main() {
 		}
 	}
 
+	fmt.Fprintf(os.Stderr, "Processing file with %d workers...\n", *workers)
+
+	// Use parallel processing
+	lineCount, matchCount := processFileParallel(file, db)
+
+	fmt.Fprintf(os.Stderr, "\nProcessing complete!\n")
+	fmt.Fprintf(os.Stderr, "Total lines processed: %d\n", lineCount)
+	fmt.Fprintf(os.Stderr, "Total matches found: %d\n", matchCount)
+}
+
+type LineBatch struct {
+	lines      []string
+	startLine  int
+}
+
+func processFileParallel(file *os.File, db *sql.DB) (int64, int64) {
+	var lineCount int64
+	var matchCount int64
+
+	// Create channels
+	lineChan := make(chan LineBatch, *workers*2)
+	var wg sync.WaitGroup
+
+	// Start worker goroutines
+	for i := 0; i < *workers; i++ {
+		wg.Add(1)
+		go worker(i, lineChan, db, &lineCount, &matchCount, &wg)
+	}
+
+	// Read file and send batches to workers
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large lines if needed
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	lineCount := 0
-	matchCount := 0
+	batch := make([]string, 0, *batchSize)
+	currentLine := 0
 
 	for scanner.Scan() {
-		lineCount++
-		line := scanner.Text()
+		batch = append(batch, scanner.Text())
+		currentLine++
 
-		record, err := parseLine(line)
-		if err != nil {
-			// Line doesn't match pattern, skip
-			continue
-		}
-
-		matchCount++
-
-		if *printOnly {
-			fmt.Printf("Line %d:\n", lineCount)
-			fmt.Printf("  Key (hex): %s\n", record.KeyHex)
-			fmt.Printf("  Key (decoded): %s\n", record.Key)
-			fmt.Printf("  Version: %d\n", record.Version)
-			fmt.Printf("  Size: %d\n", record.Size)
-			fmt.Printf("  Meta: %s\n", record.Meta)
-			fmt.Printf("  Discard: %v\n", record.Discard)
-			fmt.Println()
-		}
-
-		if *writeToDB && db != nil {
-			if err := insertRecord(db, record); err != nil {
-				log.Printf("Error inserting record at line %d: %v", lineCount, err)
+		if len(batch) >= *batchSize {
+			// Send batch to workers
+			lineChan <- LineBatch{
+				lines:     batch,
+				startLine: currentLine - len(batch) + 1,
 			}
+			batch = make([]string, 0, *batchSize)
 		}
+	}
 
-		// Progress indicator for large files
-		if lineCount%100000 == 0 {
-			fmt.Fprintf(os.Stderr, "%s Processed %d lines, found %d matches in %s...\n", time.Now().Format(time.RFC3339), lineCount, matchCount, time.Since(start))
+	// Send remaining lines
+	if len(batch) > 0 {
+		lineChan <- LineBatch{
+			lines:     batch,
+			startLine: currentLine - len(batch) + 1,
 		}
 	}
 
@@ -116,10 +137,64 @@ func main() {
 		log.Fatalf("Error reading file: %v", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nProcessing complete!\n")
-	fmt.Fprintf(os.Stderr, "Total lines processed: %d\n", lineCount)
-	fmt.Fprintf(os.Stderr, "Total matches found: %d\n", matchCount)
+	// Close channel and wait for workers to finish
+	close(lineChan)
+	wg.Wait()
+
+	return lineCount, matchCount
 }
+
+func worker(id int, lineChan <-chan LineBatch, db *sql.DB, lineCount *int64, matchCount *int64, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	localLineCount := int64(0)
+	localMatchCount := int64(0)
+
+	for batch := range lineChan {
+		for i, line := range batch.lines {
+			localLineCount++
+			lineNum := batch.startLine + i
+
+			record, err := parseLine(line)
+			if err != nil {
+				// Line doesn't match pattern, skip
+				continue
+			}
+
+			localMatchCount++
+
+			if *printOnly {
+				fmt.Printf("Line %d:\n", lineNum)
+				fmt.Printf("  Key (hex): %s\n", record.KeyHex)
+				fmt.Printf("  Key (decoded): %s\n", record.Key)
+				fmt.Printf("  Version: %d\n", record.Version)
+				fmt.Printf("  Size: %d\n", record.Size)
+				fmt.Printf("  Meta: %s\n", record.Meta)
+				fmt.Printf("  Discard: %v\n", record.Discard)
+				fmt.Println()
+			}
+
+			if *writeToDB && db != nil {
+				if err := insertRecord(db, record); err != nil {
+					log.Printf("Error inserting record at line %d: %v", lineNum, err)
+				}
+			}
+		}
+
+		// Update global counters
+		atomic.AddInt64(lineCount, int64(len(batch.lines)))
+		atomic.AddInt64(matchCount, localMatchCount)
+		localMatchCount = 0
+
+		// Progress indicator
+		total := atomic.LoadInt64(lineCount)
+		if total%100000 < int64(*batchSize) {
+			matches := atomic.LoadInt64(matchCount)
+			fmt.Fprintf(os.Stderr, "Processed %d lines, found %d matches...\n", total, matches)
+		}
+	}
+}
+
 
 func parseLine(line string) (*KeyRecord, error) {
 	matches := LinePattern.FindStringSubmatch(line)
