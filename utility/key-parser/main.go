@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"database/sql"
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type KeyRecord struct {
@@ -61,15 +61,15 @@ func main() {
 	}
 	defer file.Close()
 
-	var db *sql.DB
+	var dbPool *pgxpool.Pool
 	if *writeToDB {
-		db, err = initDB()
+		dbPool, err = initDB()
 		if err != nil {
 			log.Fatalf("Error initializing database: %v", err)
 		}
-		defer db.Close()
+		defer dbPool.Close()
 
-		if err := createTableIfNotExists(db); err != nil {
+		if err := createTableIfNotExists(dbPool); err != nil {
 			log.Fatalf("Error creating table: %v", err)
 		}
 	}
@@ -77,7 +77,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Processing file with %d workers...\n", *workers)
 
 	// Use parallel processing
-	lineCount, matchCount := processFileParallel(file, db)
+	lineCount, matchCount := processFileParallel(file, dbPool)
 
 	fmt.Fprintf(os.Stderr, "\nProcessing complete!\n")
 	fmt.Fprintf(os.Stderr, "Total lines processed: %d\n", lineCount)
@@ -89,7 +89,7 @@ type LineBatch struct {
 	startLine  int
 }
 
-func processFileParallel(file *os.File, db *sql.DB) (int64, int64) {
+func processFileParallel(file *os.File, dbPool *pgxpool.Pool) (int64, int64) {
 	var lineCount int64
 	var matchCount int64
 
@@ -100,7 +100,7 @@ func processFileParallel(file *os.File, db *sql.DB) (int64, int64) {
 	// Start worker goroutines
 	for i := 0; i < *workers; i++ {
 		wg.Add(1)
-		go worker(i, lineChan, db, &lineCount, &matchCount, &wg)
+		go worker(i, lineChan, dbPool, &lineCount, &matchCount, &wg)
 	}
 
 	// Read file and send batches to workers
@@ -144,7 +144,7 @@ func processFileParallel(file *os.File, db *sql.DB) (int64, int64) {
 	return lineCount, matchCount
 }
 
-func worker(id int, lineChan <-chan LineBatch, db *sql.DB, lineCount *int64, matchCount *int64, wg *sync.WaitGroup) {
+func worker(id int, lineChan <-chan LineBatch, dbPool *pgxpool.Pool, lineCount *int64, matchCount *int64, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	localLineCount := int64(0)
@@ -174,8 +174,8 @@ func worker(id int, lineChan <-chan LineBatch, db *sql.DB, lineCount *int64, mat
 				fmt.Println()
 			}
 
-			if *writeToDB && db != nil {
-				if err := insertRecord(db, record); err != nil {
+			if *writeToDB && dbPool != nil {
+				if err := insertRecord(dbPool, record); err != nil {
 					log.Printf("Error inserting record at line %d: %v", lineNum, err)
 				}
 			}
@@ -255,23 +255,24 @@ func parseLine(line string) (*KeyRecord, error) {
 	return r, nil
 }
 
-func initDB() (*sql.DB, error) {
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		*dbHost, *dbPort, *dbUser, *dbPassword, *dbName)
+func initDB() (*pgxpool.Pool, error) {
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		*dbUser, *dbPassword, *dbHost, *dbPort, *dbName)
 
-	db, err := sql.Open("postgres", connStr)
+	ctx := context.Background()
+	dbPool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := db.Ping(); err != nil {
+	if err := dbPool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("cannot connect to database: %v", err)
 	}
 
-	return db, nil
+	return dbPool, nil
 }
 
-func createTableIfNotExists(db *sql.DB) error {
+func createTableIfNotExists(dbPool *pgxpool.Pool) error {
 	query := `
 	CREATE TABLE IF NOT EXISTS badger_keys (
 		id SERIAL PRIMARY KEY,
@@ -294,11 +295,12 @@ func createTableIfNotExists(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_uid ON badger_keys(uid);
 	`
 
-	_, err := db.Exec(query)
+	ctx := context.Background()
+	_, err := dbPool.Exec(ctx, query)
 	return err
 }
 
-func insertRecord(db *sql.DB, record *KeyRecord) error {
+func insertRecord(dbPool *pgxpool.Pool, record *KeyRecord) error {
 	query := `
 	INSERT INTO badger_keys (
 		key_hex,
@@ -320,7 +322,8 @@ func insertRecord(db *sql.DB, record *KeyRecord) error {
 
 	attribute := strings.ReplaceAll(record.ParsedKey.Attr, "\x00", "")
 
-	_, err := db.Exec(query,
+	ctx := context.Background()
+	_, err := dbPool.Exec(ctx, query,
 		record.KeyHex,
 		record.Version,
 		record.Size,
