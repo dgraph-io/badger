@@ -138,7 +138,7 @@ func openDir(path string) (*os.File, error) { return os.Open(path) }
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
 func syncDir(dir string) error {
 	var err error
-	// TODO: AIX does not support fsync on a directory. Doing a full file system sync may be
-	// undesirable too (e.x os.Sync()).
+	// AIX does not support fsync on a directory.
+	// Data durability on crash may be affected.
 	return err
 }
