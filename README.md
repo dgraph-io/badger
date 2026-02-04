@@ -254,6 +254,23 @@ Below is a list of known projects that use Badger:
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
+### Platform Compatibility
+
+Badger uses OS-specific implementations for directory locking and `fsync` operations. On
+**POSIX-compliant systems** (Linux, macOS, BSD), these work as expected.
+
+For **non-POSIX platforms**, be aware of potential limitations:
+
+| Platform | File             | Notes                                                                |
+| -------- | ---------------- | -------------------------------------------------------------------- |
+| AIX      | `dir_aix.go`     | Directory `fsync` not supported; durability on crash may be affected |
+| Windows  | `dir_windows.go` | Uses different locking mechanism                                     |
+| Plan9    | `dir_plan9.go`   | No file locking support                                              |
+| WASM/JS  | `dir_other.go`   | No file locking support                                              |
+
+If you encounter issues on these platforms, review the corresponding `dir_*.go` source file for
+implementation details.
+
 ## Contributing
 
 If you're interested in contributing to Badger see [CONTRIBUTING](./CONTRIBUTING.md).
