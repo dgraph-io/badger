@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.9.1] - 2026-02-04
+
+**Fixed**
+
+- fix(aix): add aix directory synchronization support (#2115)
+- fix: correct the comment on value size in skl.node (#2250)
+
+**Tests**
+
+- test: add checksum tests for package y (#2246)
+
+**Chores**
+
+- chore(ci): update arm runner label (#2248)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.9.0...v4.9.1
+
 ## [4.9.0] - 2025-12-15
 
 **Fixed**
