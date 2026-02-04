@@ -5,7 +5,7 @@ This document outlines the steps needed to build and push a new release of Badge
 1. Have a team member "at-the-ready" with github `writer` access (you'll need them to approve PRs).
 1. Create a new branch (prepare-for-release-vXX.X.X, for instance).
 1. Update dependencies in `go.mod` for Ristretto, if required.
-1. Update the CHANGELOG.md. Sonnet 4.5 does a great job of doing this. Example prompt:
+1. Update the CHANGELOG.md. Opus 4.5 does a great job of doing this. Example prompt:
    `I'm releasing vXX.X.X off the main branch, add a new entry for this release. Conform to the`
    `"Keep a Changelog" format, use past entries as a formatting guide. Run the trunk linter.`
 1. Validate the version does not have storage incompatibilities with the previous version. If so,
@@ -34,7 +34,7 @@ This document outlines the steps needed to build and push a new release of Badge
 1. Splash the "go index" cache to ensure that the latest release is available to the public with:
 
    ```sh
-   go list -m github.com/dgraph-io/badger@vX.X.X
+   go list -m github.com/dgraph-io/badger/v4@vX.X.X
    ```
 
 1. If needed, create a new announcement thread in the
