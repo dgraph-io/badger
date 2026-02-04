@@ -1,6 +1,7 @@
 name: ci-badger-bank-tests
 
 on:
+  workflow_dispatch: # allows manual trigger from GitHub
   pull_request:
     paths-ignore:
       - "**.md"
