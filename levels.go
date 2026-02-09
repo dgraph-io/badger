@@ -1477,7 +1477,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 			expensive = " [E]"
 		}
 		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
-			" [%s] -> [%s], took %v\n, deleted %d bytes",
+			" [%s] -> [%s], took %v, deleted %d bytes",
 			id, expensive, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
 			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
 			dur.Round(time.Millisecond), sizeOldTables-sizeNewTables)
