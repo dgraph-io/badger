@@ -58,7 +58,8 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithNumVersionsToKeep(math.MaxInt32))
+		WithNumVersionsToKeep(math.MaxInt32).
+		WithMaxLevels(vMaxLevels))
 	if err != nil {
 		return err
 	}
