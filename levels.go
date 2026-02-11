@@ -1593,6 +1593,54 @@ func (s *levelsController) close() error {
 	return y.Wrap(err, "levelsController.Close")
 }
 
+func (s *levelsController) getBatch(keys [][]byte,
+	maxVs []y.ValueStruct, startLevel int, keysRead []bool, version uint64) ([]y.ValueStruct, error) {
+	if s.kv.IsClosed() {
+		return []y.ValueStruct{}, ErrDBClosed
+	}
+	// It's important that we iterate the levels from 0 on upward. The reason is, if we iterated
+	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
+	// read level L's tables post-compaction and level L+1's tables pre-compaction. (If we do
+	// parallelize this, we will need to call the h.RLock() function by increasing order of level
+	// number.)
+	for _, h := range s.levels {
+		// Ignore all levels below startLevel. This is useful for GC when L0 is kept in memory.
+		if h.level < startLevel {
+			continue
+		}
+		vs, err := h.getBatch(keys, keysRead, version) // Calls h.RLock() and h.RUnlock().
+		if err != nil {
+			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
+		}
+
+		for i, v := range vs {
+			// keysRead is only update by this function or one in db. levelhandler will
+			// not update done. No need to do anything is done is set.
+			if keysRead[i] {
+				continue
+			}
+			if v.Value == nil && v.Meta == 0 {
+				continue
+			}
+			y.NumBytesReadsLSMAdd(s.kv.opt.MetricsEnabled, int64(len(v.Value)))
+			if v.Version == version {
+				maxVs[i] = v
+				keysRead[i] = true
+			}
+			if maxVs[i].Version < v.Version {
+				maxVs[i] = v
+			}
+		}
+	}
+
+	for i := 0; i < len(maxVs); i++ {
+		if len(maxVs[i].Value) > 0 {
+			y.NumGetsWithResultsAdd(s.kv.opt.MetricsEnabled, 1)
+		}
+	}
+	return maxVs, nil
+}
+
 // get searches for a given key in all the levels of the LSM tree. It returns
 // key version <= the expected version (version in key). If not found,
 // it returns an empty y.ValueStruct.
