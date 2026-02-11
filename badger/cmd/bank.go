@@ -303,7 +303,8 @@ func runDisect(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(true).
 		WithEncryptionKey([]byte(encryptionKey)).
-		WithIndexCacheSize(1 << 30))
+		WithIndexCacheSize(1 << 30).
+		WithMaxLevels(vMaxLevels))
 	if err != nil {
 		return err
 	}
@@ -351,7 +352,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 		// Do not GC any versions, because we need them for the disect.
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithBlockCacheSize(1 << 30).
-		WithIndexCacheSize(1 << 30)
+		WithIndexCacheSize(1 << 30).
+		WithMaxLevels(vMaxLevels)
 
 	if verbose {
 		opts = opts.WithLoggingLevel(badger.DEBUG)
@@ -376,7 +378,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := os.MkdirTemp("", "bank_subscribe")
 		y.Check(err)
 
-		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false).WithMaxLevels(vMaxLevels))
 		if err != nil {
 			return err
 		}
@@ -387,7 +389,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := os.MkdirTemp("", "bank_stream")
 		y.Check(err)
 
-		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false).WithMaxLevels(vMaxLevels))
 		if err != nil {
 			return err
 		}

@@ -16,6 +16,8 @@ import (
 
 var sstDir, vlogDir string
 
+var vMaxLevels int
+
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:               "badger",
@@ -38,6 +40,9 @@ func init() {
 
 	RootCmd.PersistentFlags().StringVar(&vlogDir, "vlog-dir", "",
 		"Directory where the value log files are located, if different from --dir")
+
+	RootCmd.PersistentFlags().IntVar(&vMaxLevels, "max-levels", 7, 
+		"Maximum number of levels in the LSM tree")
 }
 
 func validateRootCmdArgs(cmd *cobra.Command, args []string) error {
@@ -49,6 +54,10 @@ func validateRootCmdArgs(cmd *cobra.Command, args []string) error {
 	}
 	if vlogDir == "" {
 		vlogDir = sstDir
+	}
+
+	if vMaxLevels < 1 {
+		return errors.New("--max-levels should be at least 1")
 	}
 	return nil
 }

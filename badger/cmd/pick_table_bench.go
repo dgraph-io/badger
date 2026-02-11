@@ -51,7 +51,8 @@ func init() {
 func pickTableBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithReadOnly(pickOpts.readOnly)
+		WithReadOnly(pickOpts.readOnly).
+		WithMaxLevels(vMaxLevels)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.OpenManaged(opt)
 	if err != nil {
