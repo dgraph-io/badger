@@ -671,6 +671,11 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
+	if db.opt.InMemory {
+		// InMemory mode does not use WAL/vlog files, so Sync is a no-op.
+		return nil
+	}
+
 	/**
 	Make an attempt to sync both the logs, the active memtable's WAL and the vLog (1847).
 	Cases:
