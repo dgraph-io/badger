@@ -1742,8 +1742,6 @@ func TestTestSequence2(t *testing.T) {
 }
 
 func TestReadOnly(t *testing.T) {
-	t.Skipf("TODO: ReadOnly needs truncation, so this fails")
-
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
