@@ -378,7 +378,7 @@ func Open(opt Options) (*DB, error) {
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	if !db.opt.InMemory {
+	if !db.opt.InMemory && !db.opt.ReadOnly {
 		db.closers.valueGC = z.NewCloser(1)
 		go db.vlog.waitOnGC(db.closers.valueGC)
 	}
@@ -538,7 +538,7 @@ func (db *DB) close() (err error) {
 	db.blockWrites.Store(1)
 	db.isClosed.Store(1)
 
-	if !db.opt.InMemory && !db.opt.ReadOnly {
+	if db.closers.valueGC != nil {
 		// Stop value GC first.
 		db.closers.valueGC.SignalAndWait()
 	}
@@ -671,8 +671,8 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
-	if db.opt.InMemory {
-		// InMemory mode does not use WAL/vlog files, so Sync is a no-op.
+	if db.opt.InMemory || db.opt.ReadOnly {
+		// InMemory and read-only modes do not use WAL/vlog files, so Sync is a no-op.
 		return nil
 	}
 
@@ -1235,6 +1235,9 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if db.opt.InMemory {
 		return ErrGCInMemoryMode
 	}
+	if db.opt.ReadOnly {
+		return ErrGCInReadOnlyMode
+	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}
@@ -1354,6 +1357,9 @@ func (seq *Sequence) updateLease() error {
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	if db.opt.managedTxns {
 		panic("Cannot use GetSequence with managedDB=true.")
+	}
+	if db.opt.ReadOnly {
+		panic("Cannot use GetSequence in read-only mode.")
 	}
 
 	switch {
@@ -1563,6 +1569,9 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
+	if db.opt.ReadOnly {
+		panic("Cannot flatten in read-only mode.")
+	}
 
 	db.stopCompactions()
 	defer db.startCompactions()
@@ -1850,6 +1859,9 @@ func (db *DB) isBanned(key []byte) error {
 func (db *DB) BanNamespace(ns uint64) error {
 	if db.opt.NamespaceOffset < 0 {
 		return ErrNamespaceMode
+	}
+	if db.opt.ReadOnly {
+		panic("Cannot ban namespace in read-only mode.")
 	}
 	db.opt.Infof("Banning namespace: %d", ns)
 	// First set the banned namespaces in DB and then update the in-memory structure.

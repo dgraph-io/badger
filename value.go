@@ -579,7 +579,6 @@ func (vlog *valueLog) open(db *DB) error {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
 
-		// Just open in RDWR mode. This should not create a new log file.
 		lf.opt = vlog.opt
 		flags := os.O_RDWR
 		if vlog.opt.ReadOnly {
@@ -590,7 +589,7 @@ func (vlog *valueLog) open(db *DB) error {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 		// We shouldn't delete the maxFid file.
-		if lf.size.Load() == vlogHeaderSize && fid != vlog.maxFid {
+		if lf.size.Load() == vlogHeaderSize && fid != vlog.maxFid && !vlog.opt.ReadOnly {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
 				return y.Wrapf(err, "while trying to delete empty file: %s", lf.path)
@@ -1101,7 +1100,7 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 }
 
 func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
-	if vlog.opt.InMemory {
+	if vlog.opt.InMemory || vlog.opt.ReadOnly {
 		return
 	}
 	for fid, discard := range stats {

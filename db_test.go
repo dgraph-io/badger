@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io/fs"
 	"math"
 	"math/rand"
 	"os"
@@ -1769,12 +1770,10 @@ func TestReadOnly(t *testing.T) {
 	opts.ReadOnly = true
 	kv1, err := Open(opts)
 	require.NoError(t, err)
-	defer kv1.Close()
 
 	// Open another read-only
 	kv2, err := Open(opts)
 	require.NoError(t, err)
-	defer kv2.Close()
 
 	// Attempt a read-write open while it's open for read-only
 	opts.ReadOnly = false
@@ -1790,6 +1789,10 @@ func TestReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, b1, []byte("value1"))
 	err = txn1.Commit()
+	require.NoError(t, err)
+	err = kv1.RunValueLogGC(0.5)
+	require.Error(t, err, ErrGCInReadOnlyMode)
+	err = kv1.Sync()
 	require.NoError(t, err)
 
 	// Get a thing from the DB via the other connection
@@ -1809,6 +1812,32 @@ func TestReadOnly(t *testing.T) {
 	require.Contains(t, err.Error(), "No sets or deletes are allowed in a read-only transaction")
 	err = txn.Commit()
 	require.NoError(t, err)
+
+	// Close
+	require.NoError(t, kv1.Close())
+	require.NoError(t, kv2.Close())
+
+	// Test os permission read-only open
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		require.NoError(t, err)
+		if path == dir {
+			return os.Chmod(path, 0o500)
+		}
+		return os.Chmod(path, 0o400)
+	})
+	require.NoError(t, err)
+
+	opts.ReadOnly = true
+	kv3, err := Open(opts)
+	require.NoError(t, err)
+	txn3 := kv3.NewTransaction(true)
+	_, err = txn3.Get([]byte("key1"))
+	require.NoError(t, err)
+	require.NoError(t, txn3.Commit())
+	require.NoError(t, kv3.Close())
+
+	// Restore permissions for cleanup
+	require.NoError(t, os.Chmod(dir, 0o700))
 }
 
 func TestLSMOnly(t *testing.T) {
@@ -1843,7 +1872,6 @@ func TestLSMOnly(t *testing.T) {
 		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
 	}
 	require.NoError(t, db.Close())
-
 }
 
 // This test function is doing some intricate sorcery.
