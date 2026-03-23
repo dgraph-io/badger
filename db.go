@@ -538,7 +538,7 @@ func (db *DB) close() (err error) {
 	db.blockWrites.Store(1)
 	db.isClosed.Store(1)
 
-	if !db.opt.InMemory {
+	if !db.opt.InMemory && !db.opt.ReadOnly {
 		// Stop value GC first.
 		db.closers.valueGC.SignalAndWait()
 	}
