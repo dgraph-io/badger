@@ -540,6 +540,10 @@ func (vlog *valueLog) init(db *DB) {
 	}
 	vlog.dirPath = vlog.opt.ValueDir
 
+	if vlog.opt.ReadOnly {
+		return
+	}
+
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	lf, err := InitDiscardStats(vlog.opt)
 	y.Check(err)
@@ -573,7 +577,11 @@ func (vlog *valueLog) open(db *DB) error {
 
 		// Just open in RDWR mode. This should not create a new log file.
 		lf.opt = vlog.opt
-		if err := lf.open(vlog.fpath(fid), os.O_RDWR,
+		flags := os.O_RDWR
+		if vlog.opt.ReadOnly {
+			flags = os.O_RDONLY
+		}
+		if err := lf.open(vlog.fpath(fid), flags,
 			2*vlog.opt.ValueLogFileSize); err != nil {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
