@@ -8,6 +8,7 @@ package badger
 import (
 	"bytes"
 	"errors"
+	"expvar"
 	"fmt"
 	"math"
 	"math/rand"
@@ -15,6 +16,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
@@ -894,6 +896,87 @@ func (th *testHelper) writeRange(from, to int) {
 		})
 		require.NoError(th.t, err)
 	}
+}
+
+func TestValueGCRewriteSkipsLSMGetOnlyForExpiredEntriesInMixedVlogFile(t *testing.T) {
+	dir := t.TempDir()
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
+
+	kv, err := Open(opt)
+	require.NoError(t, err)
+	defer kv.Close()
+
+	rng := rand.New(rand.NewSource(2))
+	const mixedEntryCount = 16
+	const mixedLiveEntryCount = mixedEntryCount / 2
+	const extraLiveEntryCount = 1
+	// Leave enough room for entry metadata so all mixed entries stay in one vlog file.
+	valueSize := int(opt.ValueLogFileSize/int64(mixedEntryCount)) - 512
+	values := make([][]byte, mixedEntryCount)
+	for i := range values {
+		values[i] = make([]byte, valueSize)
+		_, err = rng.Read(values[i])
+		require.NoError(t, err)
+	}
+	rotatingVal := make([]byte, 32<<10)
+	_, err = rng.Read(rotatingVal)
+	require.NoError(t, err)
+
+	// Keep several expired and live entries in the same old vlog file.
+	require.NoError(t, kv.Update(func(txn *Txn) error {
+		for i, val := range values {
+			key := []byte(fmt.Sprintf("mixed-%02d", i))
+			entry := NewEntry(key, val)
+			if i%2 == 0 {
+				entry = entry.WithTTL(-time.Hour)
+			}
+			if err := txn.SetEntry(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, kv.Update(func(txn *Txn) error {
+		return txn.SetEntry(NewEntry([]byte("rotating"), rotatingVal))
+	}))
+
+	fids := kv.vlog.sortedFids()
+	require.Len(t, fids, 2)
+
+	kv.vlog.filesLock.RLock()
+	lf := kv.vlog.filesMap[fids[0]]
+	kv.vlog.filesLock.RUnlock()
+
+	// Only the live entry should require an LSM lookup during rewrite.
+	clearAllMetrics()
+	require.NoError(t, kv.vlog.rewrite(lf))
+
+	totalGets := expvar.Get("badger_get_num_user")
+	require.NotNil(t, totalGets)
+	require.Equal(t, int64(mixedLiveEntryCount+extraLiveEntryCount), totalGets.(*expvar.Int).Value())
+
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		for i, want := range values {
+			key := []byte(fmt.Sprintf("mixed-%02d", i))
+			item, err := txn.Get(key)
+			if i%2 == 0 {
+				require.Equal(t, ErrKeyNotFound, err)
+				continue
+			}
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.Equal(t, want, val)
+		}
+		item, err := txn.Get([]byte("rotating"))
+		require.NoError(t, err)
+		val := getItemValue(t, item)
+		require.Equal(t, rotatingVal, val)
+		return nil
+	}))
 }
 
 func (th *testHelper) readRange(from, to int) {
