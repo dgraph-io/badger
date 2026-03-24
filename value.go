@@ -183,6 +183,10 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			vlog.opt.Debugf("Processing entry %d", count)
 		}
 
+		if isDeletedOrExpired(e.meta, e.ExpiresAt) {
+			return nil
+		}
+
 		vs, err := vlog.db.get(e.Key)
 		if err != nil {
 			return err
@@ -1035,9 +1039,6 @@ LOOP:
 func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	if vs.Version != y.ParseTs(e.Key) {
 		// Version not found. Discard.
-		return true
-	}
-	if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
 		return true
 	}
 	if (vs.Meta & bitValuePointer) == 0 {

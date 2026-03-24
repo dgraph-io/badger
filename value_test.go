@@ -8,6 +8,7 @@ package badger
 import (
 	"bytes"
 	"errors"
+	"expvar"
 	"fmt"
 	"math"
 	"math/rand"
@@ -15,6 +16,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
@@ -894,6 +896,71 @@ func (th *testHelper) writeRange(from, to int) {
 		})
 		require.NoError(th.t, err)
 	}
+}
+
+func TestValueGCRewriteSkipsLSMGetForExpiredVlogEntry(t *testing.T) {
+	dir := t.TempDir()
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	opt.BaseTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
+
+	kv, err := Open(opt)
+	require.NoError(t, err)
+	defer kv.Close()
+
+	rng := rand.New(rand.NewSource(1))
+	expiredVal1 := make([]byte, 600<<10)
+	expiredVal2 := make([]byte, 600<<10)
+	liveVal := make([]byte, 32<<10)
+	_, err = rng.Read(expiredVal1)
+	require.NoError(t, err)
+	_, err = rng.Read(expiredVal2)
+	require.NoError(t, err)
+	_, err = rng.Read(liveVal)
+	require.NoError(t, err)
+
+	// Write enough expired data to make the first vlog file contain only expired entries.
+	require.NoError(t, kv.Update(func(txn *Txn) error {
+		if err := txn.SetEntry(NewEntry([]byte("expired-1"), expiredVal1).WithTTL(-time.Hour)); err != nil {
+			return err
+		}
+		return txn.SetEntry(NewEntry([]byte("expired-2"), expiredVal2).WithTTL(-time.Hour))
+	}))
+	require.NoError(t, kv.Update(func(txn *Txn) error {
+		return txn.SetEntry(NewEntry([]byte("live"), liveVal))
+	}))
+
+	fids := kv.vlog.sortedFids()
+	require.Len(t, fids, 2)
+
+	kv.vlog.filesLock.RLock()
+	lf := kv.vlog.filesMap[fids[0]]
+	kv.vlog.filesLock.RUnlock()
+
+	// Rewriting an expired-only vlog file should not trigger an LSM lookup.
+	clearAllMetrics()
+	require.NoError(t, kv.vlog.rewrite(lf))
+
+	totalGets := expvar.Get("badger_get_num_user")
+	require.NotNil(t, totalGets)
+	require.Equal(t, int64(0), totalGets.(*expvar.Int).Value())
+
+	// Expired keys must stay invisible and live keys must remain readable.
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("expired-1"))
+		require.Equal(t, ErrKeyNotFound, err)
+
+		_, err = txn.Get([]byte("expired-2"))
+		require.Equal(t, ErrKeyNotFound, err)
+
+		item, err := txn.Get([]byte("live"))
+		require.NoError(t, err)
+		val := getItemValue(t, item)
+		require.Equal(t, liveVal, val)
+		return nil
+	}))
 }
 
 func (th *testHelper) readRange(from, to int) {
