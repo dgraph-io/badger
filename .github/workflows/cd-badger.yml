@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   badger-build-amd64:
@@ -95,3 +95,25 @@ jobs:
           path: |
             badger/badger-checksum-linux-arm64.sha256
             badger/badger-linux-arm64.tar.gz
+
+  upload-to-release:
+    runs-on: ubuntu-latest
+    needs: [badger-build-amd64, badger-build-arm64]
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List downloaded artifacts
+        run: ls -alR artifacts/
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.inputs.releasetag }}" \
+            artifacts/badger-linux-amd64.tar.gz \
+            artifacts/badger-checksum-linux-amd64.sha256 \
+            artifacts/badger-linux-arm64.tar.gz \
+            artifacts/badger-checksum-linux-arm64.sha256 \
+            --repo "${{ github.repository }}"
