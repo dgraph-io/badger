@@ -22,7 +22,7 @@ lint:
         - pb/*.pb.go
   enabled:
     - golangci-lint2@2.4.0
-    - trivy@0.64.1
+    - trivy@0.69.3
     - renovate@41.76.0
     - actionlint@1.7.7
     - checkov@3.2.461
