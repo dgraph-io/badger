@@ -384,9 +384,7 @@ method. Iteration happens in byte-wise lexicographical sorting order.
 
 ```go
 err := db.View(func(txn *badger.Txn) error {
-  opts := badger.DefaultIteratorOptions
-  opts.PrefetchSize = 10
-  it := txn.NewIterator(opts)
+  it := txn.NewIterator(badger.DefaultIteratorOptions.WithPrefetchSize(10))
   defer it.Close()
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
@@ -526,9 +524,7 @@ reads for selected keys during an iteration, by calling `item.Value()` only when
 
 ```go
 err := db.View(func(txn *badger.Txn) error {
-  opts := badger.DefaultIteratorOptions
-  opts.PrefetchValues = false
-  it := txn.NewIterator(opts)
+  it := txn.NewIterator(badger.DefaultIteratorOptions.WithPrefetchValues(false))
   defer it.Close()
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
