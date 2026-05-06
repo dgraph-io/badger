@@ -2161,6 +2161,19 @@ func TestSyncForReadingTheEntriesThatWereSynced(t *testing.T) {
 	}
 }
 
+func TestSyncInMemoryNoError(t *testing.T) {
+	opt := getTestOptions("")
+	opt.InMemory = true
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("key"), []byte("value"))
+		})
+		require.NoError(t, err)
+		require.NoError(t, db.Sync())
+	})
+}
+
 func TestForceFlushMemtable(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err, "temp dir for badger could not be created")
