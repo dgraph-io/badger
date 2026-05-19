@@ -109,6 +109,9 @@ var (
 	// ErrGCInMemoryMode is returned when db.RunValueLogGC is called in in-memory mode.
 	ErrGCInMemoryMode = stderrors.New("Cannot run value log GC when DB is opened in InMemory mode")
 
+	// ErrGCInReadOnlyMode is returned when db.RunValueLogGC is called in read-only mode.
+	ErrGCInReadOnlyMode = stderrors.New("Cannot run value log GC when DB is opened in ReadOnly mode")
+
 	// ErrDBClosed is returned when a get operation is performed after closing the DB.
 	ErrDBClosed = stderrors.New("DB Closed")
 )
