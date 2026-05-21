@@ -157,6 +157,7 @@ Below is a list of known projects that use Badger:
   persistent, time sorted message queue.
 - [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series
   database.
+- [gracedb](https://github.com/gracegaoya/gracedb) - Lightweight Go-embedded AI memory and knowledge graph database built on Badger, with vector search, full-text search, property graph, RDF/SPARQL, and MCP server support.
 - [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization
   Project.
 - [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
