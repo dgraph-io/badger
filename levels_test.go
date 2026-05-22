@@ -1290,3 +1290,149 @@ func TestStaleDataCleanup(t *testing.T) {
 
 	})
 }
+
+func TestLevelTargets(t *testing.T) {
+	// Disable compactions and keep single version of each key.
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+
+	t.Run("level 0 to level 6 when level 5 is not empty", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 4
+
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[opt.MaxLevels-1],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[opt.MaxLevels-1].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = opt.MaxLevels - 1
+			err := db.lc.runCompactDef(-1, 0, cdef)
+			require.Error(t, err)
+			expectedErr := fmt.Sprintf(
+				"there is a non-empty level %d above base level %d",
+				opt.MaxLevels-2, opt.MaxLevels-1)
+			require.Contains(t, err.Error(), expectedErr)
+		})
+	})
+
+	t.Run("level 0 to level 5 while size of level 6 is less than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 4
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
+		})
+	})
+
+	t.Run("level 0 to level 4 while size of level 5 and 6 is less than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-3)
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-3].totalSize = opt.BaseLevelSize / 4
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+		})
+	})
+
+	t.Run("all level have data", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			for i := 1; i < opt.MaxLevels; i++ {
+				createAndOpen(db, data, i)
+				db.lc.levels[i].totalSize = opt.BaseLevelSize / 2
+			}
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("level 1 is larger than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			for i := 1; i < opt.MaxLevels; i++ {
+				createAndOpen(db, data, i)
+				db.lc.levels[i].totalSize = opt.BaseLevelSize * 2
+			}
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("level 5 is larger than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize * 2
+			// Set level 6 large enough so that targetSz[5] > level 5 size (satisfying old
+			// bump condition), but level 5 itself exceeds BaseLevelSize so the new guard
+			// prevents the bump.
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * int64(opt.LevelSizeMultiplier*2+1)
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+		})
+	})
+
+	t.Run("only level 0 has data", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			// All levels below are empty; base level should be the last level.
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-1, target.baseLevel)
+		})
+	})
+
+	t.Run("level size exactly at BaseLevelSize boundary", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			// Level 5 size exactly equals BaseLevelSize; should NOT bump past it.
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 2
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+		})
+	})
+}
