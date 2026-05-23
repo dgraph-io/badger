@@ -130,6 +130,12 @@ func ParseTs(key []byte) uint64 {
 // a<timestamp> would be sorted higher than aa<timestamp> if we use bytes.compare
 // All keys should have timestamp.
 func CompareKeys(key1, key2 []byte) int {
+	// Fast path: when total lengths match, the user-key portion has the same
+	// length, so a single lexicographic compare over the full keys is
+	// equivalent to comparing user-key then timestamp.
+	if len(key1) == len(key2) {
+		return bytes.Compare(key1, key2)
+	}
 	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
 		return cmp
 	}
