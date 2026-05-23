@@ -276,3 +276,78 @@ func TestEmptyBuilder(t *testing.T) {
 	require.Equal(t, []byte{}, b.Finish())
 
 }
+
+func TestKeyDiff(t *testing.T) {
+	// keyDiff only reads b.curBlock.baseKey; construct a minimal Builder.
+	mk := func(base []byte) *Builder {
+		return &Builder{curBlock: &bblock{baseKey: base}}
+	}
+
+	cases := []struct {
+		name string
+		base []byte
+		k    []byte
+		want []byte
+	}{
+		{"empty base", nil, []byte("anything"), []byte("anything")},
+		{"empty new", []byte("base"), nil, []byte{}},
+		{"identical short", []byte("abc"), []byte("abc"), []byte{}},
+		{"identical 8 bytes", []byte("01234567"), []byte("01234567"), []byte{}},
+		{"identical 16 bytes", []byte("0123456789abcdef"), []byte("0123456789abcdef"), []byte{}},
+		{"diff at byte 0 (tail-only path: len<8)", []byte("abc"), []byte("xbc"), []byte("xbc")},
+		{"diff at byte 1 (tail-only)", []byte("abc"), []byte("aXc"), []byte("Xc")},
+		{"diff at last tail byte", []byte("abcdefg"), []byte("abcdefX"), []byte("X")},
+		{"diff in first word: byte 0", []byte("01234567abcd"), []byte("X1234567abcd"), []byte("X1234567abcd")},
+		{"diff in first word: byte 3", []byte("01234567abcd"), []byte("012X4567abcd"), []byte("X4567abcd")},
+		{"diff in first word: byte 7", []byte("01234567abcd"), []byte("0123456Xabcd"), []byte("Xabcd")},
+		{"diff in second word at byte 8", []byte("0123456789abcdef"), []byte("01234567X9abcdef"), []byte("X9abcdef")},
+		{"diff in tail after one word (byte 8 of 9)", []byte("012345678"), []byte("012345679"), []byte("9")},
+		{"diff in tail after one word (byte 10 of 11)", []byte("0123456789a"), []byte("0123456789X"), []byte("X")},
+		{"new longer, full prefix match", []byte("0123"), []byte("0123XYZ"), []byte("XYZ")},
+		{"new shorter, full prefix match", []byte("0123XYZ"), []byte("0123"), []byte{}},
+		{"new longer, full 8-byte prefix match", []byte("01234567"), []byte("01234567tail"), []byte("tail")},
+		{"new longer than base by exactly 8", []byte("01234567"), []byte("0123456789ABCDEF"), []byte("89ABCDEF")},
+		{"binary keys with zero bytes", []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, []byte{0, 1, 2, 3, 4, 5, 6, 0xff, 8, 9}, []byte{0xff, 8, 9}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := mk(c.base)
+			got := b.keyDiff(c.k)
+			require.Equal(t, string(c.want), string(got))
+		})
+	}
+}
+
+// TestKeyDiffMatchesNaive cross-checks the word-wise implementation against a
+// byte-by-byte reference over randomized inputs.
+func TestKeyDiffMatchesNaive(t *testing.T) {
+	naive := func(base, newKey []byte) []byte {
+		n := len(newKey)
+		if m := len(base); m < n {
+			n = m
+		}
+		i := 0
+		for i < n && newKey[i] == base[i] {
+			i++
+		}
+		return newKey[i:]
+	}
+
+	rng := rand.New(rand.NewSource(42))
+	for i := 0; i < 2000; i++ {
+		baseLen := rng.Intn(40)
+		newLen := rng.Intn(40)
+		base := make([]byte, baseLen)
+		newKey := make([]byte, newLen)
+		_, _ = rng.Read(base)
+		_, _ = rng.Read(newKey)
+		// With ~50% probability, share a random prefix to stress LCP boundary.
+		if rng.Intn(2) == 0 && baseLen > 0 && newLen > 0 {
+			share := rng.Intn(min(baseLen, newLen) + 1)
+			copy(newKey[:share], base[:share])
+		}
+		b := &Builder{curBlock: &bblock{baseKey: base}}
+		require.Equal(t, string(naive(base, newKey)), string(b.keyDiff(newKey)))
+	}
+}
