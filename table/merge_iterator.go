@@ -85,55 +85,32 @@ func (n *node) seek(key []byte) {
 }
 
 func (mi *MergeIterator) fix() {
-	if !mi.bigger().valid {
+	// Hoist the "other" node once. mi.small is always &mi.left or &mi.right.
+	big := &mi.left
+	if mi.small == &mi.left {
+		big = &mi.right
+	}
+	if !big.valid {
 		return
 	}
 	if !mi.small.valid {
-		mi.swapSmall()
+		mi.small = big
 		return
 	}
-	cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
-	switch {
-	case cmp == 0: // Both the keys are equal.
-		// In case of same keys, move the right iterator ahead.
+	cmp := y.CompareKeys(mi.small.key, big.key)
+	if cmp == 0 {
+		// Same key on both sides: advance right, then if right was small, swap to left.
 		mi.right.next()
-		if &mi.right == mi.small {
-			mi.swapSmall()
-		}
-		return
-	case cmp < 0: // Small is less than bigger().
-		if mi.reverse {
-			mi.swapSmall()
-		} else { //nolint:staticcheck
-			// we don't need to do anything. Small already points to the smallest.
-		}
-		return
-	default: // bigger() is less than small.
-		if mi.reverse {
-			// Do nothing since we're iterating in reverse. Small currently points to
-			// the bigger key and that's okay in reverse iteration.
-		} else {
-			mi.swapSmall()
+		if mi.small == &mi.right {
+			mi.small = &mi.left
 		}
 		return
 	}
-}
-
-func (mi *MergeIterator) bigger() *node {
-	if mi.small == &mi.left {
-		return &mi.right
-	}
-	return &mi.left
-}
-
-func (mi *MergeIterator) swapSmall() {
-	if mi.small == &mi.left {
-		mi.small = &mi.right
-		return
-	}
-	if mi.small == &mi.right {
-		mi.small = &mi.left
-		return
+	// Swap when small holds the "wrong" side for the direction:
+	//   forward (!reverse) + cmp > 0 → big is smaller, swap to it
+	//   reverse + cmp < 0           → big is larger, swap to it
+	if (cmp < 0) == mi.reverse {
+		mi.small = big
 	}
 }
 
