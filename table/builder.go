@@ -7,8 +7,10 @@ package table
 
 import (
 	"crypto/aes"
+	"encoding/binary"
 	"errors"
 	"math"
+	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -197,9 +199,26 @@ func (b *Builder) Empty() bool { return len(b.keyHashes) == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
+	base := b.curBlock.baseKey
+	n := len(newKey)
+	if m := len(base); m < n {
+		n = m
+	}
 	var i int
-	for i = 0; i < len(newKey) && i < len(b.curBlock.baseKey); i++ {
-		if newKey[i] != b.curBlock.baseKey[i] {
+	// Word-wise loop: 8 bytes at a time. The Go compiler lowers
+	// binary.LittleEndian.Uint64 to a single unaligned 64-bit load.
+	for i+8 <= n {
+		a := binary.LittleEndian.Uint64(newKey[i:])
+		c := binary.LittleEndian.Uint64(base[i:])
+		if a != c {
+			// First differing byte = trailing-zero bits / 8 (little-endian byte order).
+			i += bits.TrailingZeros64(a^c) >> 3
+			return newKey[i:]
+		}
+		i += 8
+	}
+	for ; i < n; i++ {
+		if newKey[i] != base[i] {
 			break
 		}
 	}
