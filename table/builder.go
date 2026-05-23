@@ -235,12 +235,15 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	// store current entry's offset
 	b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, uint32(b.curBlock.end))
 
-	// Layout: header, diffKey, value.
-	b.append(h.Encode())
-	b.append(diffKey)
-
-	dst := b.allocate(int(v.EncodedSize()))
-	v.Encode(dst)
+	// Layout: header (4 bytes), diffKey, value. Fuse into a single allocate
+	// to avoid 3 capacity checks, 1 heap-escaping local [4]byte from h.Encode(),
+	// and 1 intermediate copy per entry. Same byte layout as before.
+	dlen := len(diffKey)
+	vsz := int(v.EncodedSize())
+	dst := b.allocate(4 + dlen + vsz)
+	*(*header)(unsafe.Pointer(&dst[0])) = h
+	copy(dst[4:4+dlen], diffKey)
+	v.Encode(dst[4+dlen:])
 
 	// Add the vpLen to the onDisk size. We'll add the size of the block to
 	// onDisk size in Finish() function.
