@@ -715,7 +715,19 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 
-	var tables []*memTable
+	// Pre-size the slice so we never trigger growslice. The count is known
+	// up front: 1 mutable (unless ReadOnly) + len(db.imm) immutables. The
+	// closure below still escapes (it's returned), but eliminating the
+	// growslice path saves the per-call growth allocation that otherwise
+	// fires whenever len(db.imm) crosses a slice-cap boundary. In dgraph's
+	// posting list rollup, getMemTables is called once per iterator
+	// construction (one per cache miss), so the savings scale with rollup
+	// frequency.
+	n := len(db.imm)
+	if !db.opt.ReadOnly {
+		n++
+	}
+	tables := make([]*memTable, 0, n)
 
 	// Mutable memtable does not exist in read-only mode.
 	if !db.opt.ReadOnly {
