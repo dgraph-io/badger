@@ -19,15 +19,15 @@ import (
 // against ts bytes).
 func TestRegressionHasPrefixShortPrefixFallback(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		// Single short key — userKey is 1 byte.
-		txnSet(t, db, []byte("a"), []byte("v"), 0)
+		// userKey "z" sorts AFTER prefix "yy", so Seek(prefix) lands on it
+		// and hasPrefix is actually called. The internal key is "z"+8 ts
+		// bytes (9 bytes), strictly shorter than prefix(2)+8=10, forcing
+		// the ParseKey fallback branch.
+		txnSet(t, db, []byte("z"), []byte("v"), 0)
 
 		require.NoError(t, db.View(func(txn *Txn) error {
 			opt := DefaultIteratorOptions
-			// Prefix is longer than the single existing userKey "a". The
-			// optimized hasPrefix must take the ParseKey fallback (because
-			// len(key) < len(prefix)+8) and return false — no key matches.
-			opt.Prefix = []byte("abcdefghij") // 10 bytes, longer than "a"
+			opt.Prefix = []byte("yy") // 2 bytes, longer than userKey "z"
 			it := txn.NewIterator(opt)
 			defer it.Close()
 			count := 0
