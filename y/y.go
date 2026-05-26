@@ -136,10 +136,9 @@ func CompareKeys(key1, key2 []byte) int {
 	if len(key1) == len(key2) {
 		return bytes.Compare(key1, key2)
 	}
-	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
-		return cmp
-	}
-	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
+	// Different total lengths => different user-key lengths => the user-key
+	// compare can never return 0. No ts tiebreak is reachable here.
+	return bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8])
 }
 
 // ParseKey parses the actual key from the key bytes.
