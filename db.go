@@ -625,6 +625,9 @@ func (db *DB) close() (err error) {
 	db.threshold.close()
 
 	if db.opt.InMemory {
+		for _, mem := range db.imm{
+			mem.DecrRef()
+		}
 		return
 	}
 
