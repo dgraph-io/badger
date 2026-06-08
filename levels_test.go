@@ -1322,7 +1322,10 @@ func TestBaseLevelZeroBySize(t *testing.T) {
 
 	for _, tc := range sizes {
 		t.Run(tc.name, func(t *testing.T) {
-			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			// Disable background compactors so they don't race with the manual
+			// size mutation and doCompact call below.
+			opt := DefaultOptions("").WithNumCompactors(0)
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 				setSize := func(level int, sz int64) {
 					lh := db.lc.levels[level]
 					lh.Lock()
@@ -1330,9 +1333,10 @@ func TestBaseLevelZeroBySize(t *testing.T) {
 					lh.Unlock()
 				}
 
-				setSize(6, tc.lmax) // last level (Lmax)
-				setSize(1, 1*GB)    // L1 non-empty: would block the "bring base level down" loop
-				setSize(0, 1*GB)    // L0 non-empty: would block the final empty-L0 adjustment
+				lmaxLevel := db.opt.MaxLevels - 1 // last level (Lmax), not hard-coded
+				setSize(lmaxLevel, tc.lmax)
+				setSize(1, 1*GB) // L1 non-empty: would block the "bring base level down" loop
+				setSize(0, 1*GB) // L0 non-empty: would block the final empty-L0 adjustment
 
 				tt := db.lc.levelTargets()
 
