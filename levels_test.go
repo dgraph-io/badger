@@ -1290,3 +1290,70 @@ func TestStaleDataCleanup(t *testing.T) {
 
 	})
 }
+
+func TestBaseLevelZeroBySize(t *testing.T) {
+	const GB = int64(1) << 30
+	const TB = int64(1) << 40
+
+	// didPanic reports whether f panicked, and with what value.
+	didPanic := func(f func()) (panicked bool, val any) {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked, val = true, r
+			}
+		}()
+		f()
+		return
+	}
+
+	// Regression test for the "Base level can't be zero." panic.
+	// Before the fix, the last two cases produced baseLevel==0 and panicked.
+	// After the fix, levelTargets() clamps baseLevel>=1, so no size panics.
+	sizes := []struct {
+		name string
+		lmax int64
+	}{
+		{"10GB", 10 * GB},
+		{"100GB", 100 * GB},
+		{"500GB", 500 * GB},
+		{"1TB", 1 * TB},
+		{"2TB", 2 * TB},
+	}
+
+	for _, tc := range sizes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Disable background compactors so they don't race with the manual
+			// size mutation and doCompact call below.
+			opt := DefaultOptions("").WithNumCompactors(0)
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				setSize := func(level int, sz int64) {
+					lh := db.lc.levels[level]
+					lh.Lock()
+					lh.totalSize = sz
+					lh.Unlock()
+				}
+
+				lmaxLevel := db.opt.MaxLevels - 1 // last level (Lmax), not hard-coded
+				setSize(lmaxLevel, tc.lmax)
+				setSize(1, 1*GB) // L1 non-empty: would block the "bring base level down" loop
+				setSize(0, 1*GB) // L0 non-empty: would block the final empty-L0 adjustment
+
+				tt := db.lc.levelTargets()
+
+				panicked, val := didPanic(func() {
+					_ = db.lc.doCompact(0, compactionPriority{level: 0, t: tt})
+				})
+
+				t.Logf("Lmax=%s: baseLevel=%d, panicked=%v (%v)  [BaseLevelSize=%d, MaxLevels=%d]",
+					tc.name, tt.baseLevel, panicked, val, db.opt.BaseLevelSize, db.opt.MaxLevels)
+
+				// Post-fix invariant: base level is never L0, and an L0
+				// compaction never hits the "Base level can't be zero." panic.
+				require.NotEqual(t, 0, tt.baseLevel,
+					"baseLevel must never be 0 (Lmax=%s)", tc.name)
+				require.False(t, panicked,
+					"L0 compaction must not panic (Lmax=%s); got %v", tc.name, val)
+			})
+		})
+	}
+}
