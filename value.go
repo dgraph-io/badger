@@ -938,7 +938,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 
 // Read reads the value log at a given location.
 // TODO: Make this read private.
-func (vlog *valueLog) Read(vp valuePointer, _ *y.Slice) ([]byte, func(), error) {
+func (vlog *valueLog) Read(vp valuePointer) ([]byte, func(), error) {
 	buf, lf, err := vlog.readValueBytes(vp)
 	// log file is locked so, decide whether to lock immediately or let the caller to
 	// unlock it, after caller uses it.
