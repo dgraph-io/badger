@@ -311,6 +311,13 @@ type IteratorOptions struct {
 	Reverse        bool // Direction of iteration. False is forward, true is backward.
 	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.
+	// NoReadTracking disables the per-Item/Seek conflict-detection read
+	// tracking that read-write transactions use to detect concurrent
+	// writes. Set this when the caller knows exactly which keys to record
+	// (e.g. Txn.MultiGet, which walks arbitrary intermediate keys but
+	// only cares about the requested keys). Has no effect on read-only
+	// transactions, where addReadKey is already a no-op.
+	NoReadTracking bool
 
 	// The following option is used to narrow down the SSTables that iterator
 	// picks up. If Prefix is specified, only tables which could have this
@@ -503,6 +510,139 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	return txn.NewIterator(opt)
 }
 
+// ItemVersion is a single MVCC version of a key, as returned by Txn.MultiGet.
+//
+// It is a flattened, self-contained snapshot of one badger.Item: Value has
+// already been materialized and copied (so it stays valid after MultiGet
+// returns and after the transaction is discarded), and the metadata mirrors
+// the accessor methods on badger.Item.
+type ItemVersion struct {
+	// Value is a copy of the version's value bytes (value-log reads are
+	// resolved during MultiGet). It is owned by the caller.
+	Value []byte
+	// Version is the commit timestamp of this version.
+	Version uint64
+	// ExpiresAt is the Unix expiry time (0 if the entry never expires).
+	ExpiresAt uint64
+	// UserMeta is the user-supplied meta byte (e.g. dgraph posting-list bits).
+	UserMeta byte
+	// meta holds badger's internal meta bits (bitDelete, etc.). Unexported
+	// on purpose; use IsDeletedOrExpired / DiscardEarlierVersions to
+	// interpret it.
+	meta byte
+}
+
+// IsDeletedOrExpired mirrors (*Item).IsDeletedOrExpired for a MultiGet version.
+func (iv *ItemVersion) IsDeletedOrExpired() bool {
+	if iv.meta&bitDelete != 0 {
+		return true
+	}
+	if iv.ExpiresAt == 0 {
+		return false
+	}
+	return iv.ExpiresAt <= uint64(time.Now().Unix())
+}
+
+// DiscardEarlierVersions mirrors (*Item).DiscardEarlierVersions for a version.
+func (iv *ItemVersion) DiscardEarlierVersions() bool {
+	return iv.meta&bitDiscardEarlierVersions != 0
+}
+
+// KeyResult holds all versions (commit ts <= the transaction's read ts) of
+// one requested key, ordered newest-first — the same order an AllVersions
+// iterator yields. Versions is empty if the key does not exist (or has no
+// version visible at the read ts); there is no separate not-found error
+// per key.
+type KeyResult struct {
+	Versions []ItemVersion
+}
+
+// MultiGet reads many keys in a single iterator pass at the transaction's
+// read timestamp. For each requested key it returns the full version chain
+// (commit ts <= read ts), newest-first — exactly what an AllVersions
+// NewKeyIterator(key) + Seek + walk would yield, but amortizing iterator
+// construction (getMemTables, per-level table iterators, the merge iterator)
+// across the whole batch instead of paying it once per key.
+//
+// Intended for point-read-heavy, fan-out workloads such as dgraph's HNSW
+// vector search, where a query touches many independent posting-list keys
+// and the per-key NewKeyIterator setup dominates. Returning every version
+// (rather than the single newest value, as Txn.Get does) is required so
+// callers can fold delta postings on top of a complete posting, the reason
+// dgraph cannot use the cheap point-get path.
+//
+// The result slice is in the same order as keys. Internally the keys are
+// visited in sorted order so the shared iterator only seeks forward, which
+// lets adjacent keys reuse decoded SSTable blocks; the original order is
+// restored before returning.
+//
+// Semantics match the existing iterator path: versions newer than the read
+// ts are skipped, badger-internal keys and banned-namespace keys are
+// filtered. For a read-write transaction, only the requested keys are added
+// to the read set for conflict detection — exactly as NewKeyIterator(key)
+// would do — even though the shared iterator walks arbitrary intermediate
+// keys; NoReadTracking suppresses per-Item/Seek tracking and the outer loop
+// records each requested key once.
+func (txn *Txn) MultiGet(keys [][]byte) ([]KeyResult, error) {
+	if txn.discarded {
+		return nil, ErrDiscardedTxn
+	}
+	res := make([]KeyResult, len(keys))
+	if len(keys) == 0 {
+		return res, nil
+	}
+
+	// Visit keys in sorted order so the shared iterator only seeks forward.
+	order := make([]int, len(keys))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool {
+		return bytes.Compare(keys[order[a]], keys[order[b]]) < 0
+	})
+
+	opt := DefaultIteratorOptions
+	opt.AllVersions = true
+	opt.PrefetchValues = false
+	opt.NoReadTracking = true
+	it := txn.NewIterator(opt)
+	defer it.Close()
+
+	for _, idx := range order {
+		key := keys[idx]
+		if len(key) == 0 {
+			continue
+		}
+		// Record the requested key for conflict detection. The iterator
+		// itself does not track reads because NoReadTracking is set; it
+		// would otherwise record every walked key.
+		txn.addReadKey(key)
+		var versions []ItemVersion
+		for it.Seek(key); it.Valid(); it.Next() {
+			item := it.Item()
+			if !bytes.Equal(item.Key(), key) {
+				break
+			}
+			iv := ItemVersion{
+				Version:   item.version,
+				ExpiresAt: item.expiresAt,
+				UserMeta:  item.userMeta,
+				meta:      item.meta,
+			}
+			// Materialize the value now; the iterator (PrefetchValues=false)
+			// would otherwise read it lazily and recycle the item on Next.
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				return nil, err
+			}
+			iv.Value = val
+			versions = append(versions, iv)
+		}
+		res[idx].Versions = versions
+	}
+	return res, nil
+}
+
 func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
@@ -515,7 +655,9 @@ func (it *Iterator) newItem() *Item {
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
 	tx := it.txn
-	tx.addReadKey(it.item.Key())
+	if !it.opt.NoReadTracking {
+		tx.addReadKey(it.item.Key())
+	}
 	return it.item
 }
 
@@ -750,7 +892,7 @@ func (it *Iterator) Seek(key []byte) {
 	if it.iitr == nil {
 		return
 	}
-	if len(key) > 0 {
+	if len(key) > 0 && !it.opt.NoReadTracking {
 		it.txn.addReadKey(key)
 	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
