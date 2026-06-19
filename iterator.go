@@ -43,6 +43,11 @@ type Item struct {
 	status   prefetchStatus
 	meta     byte // We need to store meta to know about bitValuePointer.
 	userMeta byte
+	// keyOnly is true when the parent iterator was created with
+	// IteratorOptions.KeyOnly. The iterator skips copying value bytes into
+	// this item, so Item.Value/ValueCopy and the size estimators must
+	// short-circuit instead of touching the (nil) vptr.
+	keyOnly bool
 }
 
 // String returns a string representation of Item
@@ -81,6 +86,9 @@ func (item *Item) Version() uint64 {
 // instead, or copy it yourself. Value might change once discard or commit is called.
 // Use ValueCopy if you want to do a Set after Get.
 func (item *Item) Value(fn func(val []byte) error) error {
+	if item.keyOnly {
+		return ErrKeyOnlyMode
+	}
 	item.wg.Wait()
 	if item.status == prefetched {
 		if item.err == nil && fn != nil {
@@ -108,6 +116,9 @@ func (item *Item) Value(fn func(val []byte) error) error {
 // This function is useful in long running iterate/update transactions to avoid a write deadlock.
 // See Github issue: https://github.com/dgraph-io/badger/issues/315
 func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
+	if item.keyOnly {
+		return nil, ErrKeyOnlyMode
+	}
 	item.wg.Wait()
 	if item.status == prefetched {
 		return y.SafeCopy(dst, item.val), item.err
@@ -213,7 +224,14 @@ func (item *Item) prefetchValue() {
 // This can be called while iterating through a store to quickly estimate the
 // size of a range of key-value pairs (without fetching the corresponding
 // values).
+//
+// When the iterator was created with IteratorOptions.KeyOnly=true, the
+// value bytes (and value pointer for vlog entries) are not retained on
+// the item, so this returns the key size only.
 func (item *Item) EstimatedSize() int64 {
+	if item.keyOnly {
+		return int64(len(item.key))
+	}
 	if !item.hasValue() {
 		return 0
 	}
@@ -235,7 +253,13 @@ func (item *Item) KeySize() int64 {
 //
 // This can be called to quickly estimate the size of a value without fetching
 // it.
+//
+// When the iterator was created with IteratorOptions.KeyOnly=true the value
+// length is not retained on the item; this returns 0.
 func (item *Item) ValueSize() int64 {
+	if item.keyOnly {
+		return 0
+	}
 	if !item.hasValue() {
 		return 0
 	}
@@ -311,6 +335,12 @@ type IteratorOptions struct {
 	Reverse        bool // Direction of iteration. False is forward, true is backward.
 	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.
+	// KeyOnly causes the iterator to skip copying value bytes (and the
+	// value pointer for vlog entries) into each yielded Item. The savings
+	// are material on forward scans that only iterate keys (e.g. dgraph
+	// posting-list rollups); they come at the cost of making Value /
+	// ValueCopy return ErrKeyOnlyMode for items produced under this mode.
+	KeyOnly bool
 
 	// The following option is used to narrow down the SSTables that iterator
 	// picks up. If Prefix is specified, only tables which could have this
@@ -318,6 +348,19 @@ type IteratorOptions struct {
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
 	SinceTs     uint64 // Only read data that has version > SinceTs.
+}
+
+// precludesInternalKeys reports whether this iterator's prefix is known to
+// exclude every badger-internal key. Internal keys all live under the
+// fixed badgerPrefix ("!badger!...") — when the iterator's prefix is set
+// and its first byte differs from badgerPrefix[0], no internal key can
+// possibly match, so the per-step internal-key probe in parseItem is
+// provably dead.
+//
+// An empty Prefix means an unbounded scan, which can land on internal
+// keys, so the probe is still needed.
+func (opt *IteratorOptions) precludesInternalKeys() bool {
+	return len(opt.Prefix) > 0 && opt.Prefix[0] != badgerPrefix[0]
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -462,6 +505,12 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	}
 	if txn.db.IsClosed() {
 		panic(ErrDBClosed)
+	}
+
+	// KeyOnly disables value access, so prefetching values is nonsensical.
+	// Force PrefetchValues off so the prefetch goroutine is never started.
+	if opt.KeyOnly {
+		opt.PrefetchValues = false
 	}
 
 	y.NumIteratorsCreatedAdd(txn.db.opt.MetricsEnabled, 1)
@@ -616,14 +665,28 @@ func (it *Iterator) parseItem() bool {
 		}
 	}
 
-	isInternalKey := bytes.HasPrefix(key, badgerPrefix)
-	// Skip badger keys.
-	if !it.opt.InternalAccess && isInternalKey {
+	// Detect badger-internal keys. When precludesInternalKeys is true (the
+	// common case for prefix-bounded user scans whose prefix cannot collide
+	// with badgerPrefix), we know the current key cannot be internal and
+	// elide the per-step bytes.HasPrefix(key, badgerPrefix) probe.
+	var isInternalKey bool
+	if !it.opt.precludesInternalKeys() {
+		isInternalKey = bytes.HasPrefix(key, badgerPrefix)
+		// Skip badger keys.
+		if !it.opt.InternalAccess && isInternalKey {
+			mi.Next()
+			return false
+		}
+	}
+
+	// Skip any versions which are beyond the readTs. Every key in the LSM
+	// is stored with an 8-byte timestamp suffix via y.KeyWithTs; defensively
+	// guard against corrupt blocks that yield shorter keys so the rest of
+	// the function (which subtracts 8 from len(key) below) does not panic.
+	if len(key) < 8 {
 		mi.Next()
 		return false
 	}
-
-	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
 	// Ignore everything that is above the readTs and below or at the sinceTs.
 	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
@@ -640,8 +703,9 @@ func (it *Iterator) parseItem() bool {
 	if it.opt.AllVersions {
 		// Return deleted or expired values also, otherwise user can't figure out
 		// whether the key was deleted.
+		vs := mi.Value()
 		item := it.newItem()
-		it.fill(item)
+		it.fill(item, key, &vs)
 		setItem(item)
 		mi.Next()
 		return true
@@ -650,7 +714,12 @@ func (it *Iterator) parseItem() bool {
 	// If iterating in forward direction, then just checking the last key against current key would
 	// be sufficient.
 	if !it.opt.Reverse {
-		if y.SameKey(it.lastKey, key) {
+		// lastKey holds the user-key only. Compare against the user-key
+		// portion of the current full key (last 8 bytes are the ts).
+		// y.SameUserKey uses bytes.Equal under the hood, which short-
+		// circuits on length mismatch.
+		ukLen := len(key) - 8
+		if y.SameUserKey(it.lastKey, key[:ukLen]) {
 			mi.Next()
 			return false
 		}
@@ -659,11 +728,16 @@ func (it *Iterator) parseItem() bool {
 		// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
 		// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
 		// which is wrong. Therefore, update lastKey here.
-		it.lastKey = y.SafeCopy(it.lastKey, mi.Key())
+		it.lastKey = y.SafeCopy(it.lastKey, key[:ukLen])
 	}
 
 FILL:
-	// If deleted, advance and return.
+	// Invariant on entry to FILL: `key` is mi.Key() at the *current* iitr
+	// position. The only goto FILL (below, reverse path) refreshes `key`
+	// after mi.Next(); the fall-through entry from above never advances the
+	// iterator between `key := mi.Key()` and reaching FILL. fill() can
+	// therefore safely reuse the caller-supplied key without re-calling
+	// mi.Key().
 	vs := mi.Value()
 	if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
 		mi.Next()
@@ -671,7 +745,7 @@ FILL:
 	}
 
 	item := it.newItem()
-	it.fill(item)
+	it.fill(item, key, &vs)
 	// fill item based on current cursor position. All Next calls have returned, so reaching here
 	// means no Next was called.
 
@@ -681,9 +755,11 @@ FILL:
 		return true
 	}
 
-	// Reverse direction.
-	nextTs := y.ParseTs(mi.Key())
-	mik := y.ParseKey(mi.Key())
+	// Reverse direction. Refresh key after the Next() above; the iterator
+	// has advanced, so the previous `key` slice now refers to a later block.
+	key = mi.Key()
+	nextTs := y.ParseTs(key)
+	mik := y.ParseKey(key)
 	if nextTs <= it.readTs && bytes.Equal(mik, item.key) {
 		// This is a valid potential candidate.
 		goto FILL
@@ -693,17 +769,32 @@ FILL:
 	return true
 }
 
-func (it *Iterator) fill(item *Item) {
-	vs := it.iitr.Value()
+// fill populates item from the current iterator position. Callers pass the
+// already-fetched key and value pointer to avoid the per-item cost of
+// calling mi.Key() / mi.Value() (and decoding ValueStruct) a second time
+// on the hot iterator path. vs is passed by pointer to avoid copying the
+// ~40-byte ValueStruct on every kept item.
+func (it *Iterator) fill(item *Item, key []byte, vs *y.ValueStruct) {
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
 	item.expiresAt = vs.ExpiresAt
+	item.keyOnly = it.opt.KeyOnly
 
-	item.version = y.ParseTs(it.iitr.Key())
-	item.key = y.SafeCopy(item.key, y.ParseKey(it.iitr.Key()))
+	item.version = y.ParseTs(key)
+	item.key = y.SafeCopy(item.key, y.ParseKey(key))
 
-	item.vptr = y.SafeCopy(item.vptr, vs.Value)
 	item.val = nil
+	if it.opt.KeyOnly {
+		// Don't copy vs.Value: KeyOnly callers have promised not to read
+		// it, and the SafeCopy is the largest per-item memmove on the
+		// key-only forward-scan hot path. nil out any leftover capacity
+		// from a previous item that was reused via the iterator's
+		// freelist; callers that ignore the contract will at least see a
+		// nil vptr rather than stale bytes.
+		item.vptr = nil
+	} else {
+		item.vptr = y.SafeCopy(item.vptr, vs.Value)
+	}
 	if it.opt.PrefetchValues {
 		item.wg.Add(1)
 		go func() {
