@@ -153,6 +153,19 @@ func SameKey(src, dst []byte) bool {
 	return bytes.Equal(ParseKey(src), ParseKey(dst))
 }
 
+// SameUserKey reports whether two already-parsed user keys are equal.
+// Unlike SameKey, this does NOT call ParseKey — callers that already hold
+// the user-key portion of an internal key (i.e. the caller has sliced off
+// the 8-byte ts suffix itself) can skip the per-call ParseKey overhead.
+//
+// Both arguments are required to be user keys (no ts suffix). Passing keys
+// shorter than 8 bytes yields false; passing keys that do carry a ts
+// suffix compares the whole buffer, which may produce surprising results —
+// callers are responsible for stripping the suffix before calling.
+func SameUserKey(a, b []byte) bool {
+	return bytes.Equal(a, b)
+}
+
 // Slice holds a reusable buf, will reallocate if you request a larger size than ever before.
 // One problem is with n distinct sizes in random order it'll reallocate log(n) times.
 type Slice struct {
