@@ -139,10 +139,17 @@ func (mi *MergeIterator) swapSmall() {
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (mi *MergeIterator) Next() {
-	for mi.Valid() {
-		if !bytes.Equal(mi.small.key, mi.curKey) {
-			break
-		}
+	if !mi.Valid() {
+		return
+	}
+	// Invariant on entry: mi.small.key == mi.curKey byte-for-byte, since every
+	// public method (Rewind/Seek/Next) that leaves the iterator Valid ends by
+	// calling setCurrent(). Skip the always-true first comparison and advance
+	// unconditionally; then keep advancing while the new small.key duplicates
+	// the saved curKey (only possible from the OTHER child iterator).
+	mi.small.next()
+	mi.fix()
+	for mi.Valid() && bytes.Equal(mi.small.key, mi.curKey) {
 		mi.small.next()
 		mi.fix()
 	}
