@@ -391,9 +391,17 @@ func (s *Skiplist) MemSize() int64 { return s.arena.size() }
 
 // Iterator is an iterator over skiplist object. For new objects, you just
 // need to initialize Iterator.list.
+//
+// When reversed is true, Next/Seek/Rewind dispatch to their backward
+// counterparts (Prev, SeekForPrev, SeekToLast) so the iterator satisfies
+// y.Iterator while walking in reverse. This collapses the old UniIterator
+// wrapper into Iterator directly: callers that only need a y.Iterator
+// (the merge iterator, the iterator stack) can use NewUniIterator's
+// returned *Iterator as-is, with no extra heap allocation for a wrapper.
 type Iterator struct {
-	list *Skiplist
-	n    *node
+	list     *Skiplist
+	n        *node
+	reversed bool
 }
 
 // Close frees the resources held by the iterator
@@ -421,8 +429,12 @@ func (s *Iterator) ValueUint64() uint64 {
 	return s.n.value.Load()
 }
 
-// Next advances to the next position.
+// Next advances to the next position. In reverse mode, dispatches to Prev.
 func (s *Iterator) Next() {
+	if s.reversed {
+		s.Prev()
+		return
+	}
 	y.AssertTrue(s.Valid())
 	s.n = s.list.getNext(s.n, 0)
 }
@@ -433,9 +445,24 @@ func (s *Iterator) Prev() {
 	s.n, _ = s.list.findNear(s.Key(), true, false) // find <. No equality allowed.
 }
 
-// Seek advances to the first entry with a key >= target.
+// Seek advances to the first entry with a key >= target. In reverse mode,
+// dispatches to SeekForPrev (first entry with key <= target).
 func (s *Iterator) Seek(target []byte) {
+	if s.reversed {
+		s.SeekForPrev(target)
+		return
+	}
 	s.n, _ = s.list.findNear(target, false, true) // find >=.
+}
+
+// Rewind positions the iterator at the first (or last, in reverse mode)
+// entry in the list.
+func (s *Iterator) Rewind() {
+	if s.reversed {
+		s.SeekToLast()
+		return
+	}
+	s.SeekToFirst()
 }
 
 // SeekForPrev finds an entry with key <= target.
@@ -455,57 +482,11 @@ func (s *Iterator) SeekToLast() {
 	s.n = s.list.findLast()
 }
 
-// UniIterator is a unidirectional memtable iterator. It is a thin wrapper around
-// Iterator. We like to keep Iterator as before, because it is more powerful and
-// we might support bidirectional iterators in the future.
-type UniIterator struct {
-	iter     *Iterator
-	reversed bool
+// NewUniIterator returns a unidirectional iterator over the skiplist. When
+// reversed is true, Next/Seek/Rewind dispatch to the backward
+// counterparts (Prev, SeekForPrev, SeekToLast) so the iterator satisfies
+// y.Iterator while walking in reverse.
+func (s *Skiplist) NewUniIterator(reversed bool) *Iterator {
+	s.IncrRef()
+	return &Iterator{list: s, reversed: reversed}
 }
-
-// NewUniIterator returns a UniIterator.
-func (s *Skiplist) NewUniIterator(reversed bool) *UniIterator {
-	return &UniIterator{
-		iter:     s.NewIterator(),
-		reversed: reversed,
-	}
-}
-
-// Next implements y.Interface
-func (s *UniIterator) Next() {
-	if !s.reversed {
-		s.iter.Next()
-	} else {
-		s.iter.Prev()
-	}
-}
-
-// Rewind implements y.Interface
-func (s *UniIterator) Rewind() {
-	if !s.reversed {
-		s.iter.SeekToFirst()
-	} else {
-		s.iter.SeekToLast()
-	}
-}
-
-// Seek implements y.Interface
-func (s *UniIterator) Seek(key []byte) {
-	if !s.reversed {
-		s.iter.Seek(key)
-	} else {
-		s.iter.SeekForPrev(key)
-	}
-}
-
-// Key implements y.Interface
-func (s *UniIterator) Key() []byte { return s.iter.Key() }
-
-// Value implements y.Interface
-func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
-
-// Valid implements y.Interface
-func (s *UniIterator) Valid() bool { return s.iter.Valid() }
-
-// Close implements y.Interface (and frees up the iter's resources)
-func (s *UniIterator) Close() error { return s.iter.Close() }
