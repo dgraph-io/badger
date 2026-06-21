@@ -46,6 +46,14 @@ var (
 	// ErrBannedKey is returned if the read/write key belongs to any banned namespace.
 	ErrBannedKey = stderrors.New("Key is using the banned prefix")
 
+	// ErrKeyOnlyMode is returned by Item.Value and Item.ValueCopy when the
+	// containing iterator was created with IteratorOptions.KeyOnly=true.
+	// In that mode the iterator never copies the value bytes into the Item
+	// (the main reason to use KeyOnly is to avoid that per-item copy on
+	// key-only scans), so value access is unavailable on those items.
+	ErrKeyOnlyMode = stderrors.New(
+		"Item value is unavailable in KeyOnly iterator mode")
+
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
 	ErrThresholdZero = stderrors.New(

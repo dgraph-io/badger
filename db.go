@@ -52,12 +52,19 @@ type closers struct {
 type lockedKeys struct {
 	sync.RWMutex
 	keys map[uint64]struct{}
+	// hasAny is a fast-path flag: false until the first add(), then true forever.
+	// Hot-path callers (DB.isBanned) check this without taking the lock so the
+	// common case (empty ban set) costs one atomic load instead of an
+	// RLock/RUnlock pair plus a map lookup. There is no remove API, so the
+	// flag is monotonic and never needs to flip back to false.
+	hasAny atomic.Bool
 }
 
 func (lk *lockedKeys) add(key uint64) {
 	lk.Lock()
 	defer lk.Unlock()
 	lk.keys[key] = struct{}{}
+	lk.hasAny.Store(true)
 }
 
 func (lk *lockedKeys) has(key uint64) bool {
@@ -1844,6 +1851,14 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 // namepspaces. Else it returns nil.
 func (db *DB) isBanned(key []byte) error {
 	if db.opt.NamespaceOffset < 0 {
+		return nil
+	}
+	// Fast path: no namespaces have ever been banned in this DB lifetime
+	// (the common production case). Skip the slice + lookup + lock entirely.
+	// isBanned is called on every iterator step and every Txn.Get/modify, so
+	// avoiding the RLock here matters when NamespaceOffset is enabled but no
+	// bans are active.
+	if !db.bannedNamespaces.hasAny.Load() {
 		return nil
 	}
 	if len(key) <= db.opt.NamespaceOffset+8 {
