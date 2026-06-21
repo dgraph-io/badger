@@ -429,6 +429,84 @@ func (txn *Txn) Delete(key []byte) error {
 	return txn.modify(e)
 }
 
+func (txn *Txn) GetBatch(keys [][]byte) (items []*Item, rerr error) {
+	if txn.discarded {
+		return nil, ErrDiscardedTxn
+	}
+
+	for _, key := range keys {
+		if len(key) == 0 {
+			return nil, ErrEmptyKey
+		}
+		if err := txn.db.isBanned(key); err != nil {
+			return nil, err
+		}
+	}
+
+	items = make([]*Item, len(keys))
+	done := make([]bool, len(keys))
+
+	if txn.update {
+		doneAll := 0
+		for i, key := range keys {
+			item := items[i]
+			if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+				if isDeletedOrExpired(e.meta, e.ExpiresAt) {
+					items[i] = nil
+					continue
+				}
+				// Fulfill from cache.
+				item.meta = e.meta
+				item.val = e.Value
+				item.userMeta = e.UserMeta
+				item.key = key
+				item.status = prefetched
+				item.version = txn.readTs
+				item.expiresAt = e.ExpiresAt
+				// We probably don't need to set db on item here.
+				done[i] = true
+				doneAll += 1
+			}
+			// Only track reads if this is update txn. No need to track read if txn serviced it
+			// internally.
+			txn.addReadKey(key)
+		}
+		if doneAll == len(keys) {
+			return items, nil
+		}
+	}
+
+	seeks := make([][]byte, len(keys))
+	for i, key := range keys {
+		seeks[i] = y.KeyWithTs(key, txn.readTs)
+	}
+	vss, err := txn.db.getBatch(seeks, done, txn.readTs)
+	if err != nil {
+		return nil, y.Wrapf(err, "DB::Get keys: %q", keys)
+	}
+
+	for i, vs := range vss {
+		if vs.Value == nil && vs.Meta == 0 {
+			items[i] = nil
+		}
+		if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+			items[i] = nil
+		}
+
+		items[i] = new(Item)
+		items[i].key = keys[i]
+		items[i].version = vs.Version
+		items[i].meta = vs.Meta
+		items[i].userMeta = vs.UserMeta
+		items[i].vptr = y.SafeCopy(items[i].vptr, vs.Value)
+		items[i].txn = txn
+		items[i].expiresAt = vs.ExpiresAt
+	}
+
+	return items, nil
+
+}
+
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item *Item, rerr error) {

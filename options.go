@@ -116,6 +116,9 @@ type Options struct {
 	maxBatchSize  int64 // max batch size in bytes
 
 	maxValueThreshold float64
+
+	// This would let you use get batch instead of get, an experimental api instead
+	useGetBatch bool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -174,6 +177,7 @@ func DefaultOptions(path string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
+		useGetBatch:                   true,
 	}
 }
 
