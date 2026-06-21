@@ -75,11 +75,11 @@ type Stream struct {
 	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
-	// UseKeyToListWithThreadId is used to indicate that KeyToListWithThreadId should be used
-	// instead of KeyToList. This is a new api that can be used to figure out parallelism
-	// of the stream. Each threadId would be run serially. KeyToList being concurrent makes you
-	// take care of concurrency in KeyToList. Here threadId could be used to do some things serially.
-	// Once a thread finishes FinishThread() would be called.
+	// UseKeyToListWithThreadId indicates that KeyToListWithThreadId should be used
+	// instead of KeyToList to express stream parallelism. Entries with the same
+	// threadId run serially; different threadIds may run in parallel. This avoids
+	// handling concurrency inside KeyToList. We call FinishThread() when a thread
+	// completes.
 	UseKeyToListWithThreadId bool
 	KeyToListWithThreadId    func(key []byte, itr *Iterator, threadId int) (*pb.KVList, error)
 	FinishThread             func(threadId int) (*pb.KVList, error)
@@ -190,6 +190,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		_ = outList.Release()
 	}()
 
+	if st.FinishThread == nil {
+		st.FinishThread = func(threadId int) (*pb.KVList, error) {
+			return &pb.KVList{}, nil
+		}
+	}
+
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
@@ -267,19 +273,17 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			}
 		}
 
-		if st.UseKeyToListWithThreadId {
-			if kvs, err := st.FinishThread(threadId); err != nil {
-				return err
-			} else {
-				for _, kv := range kvs.Kv {
-					kv.StreamId = streamId
-					KVToBuffer(kv, outList)
-					if outList.LenNoPadding() < batchSize {
-						continue
-					}
-					if err := sendIt(); err != nil {
-						return err
-					}
+		if kvs, err := st.FinishThread(threadId); err != nil {
+			return err
+		} else {
+			for _, kv := range kvs.Kv {
+				kv.StreamId = streamId
+				KVToBuffer(kv, outList)
+				if outList.LenNoPadding() < batchSize {
+					continue
+				}
+				if err := sendIt(); err != nil {
+					return err
 				}
 			}
 		}
