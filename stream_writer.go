@@ -93,8 +93,8 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	}
 	sw.done = func() { once.Do(done) }
 
-	mts, decr := sw.db.getMemTables()
-	defer decr()
+	mts := sw.db.getMemTables()
+	defer decrMemTables(mts)
 	for _, m := range mts {
 		if !m.sl.Empty() {
 			return fmt.Errorf("Unable to do incremental writes because MemTable has data")

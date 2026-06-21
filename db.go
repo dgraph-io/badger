@@ -710,8 +710,14 @@ func (db *DB) Sync() error {
 	return y.CombineErrors(memtableSyncError, vLogSyncError)
 }
 
-// getMemtables returns the current memtables and get references.
-func (db *DB) getMemTables() ([]*memTable, func()) {
+// getMemTables returns the active set of memtables (mutable + immutables)
+// with their refcounts already incremented. Callers MUST release the
+// references by calling decrMemTables(tables) — typically via defer.
+//
+// The two-method shape (instead of returning a cleanup closure) avoids the
+// per-call closure allocation that the previous API forced on every iterator
+// construction and stream-writer setup.
+func (db *DB) getMemTables() []*memTable {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 
@@ -730,10 +736,16 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 		tables = append(tables, db.imm[last-i])
 		db.imm[last-i].IncrRef()
 	}
-	return tables, func() {
-		for _, tbl := range tables {
-			tbl.DecrRef()
-		}
+	return tables
+}
+
+// decrMemTables releases the refcounts taken by getMemTables. Pair with
+// `defer decrMemTables(tables)` after a getMemTables call. Free function
+// (no receiver) so the deferred call record doesn't have to capture a
+// *DB pointer alongside the slice header.
+func decrMemTables(tables []*memTable) {
+	for _, tbl := range tables {
+		tbl.DecrRef()
 	}
 }
 
@@ -755,8 +767,8 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	if db.IsClosed() {
 		return y.ValueStruct{}, ErrDBClosed
 	}
-	tables, decr := db.getMemTables() // Lock should be released.
-	defer decr()
+	tables := db.getMemTables() // Lock should be released.
+	defer decrMemTables(tables)
 
 	var maxVs y.ValueStruct
 	version := y.ParseTs(key)
