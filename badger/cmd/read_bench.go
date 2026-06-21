@@ -98,7 +98,8 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(ro.readOnly).
 		WithBlockCacheSize(ro.blockCacheSize << 20).
-		WithIndexCacheSize(ro.indexCacheSize << 20)
+		WithIndexCacheSize(ro.indexCacheSize << 20).
+		WithMaxLevels(vMaxLevels)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.OpenManaged(opt)
 	if err != nil {

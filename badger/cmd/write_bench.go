@@ -264,7 +264,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueLogMaxEntries(wo.vlogMaxEntries).
 		WithEncryptionKey([]byte(wo.encryptionKey)).
 		WithDetectConflicts(wo.detectConflicts).
-		WithLoggingLevel(badger.INFO)
+		WithLoggingLevel(badger.INFO).
+		WithMaxLevels(vMaxLevels)
 	if wo.zstdComp {
 		opt = opt.WithCompression(options.ZSTD)
 	}

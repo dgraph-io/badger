@@ -40,6 +40,8 @@ type flagOptions struct {
 	checksumVerificationMode string
 	discard                  bool
 	externalMagicVersion     uint16
+
+	memTableSize int64
 }
 
 var (
@@ -73,6 +75,8 @@ func init() {
 		"Parse and print DISCARD file from value logs.")
 	infoCmd.Flags().Uint16Var(&opt.externalMagicVersion, "external-magic", 0,
 		"External magic number")
+	infoCmd.Flags().Int64Var(&opt.memTableSize, "memtable-size", 128<<20,
+		"Size of memtable in bytes.")
 }
 
 var infoCmd = &cobra.Command{
@@ -96,7 +100,9 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey([]byte(opt.encryptionKey)).
 		WithChecksumVerificationMode(cvMode).
-		WithExternalMagic(opt.externalMagicVersion)
+		WithExternalMagic(opt.externalMagicVersion).
+		WithMemTableSize(opt.memTableSize).
+		WithMaxLevels(vMaxLevels)
 
 	if opt.discard {
 		ds, err := badger.InitDiscardStats(bopt)
