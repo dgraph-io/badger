@@ -34,9 +34,8 @@ type Item struct {
 	version   uint64
 	expiresAt uint64
 
-	slice *y.Slice // Used only during prefetching.
-	next  *Item
-	txn   *Txn
+	next *Item
+	txn  *Txn
 
 	err      error
 	wg       sync.WaitGroup
@@ -142,12 +141,8 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		return nil, nil, nil
 	}
 
-	if item.slice == nil {
-		item.slice = new(y.Slice)
-	}
-
 	if (item.meta & bitValuePointer) == 0 {
-		val := item.slice.Resize(len(item.vptr))
+		val := make([]byte, len(item.vptr))
 		copy(val, item.vptr)
 		return val, nil, nil
 	}
@@ -155,7 +150,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	var vp valuePointer
 	vp.Decode(item.vptr)
 	db := item.txn.db
-	result, cb, err := db.vlog.Read(vp, item.slice)
+	result, cb, err := db.vlog.Read(vp)
 	if err != nil {
 		db.opt.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
 			" Error: %v", key, item.version, item.meta, item.userMeta, err)
@@ -203,7 +198,7 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	buf := item.slice.Resize(len(val))
+	buf := make([]byte, len(val))
 	copy(buf, val)
 	item.val = buf
 }
@@ -506,7 +501,7 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
-		item = &Item{slice: new(y.Slice), txn: it.txn}
+		item = &Item{txn: it.txn}
 	}
 	return item
 }
