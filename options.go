@@ -78,6 +78,15 @@ type Options struct {
 	LmaxCompaction       bool
 	ZSTDCompressionLevel int
 
+	// CompactionBytesPerSec, if > 0, throttles compaction (and value-log GC
+	// rewrite) IO to at most this many bytes per second using a token-bucket
+	// rate limiter. This prevents compaction/GC storms from saturating disk IO
+	// and starving foreground reads. The default of 0 means unlimited, i.e. the
+	// original behavior with zero overhead (no limiter is constructed). L0
+	// flush is deliberately NOT throttled, so throttling cannot induce a write
+	// stall.
+	CompactionBytesPerSec int64
+
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
 
@@ -606,6 +615,16 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // The default value of NumCompactors is 4. One is dedicated just for L0 and L1.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
+	return opt
+}
+
+// WithCompactionBytesPerSec sets the byte-rate IO limit for compaction (and
+// value-log GC rewrite). When val > 0, compaction IO is throttled to at most
+// val bytes per second via a token-bucket rate limiter, preventing compaction
+// storms from starving foreground reads. The default value of 0 means
+// unlimited (no throttling, no overhead) and matches the original behavior.
+func (opt Options) WithCompactionBytesPerSec(val int64) Options {
+	opt.CompactionBytesPerSec = val
 	return opt
 }
 
