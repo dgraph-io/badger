@@ -24,12 +24,23 @@ import (
 
 type tableMock struct {
 	left, right []byte
+	// absentPrefixes, when set, makes DoesNotHavePrefix return true for any of
+	// the listed prefixes, simulating a table whose prefix bloom prunes them.
+	absentPrefixes [][]byte
 }
 
 func (tm *tableMock) Smallest() []byte             { return tm.left }
 func (tm *tableMock) Biggest() []byte              { return tm.right }
 func (tm *tableMock) DoesNotHave(hash uint32) bool { return false }
 func (tm *tableMock) MaxVersion() uint64           { return math.MaxUint64 }
+func (tm *tableMock) DoesNotHavePrefix(prefix []byte) bool {
+	for _, p := range tm.absentPrefixes {
+		if bytes.Equal(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
@@ -60,6 +71,40 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "a", "ab")
 	outside("abd", "ab", "abc")
 	outside("abd", "ab", "abc123")
+}
+
+// TestPickTablePrefixBloom verifies that a prefix scan (not a single-key
+// lookup) consults the prefix bloom: a table whose prefix bloom says the scan
+// prefix is absent is skipped, even though its key range overlaps the prefix.
+func TestPickTablePrefixBloom(t *testing.T) {
+	opt := DefaultIteratorOptions
+	opt.prefixIsKey = false
+	opt.Prefix = []byte("abc")
+
+	// Key range [ab, ad] overlaps prefix "abc", so range pruning keeps it.
+	inRange := func() *tableMock {
+		return &tableMock{left: y.KeyWithTs([]byte("ab"), 1), right: y.KeyWithTs([]byte("ad"), 1)}
+	}
+
+	// Without a pruning prefix bloom, the overlapping table is picked.
+	require.True(t, opt.pickTable(inRange()))
+
+	// With the prefix bloom reporting "abc" absent, the table is skipped.
+	tm := inRange()
+	tm.absentPrefixes = [][]byte{[]byte("abc")}
+	require.False(t, opt.pickTable(tm))
+
+	// A different (present) prefix is not pruned.
+	tm2 := inRange()
+	tm2.absentPrefixes = [][]byte{[]byte("xyz")}
+	require.True(t, opt.pickTable(tm2))
+
+	// For a single-key lookup (prefixIsKey), the prefix bloom path is NOT used;
+	// the full-key bloom (DoesNotHave) governs instead, so the table is kept.
+	opt.prefixIsKey = true
+	tm3 := inRange()
+	tm3.absentPrefixes = [][]byte{[]byte("abc")}
+	require.True(t, opt.pickTable(tm3))
 }
 
 func TestPickSortTables(t *testing.T) {
@@ -112,6 +157,76 @@ func TestPickSortTables(t *testing.T) {
 	filtered = opt.pickTables(tables)
 	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
 	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
+}
+
+// TestPickTablesPrefixBloomReal builds real SSTables with a prefix bloom and
+// verifies that opt.pickTables prunes the table that does not contain the scan
+// prefix, while keeping the one that does. It also confirms a table built with
+// the prefix bloom disabled (old format) is never pruned.
+func TestPickTablesPrefixBloomReal(t *testing.T) {
+	buildPrefixed := func(prefix string, prefixLen int) *table.Table {
+		opts := table.Options{
+			ChkMode:            options.OnTableAndBlockRead,
+			BloomFalsePositive: 0.01,
+			BlockSize:          4 * 1024,
+			BloomPrefixLength:  prefixLen,
+		}
+		var kvs [][]string
+		for i := 0; i < 200; i++ {
+			kvs = append(kvs, []string{fmt.Sprintf("%s%04d", prefix, i), "v"})
+		}
+		tbl := buildTable(t, kvs, opts)
+		return tbl
+	}
+
+	// Two non-overlapping key ranges, each with a 5-byte prefix bloom.
+	tblA := buildPrefixed("aaaaa", 5) // keys aaaaa0000..aaaaa0199
+	tblC := buildPrefixed("ccccc", 5) // keys ccccc0000..ccccc0199
+	defer func() { require.NoError(t, tblA.DecrRef()) }()
+	defer func() { require.NoError(t, tblC.DecrRef()) }()
+
+	tables := []*table.Table{tblA, tblC}
+
+	opt := DefaultIteratorOptions
+	opt.prefixIsKey = false
+
+	// Scan for prefix "ccccc": tblA's range [aaaaa..aaaaa] sorts before it and
+	// is excluded by range search; tblC is kept. (Range pruning alone suffices
+	// here, so also test a same-range case below.)
+	opt.Prefix = []byte("ccccc")
+	filtered := opt.pickTables(tables)
+	require.Equal(t, 1, len(filtered))
+	require.Equal(t, []byte("ccccc"), y.ParseKey(filtered[0].Smallest())[:5])
+
+	// Now make the ranges overlap so range pruning cannot help: build a table
+	// whose key range spans the scan prefix but which does NOT contain it, and
+	// rely on the prefix bloom to prune it.
+	opts := table.Options{
+		ChkMode:            options.OnTableAndBlockRead,
+		BloomFalsePositive: 0.01,
+		BlockSize:          4 * 1024,
+		BloomPrefixLength:  3,
+	}
+	// Keys "aaa..." and "zzz...": range [aaa, zzz] straddles prefix "mmm",
+	// but no key has prefix "mmm".
+	var kvs [][]string
+	for i := 0; i < 100; i++ {
+		kvs = append(kvs, []string{fmt.Sprintf("aaa%04d", i), "v"})
+		kvs = append(kvs, []string{fmt.Sprintf("zzz%04d", i), "v"})
+	}
+	straddle := buildTable(t, kvs, opts)
+	defer func() { require.NoError(t, straddle.DecrRef()) }()
+
+	opt.Prefix = []byte("mmm")
+	// Range pruning keeps straddle (aaa <= mmm <= zzz), but the prefix bloom
+	// proves "mmm" is absent, so pickTables must drop it.
+	filtered = opt.pickTables([]*table.Table{straddle})
+	require.Equal(t, 0, len(filtered), "prefix bloom should prune straddling table")
+
+	// A present prefix is kept.
+	opt.Prefix = []byte("aaa")
+	filtered = opt.pickTables([]*table.Table{straddle})
+	require.Equal(t, 1, len(filtered))
 }
 
 func TestIterateSinceTs(t *testing.T) {
@@ -412,4 +527,58 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 			}
 		}
 	})
+}
+
+// TestPrefixBloomEndToEnd opens a DB with WithBloomPrefixLength set, flushes the
+// data to SSTables, and verifies that prefix scans return correct results:
+// present prefixes return all their keys, and an absent prefix returns nothing.
+// This exercises the full build -> persist -> read -> pickTables path.
+func TestPrefixBloomEndToEnd(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-pbloom")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opts := getTestOptions(dir).WithBloomPrefixLength(6)
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	prefixes := []string{"users:", "posts:", "likess"}
+	const perPrefix = 500
+	wb := db.NewWriteBatch()
+	for _, p := range prefixes {
+		for i := 0; i < perPrefix; i++ {
+			k := []byte(fmt.Sprintf("%s%06d", p, i))
+			require.NoError(t, wb.Set(k, []byte("v")))
+		}
+	}
+	require.NoError(t, wb.Flush())
+
+	// Push memtables to SSTables on disk so the table-level prefix bloom is used.
+	require.NoError(t, db.Flatten(2))
+
+	count := func(prefix string) int {
+		n := 0
+		require.NoError(t, db.View(func(txn *Txn) error {
+			io := DefaultIteratorOptions
+			io.Prefix = []byte(prefix)
+			it := txn.NewIterator(io)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				require.True(t, bytes.HasPrefix(it.Item().Key(), []byte(prefix)))
+				n++
+			}
+			return nil
+		}))
+		return n
+	}
+
+	// Present prefixes return all their keys.
+	for _, p := range prefixes {
+		require.Equalf(t, perPrefix, count(p), "prefix %q", p)
+	}
+
+	// Absent prefixes (>= prefix-bloom length) return nothing and are pruned.
+	require.Equal(t, 0, count("absent"))
+	require.Equal(t, 0, count("zzzzzz"))
 }

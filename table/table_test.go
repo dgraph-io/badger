@@ -896,3 +896,71 @@ func TestMaxVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, N, int(table.MaxVersion()))
 }
+
+// buildPrefixTable builds a table from the given user-key strings (sorted),
+// with the supplied options applied on top of getTestTableOptions.
+func buildPrefixTable(t *testing.T, keys []string, prefixLen int) *Table {
+	opts := getTestTableOptions()
+	opts.BloomPrefixLength = prefixLen
+	kvs := make([][]string, len(keys))
+	for i, k := range keys {
+		kvs[i] = []string{k, fmt.Sprintf("v%d", i)}
+	}
+	return buildTable(t, kvs, opts)
+}
+
+func TestPrefixBloomBasic(t *testing.T) {
+	// Keys all under prefixes "alpha" and "beta", none under "gamma".
+	var keys []string
+	for i := 0; i < 100; i++ {
+		keys = append(keys, fmt.Sprintf("alpha:%04d", i))
+		keys = append(keys, fmt.Sprintf("beta:%04d", i))
+	}
+	tbl := buildPrefixTable(t, keys, 5) // 5 = len("alpha")/len("beta")
+	defer tbl.DecrRef()
+
+	require.Equal(t, 5, tbl.PrefixBloomLength())
+
+	// Present prefixes must not be pruned.
+	require.False(t, tbl.DoesNotHavePrefix([]byte("alpha")))
+	require.False(t, tbl.DoesNotHavePrefix([]byte("beta:")))
+
+	// An absent prefix of the hashed length should be pruned.
+	require.True(t, tbl.DoesNotHavePrefix([]byte("gamma")))
+
+	// A prefix shorter than the bloom length cannot prune (conservative).
+	require.False(t, tbl.DoesNotHavePrefix([]byte("al")))
+}
+
+func TestPrefixBloomDisabledByDefault(t *testing.T) {
+	// BloomPrefixLength == 0 => no prefix bloom; DoesNotHavePrefix always false.
+	keys := []string{"alpha:1", "alpha:2", "beta:1"}
+	tbl := buildPrefixTable(t, keys, 0)
+	defer tbl.DecrRef()
+
+	require.Equal(t, 0, tbl.PrefixBloomLength())
+	require.False(t, tbl.DoesNotHavePrefix([]byte("gamma")))
+	require.False(t, tbl.DoesNotHavePrefix([]byte("zzzzz")))
+
+	// Full-key bloom is unaffected: an absent key is reported missing.
+	require.True(t, tbl.DoesNotHave(y.Hash([]byte("nope"))))
+	require.False(t, tbl.DoesNotHave(y.Hash([]byte("alpha:1"))))
+}
+
+// TestPrefixBloomOldFormatTable verifies that a table written WITHOUT the
+// prefix-bloom fields (the previous on-disk format) opens fine and reports no
+// prefix bloom, exercising the FlatBuffers backward-compatibility path.
+func TestPrefixBloomOldFormatTable(t *testing.T) {
+	// getTestTableOptions has BloomPrefixLength == 0, so this table is written
+	// with exactly the old format (no appended flatbuffer fields).
+	tbl := buildTestTable(t, "key", 5000, getTestTableOptions())
+	defer tbl.DecrRef()
+
+	require.Equal(t, 0, tbl.PrefixBloomLength())
+	require.False(t, tbl.DoesNotHavePrefix([]byte("key0")))
+	require.False(t, tbl.DoesNotHavePrefix([]byte("absent")))
+
+	// And the full-key bloom still works as before.
+	require.False(t, tbl.DoesNotHave(y.Hash([]byte("key0001"))))
+	require.True(t, tbl.DoesNotHave(y.Hash([]byte("zzzz9999"))))
+}

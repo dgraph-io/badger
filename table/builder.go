@@ -74,6 +74,7 @@ type Builder struct {
 
 	lenOffsets    uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
+	prefixHashes  []uint32 // Used for building the optional prefix bloomfilter.
 	opts          *Options
 	maxVersion    uint64
 	onDiskSize    uint32
@@ -207,7 +208,18 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
-	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
+	userKey := y.ParseKey(key)
+	b.keyHashes = append(b.keyHashes, y.Hash(userKey))
+
+	// When prefix blooms are enabled, hash the leading prefix of each user key
+	// into a separate filter so prefix-bounded seeks can prune tables. Keys
+	// shorter than the prefix length are hashed whole.
+	if n := b.opts.BloomPrefixLength; n > 0 {
+		if n > len(userKey) {
+			n = len(userKey)
+		}
+		b.prefixHashes = append(b.prefixHashes, y.Hash(userKey[:n]))
+	}
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
@@ -436,7 +448,14 @@ func (b *Builder) Done() buildData {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
-	index, dataSize := b.buildIndex(f)
+
+	// Build the optional prefix bloom filter from the per-key prefix hashes.
+	var pf y.Filter
+	if b.opts.BloomPrefixLength > 0 && b.opts.BloomFalsePositive > 0 && len(b.prefixHashes) > 0 {
+		bits := y.BloomBitsPerKey(len(b.prefixHashes), b.opts.BloomFalsePositive)
+		pf = y.NewFilter(b.prefixHashes, bits)
+	}
+	index, dataSize := b.buildIndex(f, pf)
 
 	var err error
 	if b.shouldEncrypt() {
@@ -523,7 +542,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	return nil, errors.New("Unsupported compression type")
 }
 
-func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
+func (b *Builder) buildIndex(bloom, prefixBloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20)
 
 	boList, dataSize := b.writeBlockOffsets(builder)
@@ -541,6 +560,12 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	if len(bloom) > 0 {
 		bfoff = builder.CreateByteVector(bloom)
 	}
+	// Write the optional prefix bloom filter. Byte vectors must be created
+	// before the enclosing object is started, so do it here alongside bloom.
+	var pbfoff fbs.UOffsetT
+	if len(prefixBloom) > 0 {
+		pbfoff = builder.CreateByteVector(prefixBloom)
+	}
 	b.onDiskSize += dataSize
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
@@ -550,6 +575,10 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	fb.TableIndexAddStaleDataSize(builder, uint32(b.staleDataSize))
+	if len(prefixBloom) > 0 {
+		fb.TableIndexAddBloomPrefixFilter(builder, pbfoff)
+		fb.TableIndexAddBloomPrefixLength(builder, uint32(b.opts.BloomPrefixLength))
+	}
 	builder.Finish(fb.TableIndexEnd(builder))
 
 	buf := builder.FinishedBytes()
