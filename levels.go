@@ -38,6 +38,11 @@ type levelsController struct {
 	kv     *DB
 
 	cstatus compactStatus
+
+	// compactionLimiter throttles compaction (and value-log GC rewrite) IO to
+	// a fixed byte rate when DB.opt.CompactionBytesPerSec > 0. It is nil (a
+	// no-op) when throttling is disabled, which is the default.
+	compactionLimiter *y.RateLimiter
 }
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
@@ -73,6 +78,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	}
 	s.cstatus.tables = make(map[uint64]struct{})
 	s.cstatus.levels = make([]*levelCompactStatus, db.opt.MaxLevels)
+
+	// Construct the compaction IO rate limiter only when enabled. When
+	// CompactionBytesPerSec == 0, NewRateLimiter returns nil and Request/Close
+	// are no-ops, so there is zero overhead and behavior is unchanged.
+	s.compactionLimiter = y.NewRateLimiter(db.opt.CompactionBytesPerSec, int64(db.opt.BlockSize))
 
 	for i := 0; i < db.opt.MaxLevels; i++ {
 		s.levels[i] = newLevelHandler(db, i)
@@ -816,6 +826,13 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			default:
 				builder.Add(it.Key(), vs, vp.Len)
 			}
+			// Throttle compaction IO to the configured byte rate. We charge the
+			// actual bytes moved for this entry (key + value). When values live
+			// in the value log, vs.Value is a small value pointer rather than
+			// the value bytes, so this undercounts total DB IO for vlog-resident
+			// values; that is acceptable for the MVP, which paces SST write
+			// throughput. No-op when the limiter is disabled (nil).
+			s.compactionLimiter.Request(len(it.Key()) + len(vs.Value))
 		}
 		s.kv.opt.Debugf("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
@@ -1601,6 +1618,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 }
 
 func (s *levelsController) close() error {
+	// Stop the compaction rate limiter's refill goroutine. By this point all
+	// compactions (including any CompactL0OnClose) have finished, so no Request
+	// is in flight. No-op when the limiter is disabled (nil).
+	s.compactionLimiter.Close()
 	err := s.cleanupLevels()
 	return y.Wrap(err, "levelsController.Close")
 }
