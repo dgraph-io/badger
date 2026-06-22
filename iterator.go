@@ -329,16 +329,31 @@ type IteratorOptions struct {
 // versionWindow returns the inclusive [lower, upper] version range that this
 // iterator can possibly surface, and whether storage-level skipping should be
 // applied. readTs is the transaction read timestamp (the natural upper bound).
-// lower = SinceTs+1 because the SinceTs filter excludes v <= SinceTs.
+//
+// lower MUST equal the smallest version the authoritative per-entry filter would
+// KEEP, so that pruning never drops in-window data. That filter only excludes
+// v <= SinceTs when SinceTs > 0; when SinceTs == 0 it excludes nothing below, so
+// version 0 is in-window for an UntilTs-only scan. Hence:
+//   - SinceTs == 0            -> lower = 0 (version 0 is kept; its block must not be pruned)
+//   - 0 < SinceTs < MaxUint64 -> lower = SinceTs + 1
+//   - SinceTs == MaxUint64    -> empty window (the per-entry filter keeps nothing)
 func (opt *IteratorOptions) versionWindow(readTs uint64) (lower, upper uint64, enabled bool) {
-	lower = opt.SinceTs + 1 // relevant versions satisfy v > SinceTs, i.e. v >= SinceTs+1.
+	enabled = opt.SinceTs > 0 || opt.UntilTs != 0
+	if opt.SinceTs == math.MaxUint64 {
+		// The per-entry filter (v > SinceTs) keeps nothing. Make the window empty
+		// (lower=MaxUint64, upper=0) so max<lower prunes every block, and avoid the
+		// SinceTs+1 overflow that would wrap lower to 0.
+		return math.MaxUint64, 0, enabled
+	}
+	if opt.SinceTs == 0 {
+		lower = 0 // version 0 is kept by the per-entry filter, so it must be in-window.
+	} else {
+		lower = opt.SinceTs + 1 // relevant versions satisfy v > SinceTs.
+	}
 	upper = readTs
 	if opt.UntilTs != 0 && opt.UntilTs < upper {
 		upper = opt.UntilTs
 	}
-	// Only worth skipping when the window is actually bounded below or above the
-	// full range. (lower>1 means SinceTs set; upper<MaxUint64 means a real bound.)
-	enabled = opt.SinceTs > 0 || opt.UntilTs != 0
 	return lower, upper, enabled
 }
 
@@ -358,9 +373,14 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	}
 	// Ignore this table if its [min,max] version range provably falls entirely
 	// above the requested upper bound. Tables without version-range metadata
-	// return false here and are never skipped.
-	if opt.UntilTs != 0 && t.OutsideVersionRange(opt.SinceTs+1, opt.UntilTs) {
-		return false
+	// return false here and are never skipped. The window bounds must match the
+	// authoritative per-entry filter (see versionWindow); in particular lower is
+	// 0 when SinceTs==0 so version-0 data is never pruned.
+	if opt.UntilTs != 0 {
+		lower, upper, _ := opt.versionWindow(math.MaxUint64)
+		if t.OutsideVersionRange(lower, upper) {
+			return false
+		}
 	}
 	if len(opt.Prefix) == 0 {
 		return true
@@ -384,13 +404,16 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	filterTables := func(tables []*table.Table) []*table.Table {
 		if opt.SinceTs > 0 || opt.UntilTs != 0 {
+			// Window bounds aligned with the authoritative per-entry filter; lower
+			// is 0 when SinceTs==0 so version-0 data is never pruned.
+			lower, upper, _ := opt.versionWindow(math.MaxUint64)
 			tmp := tables[:0]
 			for _, t := range tables {
 				if t.MaxVersion() < opt.SinceTs {
 					continue
 				}
 				// Drop tables whose version range falls entirely above the upper bound.
-				if opt.UntilTs != 0 && t.OutsideVersionRange(opt.SinceTs+1, opt.UntilTs) {
+				if opt.UntilTs != 0 && t.OutsideVersionRange(lower, upper) {
 					continue
 				}
 				tmp = append(tmp, t)

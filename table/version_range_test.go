@@ -280,6 +280,39 @@ func TestBlocksProvablyPruned(t *testing.T) {
 	}
 }
 
+// TestVersionZeroBlockNotSkipped is a regression test for a lower-bound bug:
+// on an UntilTs-only scan (window lower bound 0), a block whose entire version
+// range is [0,0] must NOT be skipped, because version-0 keys are in-window.
+//
+// Note: when a block's min and max are both 0, the appended flatbuffer fields are
+// omitted (value==default), so VersionRangePresent() is false and the block is
+// conservatively never pruned. Either way the version-0 data must be returned.
+func TestVersionZeroBlockNotSkipped(t *testing.T) {
+	var kvs []vkv
+	// A band of version-0 keys ...
+	for i := 0; i < 40; i++ {
+		kvs = append(kvs, vkv{key: fmt.Sprintf("aaa%04d", i), version: 0, value: "v"})
+	}
+	// ... and a band of higher-version keys to force multiple blocks/bands.
+	for i := 0; i < 40; i++ {
+		kvs = append(kvs, vkv{key: fmt.Sprintf("zzz%04d", i), version: uint64(500 + i%4), value: "v"})
+	}
+	tbl := buildVersionTable(t, kvs, 512)
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
+
+	// Window lower=0 (UntilTs-only scan semantics), upper=100.
+	it := tbl.NewIterator(0)
+	it.SetVersionBounds(0, 100)
+	defer it.Close()
+
+	// The version-0 keys are in-window; the bounded scan must surface every one
+	// of them (and none of the high-version keys).
+	want := referenceKeys(kvs, 0, 100)
+	require.NotEmpty(t, want)
+	got := iterateKeys(it, 0, 100)
+	require.Equal(t, want, got, "version-0 block must not be skipped on a lower=0 window")
+}
+
 // TestOldFormatTableNeverSkipped simulates a table written by older code that
 // lacks version-range metadata: it must open fine, report HasVersionRange=false,
 // and never be pruned by the block/table skip predicates.

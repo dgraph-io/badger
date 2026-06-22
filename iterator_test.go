@@ -247,6 +247,90 @@ func TestIterateVersionWindow(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
+// TestUntilTsLowerBoundKeepsSmallestVersion is an end-to-end regression test for
+// the version-window lower-bound bug. badger rejects CommitTs==0, so the smallest
+// storable version is 1; we write a key at version 1, flush it to an SSTable, and
+// run an UntilTs-only scan (SinceTs=0, UntilTs=1). With the lower bound correctly
+// set to 0 (not SinceTs+1=1), the entry's block/table is not pruned and the key
+// is returned. (The old code used lower=1, which is fine for a v=1 entry but wrong
+// for a v=0 one; this test pins the boundary for the smallest publicly storable
+// version, and the unit/table tests cover v=0 directly.)
+func TestUntilTsLowerBoundKeepsSmallestVersion(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(getTestOptions(dir))
+	require.NoError(t, err)
+
+	txn := db.NewTransactionAt(0, true)
+	require.NoError(t, txn.Set([]byte("k"), []byte("v1")))
+	require.NoError(t, txn.CommitAt(1, nil))
+	require.NoError(t, db.Flatten(1))
+
+	iopt := DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.SinceTs = 0
+	iopt.UntilTs = 1
+
+	rtxn := db.NewTransactionAt(math.MaxUint64, false)
+	defer rtxn.Discard()
+	it := rtxn.NewIterator(iopt)
+	defer it.Close()
+
+	var keys []string
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		keys = append(keys, fmt.Sprintf("%s@%d", string(item.KeyCopy(nil)), item.Version()))
+	}
+	require.Equal(t, []string{"k@1"}, keys, "smallest-version entry must survive an UntilTs-only scan")
+	require.NoError(t, db.Close())
+}
+
+// TestVersionWindowLowerBound guards the boundary alignment between the storage
+// prune window and the authoritative per-entry filter. The per-entry filter only
+// excludes v <= SinceTs when SinceTs > 0, so for an UntilTs-only scan version 0
+// is in-window and lower MUST be 0 (not 1) or a maxVersion==0 block gets wrongly
+// pruned.
+func TestVersionWindowLowerBound(t *testing.T) {
+	cases := []struct {
+		sinceTs, untilTs, readTs uint64
+		wantLower, wantUpper     uint64
+		wantEnabled              bool
+	}{
+		// UntilTs-only scan: lower must be 0 so version-0 data stays in-window.
+		{sinceTs: 0, untilTs: 100, readTs: math.MaxUint64, wantLower: 0, wantUpper: 100, wantEnabled: true},
+		// SinceTs set: lower excludes v <= SinceTs.
+		{sinceTs: 10, untilTs: 0, readTs: math.MaxUint64, wantLower: 11, wantUpper: math.MaxUint64, wantEnabled: true},
+		{sinceTs: 10, untilTs: 100, readTs: math.MaxUint64, wantLower: 11, wantUpper: 100, wantEnabled: true},
+		// readTs caps the upper bound when smaller than UntilTs.
+		{sinceTs: 0, untilTs: 100, readTs: 50, wantLower: 0, wantUpper: 50, wantEnabled: true},
+		// No bounds: disabled.
+		{sinceTs: 0, untilTs: 0, readTs: math.MaxUint64, wantLower: 0, wantUpper: math.MaxUint64, wantEnabled: false},
+		// SinceTs at the max: empty window, no overflow.
+		{sinceTs: math.MaxUint64, untilTs: 0, readTs: math.MaxUint64, wantLower: math.MaxUint64, wantUpper: 0, wantEnabled: true},
+	}
+	for _, c := range cases {
+		opt := IteratorOptions{SinceTs: c.sinceTs, UntilTs: c.untilTs}
+		lower, upper, enabled := opt.versionWindow(c.readTs)
+		require.Equal(t, c.wantLower, lower, "lower for since=%d until=%d", c.sinceTs, c.untilTs)
+		require.Equal(t, c.wantUpper, upper, "upper for since=%d until=%d", c.sinceTs, c.untilTs)
+		require.Equal(t, c.wantEnabled, enabled, "enabled for since=%d until=%d", c.sinceTs, c.untilTs)
+	}
+}
+
+// TestUntilTsKeepsVersionZeroTable asserts the table picker does NOT prune a
+// table whose entire version range is [0,0] on an UntilTs-only scan: version 0
+// is in-window because SinceTs==0.
+func TestUntilTsKeepsVersionZeroTable(t *testing.T) {
+	opt := DefaultIteratorOptions
+	opt.SinceTs = 0
+	opt.UntilTs = 100
+	zeroTable := &prunableTableMock{minV: 0, maxV: 0, hasRange: true}
+	require.True(t, opt.pickTable(zeroTable),
+		"version-0 table must NOT be pruned on an UntilTs-only scan")
+}
+
 // TestUntilTsPrunesTables asserts that the table picker actually drops SSTables
 // whose version range lies entirely above the UntilTs upper bound.
 func TestUntilTsPrunesTables(t *testing.T) {
