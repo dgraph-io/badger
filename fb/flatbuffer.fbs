@@ -13,6 +13,12 @@ table TableIndex {
   uncompressed_size:uint32;
   on_disk_size:uint32;
   stale_data_size:uint32;
+  // Optional prefix bloom filter, built over the first prefix_length bytes of
+  // each user key. Empty/absent when prefix blooms are disabled. Appended at the
+  // end for forward/backward compatibility: old readers ignore these fields, and
+  // new readers see the default (nil/0) when reading tables written without them.
+  bloom_prefix_filter:[ubyte];
+  bloom_prefix_length:uint32;
 }
 
 table BlockOffset {

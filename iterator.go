@@ -348,6 +348,12 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
 		return false
 	}
+	// Prefix bloom: for a true prefix scan (not a single-key lookup), consult
+	// the optional prefix bloom filter. It is a no-op for tables built without
+	// the WithBloomPrefixLength option (DoesNotHavePrefix returns false).
+	if !opt.prefixIsKey && t.DoesNotHavePrefix(opt.Prefix) {
+		return false
+	}
 	return true
 }
 
@@ -388,8 +394,17 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		eIdx := sort.Search(len(filtered), func(i int) bool {
 			return opt.compareToPrefix(filtered[i].Smallest()) > 0
 		})
-		out := make([]*table.Table, len(filtered[:eIdx]))
-		copy(out, filtered[:eIdx])
+		candidates := filtered[:eIdx]
+		// Prune candidates whose prefix bloom proves the scan prefix is absent.
+		// Tables without a prefix bloom (DoesNotHavePrefix == false) are kept,
+		// preserving the original key-range behaviour.
+		out := make([]*table.Table, 0, len(candidates))
+		for _, t := range candidates {
+			if t.DoesNotHavePrefix(opt.Prefix) {
+				continue
+			}
+			out = append(out, t)
+		}
 		return filterTables(out)
 	}
 

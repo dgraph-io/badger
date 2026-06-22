@@ -56,6 +56,11 @@ type Options struct {
 	// BloomFalsePositive is the false positive probabiltiy of bloom filter.
 	BloomFalsePositive float64
 
+	// BloomPrefixLength, when > 0, builds an additional bloom filter over the
+	// first BloomPrefixLength bytes of each user key, enabling prefix-bounded
+	// seeks to skip whole SSTables. 0 (the default) disables it.
+	BloomPrefixLength int
+
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 
@@ -80,6 +85,7 @@ type TableInterface interface {
 	Smallest() []byte
 	Biggest() []byte
 	DoesNotHave(hash uint32) bool
+	DoesNotHavePrefix(prefix []byte) bool
 	MaxVersion() uint64
 }
 
@@ -98,11 +104,13 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	Checksum       []byte
-	CreatedAt      time.Time
-	indexStart     int
-	indexLen       int
-	hasBloomFilter bool
+	Checksum         []byte
+	CreatedAt        time.Time
+	indexStart       int
+	indexLen         int
+	hasBloomFilter   bool
+	hasPrefixBloom   bool
+	prefixBloomLen   int // Number of leading user-key bytes hashed into the prefix bloom.
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -467,6 +475,8 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	}
 
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
+	t.prefixBloomLen = int(index.BloomPrefixLength())
+	t.hasPrefixBloom = t.prefixBloomLen > 0 && len(index.BloomPrefixFilterBytes()) > 0
 
 	var bo fb.BlockOffset
 	y.AssertTrue(index.Offsets(&bo, 0))
@@ -677,6 +687,38 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 	mayContain := y.Filter(bf).MayContain(hash)
 	if !mayContain {
 		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHave_HIT", 1)
+	}
+	return !mayContain
+}
+
+// PrefixBloomLength returns the number of leading user-key bytes hashed into the
+// prefix bloom filter, or 0 if this table has no prefix bloom.
+func (t *Table) PrefixBloomLength() int { return t.prefixBloomLen }
+
+// DoesNotHavePrefix returns true if and only if the table's prefix bloom filter
+// proves that no key with the given prefix is present. The prefix is hashed
+// using exactly the table's prefix-bloom length (the leading bytes of prefix);
+// callers must only consult it when len(prefix) >= t.PrefixBloomLength(),
+// otherwise it returns false (cannot prune). Tables without a prefix bloom
+// always return false so they are never skipped.
+func (t *Table) DoesNotHavePrefix(prefix []byte) bool {
+	if !t.hasPrefixBloom {
+		return false
+	}
+	// We can only prune when the scan prefix is at least as long as the bytes
+	// that were hashed; otherwise the hash of prefix[:prefixBloomLen] is
+	// undefined for this query.
+	if len(prefix) < t.prefixBloomLen {
+		return false
+	}
+	hash := y.Hash(prefix[:t.prefixBloomLen])
+
+	y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHavePrefix_ALL", 1)
+	index := t.fetchIndex()
+	bf := index.BloomPrefixFilterBytes()
+	mayContain := y.Filter(bf).MayContain(hash)
+	if !mayContain {
+		y.NumLSMBloomHitsAdd(t.opt.MetricsEnabled, "DoesNotHavePrefix_HIT", 1)
 	}
 	return !mayContain
 }

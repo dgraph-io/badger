@@ -140,8 +140,51 @@ func (rcv *TableIndex) MutateStaleDataSize(n uint32) bool {
 	return rcv._tab.MutateUint32Slot(16, n)
 }
 
+// BloomPrefixFilter is an optional bloom filter built over the first
+// BloomPrefixLength bytes of each user key. It is stored in an appended
+// flatbuffer field (vtable slot 7) so that tables written without it (or by
+// older code) decode to a nil slice here.
+func (rcv *TableIndex) BloomPrefixFilter(j int) byte {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		a := rcv._tab.Vector(o)
+		return rcv._tab.GetByte(a + flatbuffers.UOffsetT(j*1))
+	}
+	return 0
+}
+
+func (rcv *TableIndex) BloomPrefixFilterLength() int {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		return rcv._tab.VectorLen(o)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) BloomPrefixFilterBytes() []byte {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
+	}
+	return nil
+}
+
+// BloomPrefixLength is the number of leading user-key bytes hashed into
+// BloomPrefixFilter. Zero means prefix blooms are disabled for this table.
+func (rcv *TableIndex) BloomPrefixLength() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(20))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) MutateBloomPrefixLength(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(20, n)
+}
+
 func TableIndexStart(builder *flatbuffers.Builder) {
-	builder.StartObject(7)
+	builder.StartObject(9)
 }
 func TableIndexAddOffsets(builder *flatbuffers.Builder, offsets flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(offsets), 0)
@@ -169,6 +212,15 @@ func TableIndexAddOnDiskSize(builder *flatbuffers.Builder, onDiskSize uint32) {
 }
 func TableIndexAddStaleDataSize(builder *flatbuffers.Builder, staleDataSize uint32) {
 	builder.PrependUint32Slot(6, staleDataSize, 0)
+}
+func TableIndexAddBloomPrefixFilter(builder *flatbuffers.Builder, bloomPrefixFilter flatbuffers.UOffsetT) {
+	builder.PrependUOffsetTSlot(7, flatbuffers.UOffsetT(bloomPrefixFilter), 0)
+}
+func TableIndexStartBloomPrefixFilterVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
+	return builder.StartVector(1, numElems, 1)
+}
+func TableIndexAddBloomPrefixLength(builder *flatbuffers.Builder, bloomPrefixLength uint32) {
+	builder.PrependUint32Slot(8, bloomPrefixLength, 0)
 }
 func TableIndexEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()
