@@ -7,6 +7,7 @@ package badger
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -313,14 +314,18 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 				out = append(out, t)
 			}
 		}
-		return appendIteratorsReversed(iters, out, topt)
+		return appendIteratorsReversed(iters, out, topt, opt)
 	}
 
 	tables := opt.pickTables(s.tables)
 	if len(tables) == 0 {
 		return iters
 	}
-	return append(iters, table.NewConcatIterator(tables, topt))
+	ci := table.NewConcatIterator(tables, topt)
+	if lower, upper, enabled := opt.versionWindow(math.MaxUint64); enabled {
+		ci.SetVersionBounds(lower, upper)
+	}
+	return append(iters, ci)
 }
 
 type levelHandlerRLocked struct{}

@@ -171,6 +171,15 @@ type Iterator struct {
 	// Internally, Iterator is bidirectional. However, we only expose the
 	// unidirectional functionality for now.
 	opt int // Valid options are REVERSED and NOCACHE.
+
+	// vLower/vUpper define an inclusive version window [vLower,vUpper]. When
+	// vEnabled is true, blocks whose [min,max] version range provably does not
+	// intersect the window are skipped without decompressing them. This is a
+	// performance prune only; the caller's per-entry version filter stays
+	// authoritative. Blocks lacking version-range metadata are never skipped.
+	vEnabled bool
+	vLower   uint64
+	vUpper   uint64
 }
 
 // NewIterator returns a new iterator of the Table
@@ -178,6 +187,34 @@ func (t *Table) NewIterator(opt int) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, opt: opt}
 	return ti
+}
+
+// SetVersionBounds restricts iteration to keys whose version v satisfies
+// lower <= v <= upper, enabling whole-block skipping when a block's recorded
+// [min,max] version range does not intersect the window. It must be called
+// before the iterator is positioned. Blocks without version-range metadata
+// (e.g. from older tables) are never skipped.
+func (itr *Iterator) SetVersionBounds(lower, upper uint64) {
+	itr.vEnabled = true
+	itr.vLower = lower
+	itr.vUpper = upper
+}
+
+// blockOutsideWindow reports whether block bpos provably contains no key in the
+// active version window and may be skipped. Always false when version bounds are
+// not set or the block lacks version-range metadata.
+func (itr *Iterator) blockOutsideWindow(bpos int) bool {
+	if !itr.vEnabled {
+		return false
+	}
+	var ko fb.BlockOffset
+	if !itr.t.offsets(&ko, bpos) {
+		return false
+	}
+	if !ko.VersionRangePresent() {
+		return false
+	}
+	return ko.MaxVersion() < itr.vLower || ko.MinVersion() > itr.vUpper
 }
 
 // Close closes the iterator (and it must be called).
@@ -207,6 +244,14 @@ func (itr *Iterator) seekToFirst() {
 		return
 	}
 	itr.bpos = 0
+	// Skip leading blocks that are outside the version window.
+	for itr.bpos < numBlocks && itr.blockOutsideWindow(itr.bpos) {
+		itr.bpos++
+	}
+	if itr.bpos >= numBlocks {
+		itr.err = io.EOF
+		return
+	}
 	block, err := itr.t.block(itr.bpos, itr.useCache())
 	if err != nil {
 		itr.err = err
@@ -226,6 +271,14 @@ func (itr *Iterator) seekToLast() {
 		return
 	}
 	itr.bpos = numBlocks - 1
+	// Skip trailing blocks that are outside the version window.
+	for itr.bpos >= 0 && itr.blockOutsideWindow(itr.bpos) {
+		itr.bpos--
+	}
+	if itr.bpos < 0 {
+		itr.err = io.EOF
+		return
+	}
 	block, err := itr.t.block(itr.bpos, itr.useCache())
 	if err != nil {
 		itr.err = err
@@ -311,6 +364,13 @@ func (itr *Iterator) seekForPrev(key []byte) {
 func (itr *Iterator) next() {
 	itr.err = nil
 
+	// Skip whole blocks that fall outside the version window without loading or
+	// decompressing them. Safe because such blocks contain no key in [vLower,vUpper].
+	for itr.bpos < itr.t.offsetsLength() && itr.blockOutsideWindow(itr.bpos) {
+		itr.bpos++
+		itr.bi.data = nil
+	}
+
 	if itr.bpos >= itr.t.offsetsLength() {
 		itr.err = io.EOF
 		return
@@ -341,6 +401,13 @@ func (itr *Iterator) next() {
 
 func (itr *Iterator) prev() {
 	itr.err = nil
+
+	// Skip whole blocks that fall outside the version window (reverse direction).
+	for itr.bpos >= 0 && itr.blockOutsideWindow(itr.bpos) {
+		itr.bpos--
+		itr.bi.data = nil
+	}
+
 	if itr.bpos < 0 {
 		itr.err = io.EOF
 		return
@@ -429,6 +496,21 @@ type ConcatIterator struct {
 	iters   []*Iterator // Corresponds to tables.
 	tables  []*Table    // Disregarding reversed, this is in ascending order.
 	options int         // Valid options are REVERSED and NOCACHE.
+
+	// Version window propagated to each lazily-created table Iterator for
+	// per-block skipping. Disabled unless SetVersionBounds is called.
+	vEnabled bool
+	vLower   uint64
+	vUpper   uint64
+}
+
+// SetVersionBounds restricts this concat iterator (and every table iterator it
+// lazily creates) to keys whose version v satisfies lower <= v <= upper. It must
+// be called before the iterator is positioned.
+func (s *ConcatIterator) SetVersionBounds(lower, upper uint64) {
+	s.vEnabled = true
+	s.vLower = lower
+	s.vUpper = upper
 }
 
 // NewConcatIterator creates a new concatenated iterator
@@ -457,7 +539,11 @@ func (s *ConcatIterator) setIdx(idx int) {
 		return
 	}
 	if s.iters[idx] == nil {
-		s.iters[idx] = s.tables[idx].NewIterator(s.options)
+		it := s.tables[idx].NewIterator(s.options)
+		if s.vEnabled {
+			it.SetVersionBounds(s.vLower, s.vUpper)
+		}
+		s.iters[idx] = it
 	}
 	s.cur = s.iters[s.idx]
 }

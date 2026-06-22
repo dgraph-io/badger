@@ -81,6 +81,10 @@ type TableInterface interface {
 	Biggest() []byte
 	DoesNotHave(hash uint32) bool
 	MaxVersion() uint64
+	// OutsideVersionRange reports whether the table provably contains no key with
+	// a version v in [lower,upper]; returns false for tables without version-range
+	// metadata (never skip).
+	OutsideVersionRange(lower, upper uint64) bool
 }
 
 // Table represents a loaded table file with the info we have about it.
@@ -110,6 +114,8 @@ type Table struct {
 
 type cheapIndex struct {
 	MaxVersion        uint64
+	MinVersion        uint64
+	HasVersionRange   bool // true if this table was written with a min_version field.
 	KeyCount          uint32
 	UncompressedSize  uint32
 	OnDiskSize        uint32
@@ -124,6 +130,28 @@ func (t *Table) offsetsLength() int { return t.cheapIndex().OffsetsLength }
 
 // MaxVersion returns the maximum version across all keys stored in this table.
 func (t *Table) MaxVersion() uint64 { return t.cheapIndex().MaxVersion }
+
+// MinVersion returns the minimum version across all keys stored in this table.
+// It is only meaningful when HasVersionRange reports true; otherwise it is 0.
+func (t *Table) MinVersion() uint64 { return t.cheapIndex().MinVersion }
+
+// HasVersionRange reports whether this table was written with version-range
+// metadata (a min_version field). Tables written by older code return false and
+// must never be pruned on the basis of their version range.
+func (t *Table) HasVersionRange() bool { return t.cheapIndex().HasVersionRange }
+
+// OutsideVersionRange reports whether this table provably contains NO key whose
+// version v satisfies lower <= v <= upper, and can therefore be skipped entirely
+// by a version-bounded scan. It returns false (do not skip) for tables without
+// version-range metadata. The check is a conservative performance prune only;
+// the per-entry version filter remains authoritative.
+func (t *Table) OutsideVersionRange(lower, upper uint64) bool {
+	ci := t.cheapIndex()
+	if !ci.HasVersionRange {
+		return false
+	}
+	return ci.MaxVersion < lower || ci.MinVersion > upper
+}
 
 // BloomFilterSize returns the size of the bloom filter in bytes stored in memory.
 func (t *Table) BloomFilterSize() int { return t.cheapIndex().BloomFilterLength }
@@ -459,6 +487,8 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	}
 	t._cheap = &cheapIndex{
 		MaxVersion:        index.MaxVersion(),
+		MinVersion:        index.MinVersion(),
+		HasVersionRange:   index.MinVersionPresent(),
 		KeyCount:          index.KeyCount(),
 		UncompressedSize:  index.UncompressedSize(),
 		OnDiskSize:        index.OnDiskSize(),

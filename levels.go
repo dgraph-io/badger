@@ -911,7 +911,7 @@ func (s *levelsController) compactBuildTables(
 		var iters []y.Iterator
 		switch {
 		case lev == 0:
-			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
+			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE, nil)
 		case len(topTables) > 0:
 			y.AssertTrue(len(topTables) == 1)
 			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
@@ -1645,10 +1645,20 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 	return maxVs, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
+func appendIteratorsReversed(
+	out []y.Iterator, th []*table.Table, topt int, opt *IteratorOptions) []y.Iterator {
+	var lower, upper uint64
+	var vEnabled bool
+	if opt != nil {
+		lower, upper, vEnabled = opt.versionWindow(math.MaxUint64)
+	}
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].NewIterator(opt))
+		it := th[i].NewIterator(topt)
+		if vEnabled {
+			it.SetVersionBounds(lower, upper)
+		}
+		out = append(out, it)
 	}
 	return out
 }
