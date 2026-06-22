@@ -140,8 +140,30 @@ func (rcv *TableIndex) MutateStaleDataSize(n uint32) bool {
 	return rcv._tab.MutateUint32Slot(16, n)
 }
 
+// MinVersion is the smallest key version (timestamp) across all keys in this
+// table. It is stored in an appended flatbuffer field (vtable slot 7) so that
+// tables written without it (or by older code) decode to 0 here. Use
+// MinVersionPresent to distinguish a genuine 0 from an absent field.
+func (rcv *TableIndex) MinVersion() uint64 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
+	if o != 0 {
+		return rcv._tab.GetUint64(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+// MinVersionPresent reports whether the min_version field was written to this
+// table index (i.e. it was produced by version-range-aware code).
+func (rcv *TableIndex) MinVersionPresent() bool {
+	return rcv._tab.Offset(18) != 0
+}
+
+func (rcv *TableIndex) MutateMinVersion(n uint64) bool {
+	return rcv._tab.MutateUint64Slot(18, n)
+}
+
 func TableIndexStart(builder *flatbuffers.Builder) {
-	builder.StartObject(7)
+	builder.StartObject(8)
 }
 func TableIndexAddOffsets(builder *flatbuffers.Builder, offsets flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(offsets), 0)
@@ -169,6 +191,9 @@ func TableIndexAddOnDiskSize(builder *flatbuffers.Builder, onDiskSize uint32) {
 }
 func TableIndexAddStaleDataSize(builder *flatbuffers.Builder, staleDataSize uint32) {
 	builder.PrependUint32Slot(6, staleDataSize, 0)
+}
+func TableIndexAddMinVersion(builder *flatbuffers.Builder, minVersion uint64) {
+	builder.PrependUint64Slot(7, minVersion, 0)
 }
 func TableIndexEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()
