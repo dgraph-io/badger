@@ -248,8 +248,8 @@ type Txn struct {
 	conflictKeys map[uint64]struct{}
 	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
-	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
-	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
+	pendingWrites   *pendingEntries // cache stores any writes done by txn.
+	duplicateWrites []*Entry        // Used in managed mode to store duplicate entries.
 
 	numIterators atomic.Int32
 	discarded    bool
@@ -310,13 +310,13 @@ func (pi *pendingWritesIterator) Close() error {
 }
 
 func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
-	if !txn.update || len(txn.pendingWrites) == 0 {
+	if !txn.update || txn.pendingWrites.len() == 0 {
 		return nil
 	}
-	entries := make([]*Entry, 0, len(txn.pendingWrites))
-	for _, e := range txn.pendingWrites {
+	entries := make([]*Entry, 0, txn.pendingWrites.len())
+	txn.pendingWrites.rangeEntries(func(e *Entry) {
 		entries = append(entries, e)
-	}
+	})
 	// Number of pending writes per transaction shouldn't be too big in general.
 	sort.Slice(entries, func(i, j int) bool {
 		cmp := bytes.Compare(entries[i].Key, entries[j].Key)
@@ -388,10 +388,9 @@ func (txn *Txn) modify(e *Entry) error {
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
 	// same versions, we will overwrite the existing entry.
-	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+	if oldEntry, duplicate := txn.pendingWrites.set(e); duplicate {
 		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
 	}
-	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
 
@@ -444,7 +443,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 
 	item = new(Item)
 	if txn.update {
-		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+		if e, has := txn.pendingWrites.get(key); has {
 			if isDeletedOrExpired(e.meta, e.ExpiresAt) {
 				return nil, ErrKeyNotFound
 			}
@@ -540,21 +539,27 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			keepTogether = false
 		}
 	}
-	for _, e := range txn.pendingWrites {
+	// arenaSize accumulates the total bytes needed for all key+ts buffers so we
+	// can carve them from a single allocation instead of one per key.
+	var arenaSize int
+	txn.pendingWrites.rangeEntries(func(e *Entry) {
 		setVersion(e)
-	}
+		arenaSize += len(e.Key) + 8
+	})
 	// The duplicateWrites slice will be non-empty only if there are duplicate
 	// entries with different versions.
 	for _, e := range txn.duplicateWrites {
 		setVersion(e)
+		arenaSize += len(e.Key) + 8
 	}
 
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
+	entries := make([]*Entry, 0, txn.pendingWrites.len()+len(txn.duplicateWrites)+1)
+	arena := newKeyArena(arenaSize)
 
 	processEntry := func(e *Entry) {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, e.version)
+		e.Key = arena.keyWithTs(e.Key, e.version)
 		// Add bitTxn only if these entries are part of a transaction. We
 		// support SetEntryAt(..) in managed mode which means a single
 		// transaction can have entries with different timestamps. If entries
@@ -572,9 +577,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
 	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
-	for _, e := range txn.pendingWrites {
-		processEntry(e)
-	}
+	txn.pendingWrites.rangeEntries(processEntry)
 	for _, e := range txn.duplicateWrites {
 		processEntry(e)
 	}
@@ -611,11 +614,11 @@ func (txn *Txn) commitPrecheck() error {
 		return errors.New("Trying to commit a discarded txn")
 	}
 	keepTogether := true
-	for _, e := range txn.pendingWrites {
+	txn.pendingWrites.rangeEntries(func(e *Entry) {
 		if e.version != 0 {
 			keepTogether = false
 		}
-	}
+	})
 
 	// If keepTogether is True, it implies transaction markers will be added.
 	// In that case, commitTs should not be never be zero. This might happen if
@@ -649,7 +652,7 @@ func (txn *Txn) commitPrecheck() error {
 func (txn *Txn) Commit() error {
 	// txn.conflictKeys can be zero if conflict detection is turned off. So we
 	// should check txn.pendingWrites.
-	if len(txn.pendingWrites) == 0 {
+	if txn.pendingWrites.len() == 0 {
 		// Discard the transaction so that the read is marked done.
 		txn.Discard()
 		return nil
@@ -702,7 +705,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	if len(txn.pendingWrites) == 0 {
+	if txn.pendingWrites.len() == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
@@ -774,7 +777,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		if db.opt.DetectConflicts {
 			txn.conflictKeys = make(map[uint64]struct{})
 		}
-		txn.pendingWrites = make(map[string]*Entry)
+		txn.pendingWrites = newPendingEntries()
 	}
 	if !isManaged {
 		txn.readTs = db.orc.readTs()
