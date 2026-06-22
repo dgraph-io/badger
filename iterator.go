@@ -318,6 +318,28 @@ type IteratorOptions struct {
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
 	SinceTs     uint64 // Only read data that has version > SinceTs.
+	// UntilTs, when non-zero, is an inclusive upper bound on versions: only read
+	// data that has version <= UntilTs. Together with SinceTs it defines a
+	// version window (SinceTs, UntilTs]. It is a performance/scoping hint that
+	// lets storage skip whole blocks/SSTables outside the window; the per-entry
+	// version filter remains authoritative. Zero means no upper bound.
+	UntilTs uint64
+}
+
+// versionWindow returns the inclusive [lower, upper] version range that this
+// iterator can possibly surface, and whether storage-level skipping should be
+// applied. readTs is the transaction read timestamp (the natural upper bound).
+// lower = SinceTs+1 because the SinceTs filter excludes v <= SinceTs.
+func (opt *IteratorOptions) versionWindow(readTs uint64) (lower, upper uint64, enabled bool) {
+	lower = opt.SinceTs + 1 // relevant versions satisfy v > SinceTs, i.e. v >= SinceTs+1.
+	upper = readTs
+	if opt.UntilTs != 0 && opt.UntilTs < upper {
+		upper = opt.UntilTs
+	}
+	// Only worth skipping when the window is actually bounded below or above the
+	// full range. (lower>1 means SinceTs set; upper<MaxUint64 means a real bound.)
+	enabled = opt.SinceTs > 0 || opt.UntilTs != 0
+	return lower, upper, enabled
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -332,6 +354,12 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	// Ignore this table if its max version is less than the sinceTs.
 	if t.MaxVersion() < opt.SinceTs {
+		return false
+	}
+	// Ignore this table if its [min,max] version range provably falls entirely
+	// above the requested upper bound. Tables without version-range metadata
+	// return false here and are never skipped.
+	if opt.UntilTs != 0 && t.OutsideVersionRange(opt.SinceTs+1, opt.UntilTs) {
 		return false
 	}
 	if len(opt.Prefix) == 0 {
@@ -355,10 +383,14 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	filterTables := func(tables []*table.Table) []*table.Table {
-		if opt.SinceTs > 0 {
+		if opt.SinceTs > 0 || opt.UntilTs != 0 {
 			tmp := tables[:0]
 			for _, t := range tables {
 				if t.MaxVersion() < opt.SinceTs {
+					continue
+				}
+				// Drop tables whose version range falls entirely above the upper bound.
+				if opt.UntilTs != 0 && t.OutsideVersionRange(opt.SinceTs+1, opt.UntilTs) {
 					continue
 				}
 				tmp = append(tmp, t)
@@ -625,8 +657,10 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	// Ignore everything that is above the readTs and below or at the sinceTs.
-	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
+	// Ignore everything that is above the readTs and below or at the sinceTs,
+	// and (when set) anything strictly above the UntilTs upper bound.
+	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) ||
+		(it.opt.UntilTs != 0 && version > it.opt.UntilTs) {
 		mi.Next()
 		return false
 	}

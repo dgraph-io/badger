@@ -13,12 +13,26 @@ table TableIndex {
   uncompressed_size:uint32;
   on_disk_size:uint32;
   stale_data_size:uint32;
+  // min_version is the smallest version (timestamp) across all keys in this
+  // table. Appended at the end for forward/backward compatibility: old readers
+  // ignore it, and new readers see the default (0) and treat the table range as
+  // unknown when reading tables written without it. Presence is detected via the
+  // vtable (Offset(18) != 0), so a genuine min_version of 0 is distinguishable
+  // from an absent field only when paired with a non-zero max_version.
+  min_version:uint64;
 }
 
 table BlockOffset {
   key:[ubyte];
   offset:uint;
   len:uint;
+  // Appended fields for per-block pruning and exact decompress sizing. Forward/
+  // backward compatible: old readers ignore them, new readers see 0 when reading
+  // tables written without them.
+  min_version:uint64;
+  max_version:uint64;
+  uncompressed_len:uint32;
+  key_count:uint32;
 }
 
 root_type TableIndex;

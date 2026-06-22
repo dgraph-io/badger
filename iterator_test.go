@@ -31,6 +31,10 @@ func (tm *tableMock) Biggest() []byte              { return tm.right }
 func (tm *tableMock) DoesNotHave(hash uint32) bool { return false }
 func (tm *tableMock) MaxVersion() uint64           { return math.MaxUint64 }
 
+// OutsideVersionRange: the mock has no version-range metadata, so it is never
+// skipped (matches the behavior of older real tables).
+func (tm *tableMock) OutsideVersionRange(lower, upper uint64) bool { return false }
+
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
 
@@ -148,6 +152,136 @@ func TestIterateSinceTs(t *testing.T) {
 		}))
 
 	})
+}
+
+// TestIterateVersionWindow asserts that a version-bounded scan using UntilTs (an
+// upper bound complementing SinceTs) returns IDENTICAL results to an unbounded
+// AllVersions scan filtered to the same window, across multi-version data
+// including deletes, after the data has been flushed to SSTables. This exercises
+// both the table-level and block-level version-range skipping on the read path.
+func TestIterateVersionWindow(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opts := getTestOptions(dir)
+	db, err := OpenManaged(opts)
+	require.NoError(t, err)
+
+	const nkeys = 200
+	bkey := func(i int) []byte { return []byte(fmt.Sprintf("key%05d", i)) }
+
+	// Write three version bands far apart so whole tables/blocks fall outside
+	// typical windows. Some keys get deleted at a later version.
+	type rec struct {
+		key     string
+		version uint64
+		deleted bool
+	}
+	var written []rec
+	bands := []uint64{10, 1000, 100000}
+	for _, base := range bands {
+		for i := 0; i < nkeys; i++ {
+			ver := base + uint64(i%50)
+			txn := db.NewTransactionAt(ver-1, true)
+			if i%7 == 0 {
+				require.NoError(t, txn.Delete(bkey(i)))
+				written = append(written, rec{key: string(bkey(i)), version: ver, deleted: true})
+			} else {
+				require.NoError(t, txn.Set(bkey(i), []byte(fmt.Sprintf("v%d", ver))))
+				written = append(written, rec{key: string(bkey(i)), version: ver})
+			}
+			require.NoError(t, txn.CommitAt(ver, nil))
+		}
+	}
+	// Flatten to push everything into SSTables so the storage-level skip applies.
+	require.NoError(t, db.Flatten(2))
+
+	// reference returns the set of (key,version) pairs (incl. deletes) within the
+	// window, matching what an AllVersions+InternalAccess iterator should surface.
+	reference := func(lower, upper uint64) map[string]bool {
+		m := map[string]bool{}
+		for _, r := range written {
+			if r.version > lower && r.version <= upper {
+				m[fmt.Sprintf("%s@%d", r.key, r.version)] = true
+			}
+		}
+		return m
+	}
+
+	readWindow := func(sinceTs, untilTs, readTs uint64) map[string]bool {
+		iopt := DefaultIteratorOptions
+		iopt.AllVersions = true
+		iopt.SinceTs = sinceTs
+		iopt.UntilTs = untilTs
+		got := map[string]bool{}
+		txn := db.NewTransactionAt(readTs, false)
+		defer txn.Discard()
+		it := txn.NewIterator(iopt)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			got[fmt.Sprintf("%s@%d", string(item.KeyCopy(nil)), item.Version())] = true
+		}
+		return got
+	}
+
+	readTs := db.MaxVersion()
+	windows := [][2]uint64{
+		{0, math.MaxUint64}, // full
+		{0, 500},            // only band 1
+		{900, 1100},         // only band 2
+		{50000, 200000},     // only band 3
+		{500, 900},          // gap => empty
+		{0, 1049},           // bands 1 and 2
+	}
+	for _, w := range windows {
+		sinceTs, untilTs := w[0], w[1]
+		t.Run(fmt.Sprintf("window_%d_%d", sinceTs, untilTs), func(t *testing.T) {
+			want := reference(sinceTs, untilTs)
+			got := readWindow(sinceTs, untilTs, readTs)
+			require.Equal(t, want, got, "bounded window scan must match manual filter")
+		})
+	}
+
+	require.NoError(t, db.Close())
+}
+
+// TestUntilTsPrunesTables asserts that the table picker actually drops SSTables
+// whose version range lies entirely above the UntilTs upper bound.
+func TestUntilTsPrunesTables(t *testing.T) {
+	mk := func(minV, maxV uint64, hasRange bool) *prunableTableMock {
+		return &prunableTableMock{minV: minV, maxV: maxV, hasRange: hasRange}
+	}
+	opt := DefaultIteratorOptions
+	opt.UntilTs = 100
+
+	// Table entirely above the window => pruned.
+	require.False(t, opt.pickTable(mk(500, 600, true)))
+	// Table intersecting the window => kept.
+	require.True(t, opt.pickTable(mk(50, 120, true)))
+	// Table below window (still has versions <= 100) => kept.
+	require.True(t, opt.pickTable(mk(1, 50, true)))
+	// Old-format table without a range => never pruned, even if it "looks" above.
+	require.True(t, opt.pickTable(mk(500, 600, false)))
+}
+
+// prunableTableMock implements table.TableInterface with a controllable version
+// range, for testing the UntilTs table-pruning predicate.
+type prunableTableMock struct {
+	minV, maxV uint64
+	hasRange   bool
+}
+
+func (m *prunableTableMock) Smallest() []byte             { return y.KeyWithTs([]byte("a"), 1) }
+func (m *prunableTableMock) Biggest() []byte              { return y.KeyWithTs([]byte("z"), 1) }
+func (m *prunableTableMock) DoesNotHave(hash uint32) bool { return false }
+func (m *prunableTableMock) MaxVersion() uint64           { return m.maxV }
+func (m *prunableTableMock) OutsideVersionRange(lower, upper uint64) bool {
+	if !m.hasRange {
+		return false
+	}
+	return m.maxV < lower || m.minV > upper
 }
 
 func TestIterateSinceTsWithPendingWrites(t *testing.T) {
