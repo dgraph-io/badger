@@ -544,15 +544,25 @@ func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs.Load()))
 
+	// Set blockWrites/isClosed and wake any writer parked in ensureRoomForWrite's
+	// flushCond.Wait ATOMICALLY under db.lock. ensureRoomForWrite checks
+	// blockWrites and calls flushCond.Wait while holding db.lock, so we must hold
+	// the same lock here; otherwise the wakeup can be lost in this interleaving:
+	// the writer reads blockWrites==0, then we Store(1)+Broadcast (writer not yet
+	// enqueued in Wait, so the Broadcast is lost), then the writer Waits forever
+	// and closers.writes.SignalAndWait below hangs (stopMemoryFlush, which would
+	// unstall the flush goroutine, is only reached later). Holding db.lock
+	// serializes the two: either the writer sees blockWrites==1 and returns
+	// errNoRoom without waiting, or it is already in Wait (which released db.lock)
+	// and the Broadcast reaches it. Either way the write goroutine can finish so
+	// SignalAndWait completes.
+	db.lock.Lock()
 	db.blockWrites.Store(1)
 	db.isClosed.Store(1)
-
-	// Wake any writer parked in ensureRoomForWrite's flushCond.Wait. blockWrites is
-	// now set, so on wake the writer returns errNoRoom instead of waiting, letting
-	// closers.writes.SignalAndWait below complete rather than hang.
 	if db.flushCond != nil {
 		db.flushCond.Broadcast()
 	}
+	db.lock.Unlock()
 
 	if db.closers.valueGC != nil {
 		// Stop value GC first.

@@ -7,11 +7,14 @@ package badger
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/v4/table"
 )
 
 // drainL0 removes the first n tables from L0 and signals the stall cond, mimicking
@@ -232,4 +235,160 @@ func TestL0StallSpuriousWakeupSafe(t *testing.T) {
 			t.Fatal("add did not resume after real drain")
 		}
 	})
+}
+
+// TestL0CloseRaceWithStalledWriters is a regression test for the lost flushCond
+// broadcast on close. Many concurrent writers hammer the DB so the write path
+// (ensureRoomForWrite) repeatedly hits a full flushChan and cycles through the
+// check-blockWrites -> flushCond.Wait transition, while a toggler goroutine keeps
+// L0 oscillating around the stall threshold (so the flush goroutine drains just
+// enough to free a flushChan slot, then stalls again). We then Close() and assert
+// it returns within a hard timeout.
+//
+// Before the fix, close() set blockWrites and broadcast flushCond WITHOUT holding
+// db.lock. The lost-wakeup window: a writer holds db.lock and reads blockWrites==0;
+// before it calls flushCond.Wait() (which would enqueue it on the notify list and
+// release the lock), close() — not holding the lock — Stores blockWrites=1 and
+// Broadcasts; the writer then enqueues and parks, having missed the only close-time
+// broadcast, and closers.writes.SignalAndWait() hangs forever. The fix performs the
+// Store+Broadcast under db.lock so it cannot interleave between the writer's check
+// and its enqueue.
+//
+// The window is tiny (the writer holds db.lock from the blockWrites read until it
+// enqueues in Wait), so this test maximizes the odds of landing in it: a toggler
+// goroutine keeps the write path churning through check->Wait transitions, we stop
+// it just before Close so the flusher re-stalls, and we jitter the timing across
+// -count iterations. Run with -race and a high -count. NOTE: this is probabilistic
+// coverage of the close-under-stall path; the underlying lost-wakeup is a
+// nanosecond-scale interleaving that black-box timing cannot guarantee to hit every
+// run. The fix's correctness rests on mutual exclusion (Store+Broadcast and the
+// writer's check+Wait share db.lock), which this test guards against regressing by
+// asserting Close never hangs under heavy concurrent stall.
+func TestL0CloseRaceWithStalledWriters(t *testing.T) {
+	opt := getTestOptions("")
+	opt.InMemory = true
+	// Small memtables + few flush/L0 slots so flushChan fills and L0 stalls fast.
+	opt.MemTableSize = 1 << 15
+	opt.ValueThreshold = 1 << 10
+	opt.NumMemtables = 2
+	opt.NumLevelZeroTables = 2
+	opt.NumLevelZeroTablesStall = 3
+	// Disable compaction and pin L0 above the stall threshold so the flush
+	// goroutine is stalled in addLevel0Table and CANNOT emit its own post-flush
+	// flushCond.Broadcast before stopMemoryFlush runs. This is the condition that
+	// makes the lost broadcast fatal: with the flusher stuck, the only close-time
+	// wakeup for a parked writer is close()'s own Broadcast, so if that is lost the
+	// system deadlocks (close hangs at closers.writes.SignalAndWait, never reaching
+	// stopMemoryFlush which would unstall the flusher).
+	opt.NumCompactors = 0
+
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	l0 := db.lc.levels[0]
+	l0.Lock()
+	for i := 0; i < opt.NumLevelZeroTablesStall; i++ {
+		tab := createEmptyTable(db)
+		l0.tables = append(l0.tables, tab)
+		l0.addSize(tab)
+	}
+	l0.Unlock()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Toggler: repeatedly drop L0 below the stall threshold (signal) and then
+	// restore it above. Each drop briefly unstalls the flush goroutine, which
+	// drains a memtable from flushChan and frees a slot, waking the parked
+	// writeRequests goroutine; it pushes, refills flushChan, and re-parks. This
+	// produces a continuous stream of check-blockWrites -> flushCond.Wait
+	// transitions in the write path, so that when Close() fires there is almost
+	// always a writer mid-transition for the lost-wakeup window to bite. Toggling
+	// never drops a table's refcount (we re-add the same pointer). We stop toggling
+	// right before Close so the flusher is reliably re-stalled in addLevel0Table
+	// (condition (2)) at close time and cannot emit a covering flushCond.Broadcast.
+	togglerStop := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-togglerStop:
+				// Leave L0 above the stall threshold so the flusher re-stalls.
+				return
+			default:
+			}
+			// Drop one table below threshold (keep its pointer) and signal.
+			var dropped *table.Table
+			l0.Lock()
+			if n := len(l0.tables); n > 0 {
+				dropped = l0.tables[n-1]
+				l0.tables = l0.tables[:n-1]
+				l0.subtractSize(dropped)
+			}
+			l0.Unlock()
+			l0.signalL0Drained()
+			time.Sleep(time.Millisecond)
+			// Restore the same table above threshold.
+			if dropped != nil {
+				l0.Lock()
+				l0.tables = append(l0.tables, dropped)
+				l0.addSize(dropped)
+				l0.Unlock()
+			}
+		}
+	}()
+
+	// Many concurrent writers hammer the write path. The single writeRequests
+	// goroutine repeatedly transitions through check-blockWrites -> flushCond.Wait
+	// in ensureRoomForWrite as it tries to push into a full flushChan.
+	const writers = 64
+	val := make([]byte, 2048)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			i := 0
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				err := db.Update(func(txn *Txn) error {
+					return txn.Set([]byte(fmt.Sprintf("w%02d-key-%08d", id, i)), val)
+				})
+				if err != nil {
+					return // DB closing: ErrBlockedWrites / errNoRoom-derived.
+				}
+				i++
+			}
+		}(w)
+	}
+
+	// Let churn establish (writers cycling check->Wait via the toggler), with a
+	// jittered offset so successive -count runs probe different scheduling points.
+	time.Sleep(time.Duration(20+time.Now().UnixNano()%30) * time.Millisecond)
+
+	// Stop the toggler so the flusher re-stalls, then fire Close immediately. At
+	// this instant a writeRequests goroutine is very likely mid check->Wait, and
+	// the flusher is (re)stalled and cannot emit a covering flushCond.Broadcast, so
+	// the buggy unlocked Store+Broadcast in close() can lose the only wakeup and
+	// deadlock. The fix (Store+Broadcast under db.lock) makes this impossible.
+	close(togglerStop)
+
+	closed := make(chan error, 1)
+	go func() {
+		closed <- db.Close()
+	}()
+
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("db.Close() hung: stalled writer's flushCond wakeup was lost on close")
+	}
+
+	close(stop)
+	wg.Wait()
 }
