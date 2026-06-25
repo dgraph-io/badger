@@ -423,6 +423,18 @@ func (s *levelsController) levelTargets() targets {
 		}
 	}
 
+	// The base level must never be L0. For a very large LSM tree the size loop
+	// above can fail to assign a base level: it only sets baseLevel where
+	// adjust(dbSize) <= BaseLevelSize, and the smallest level it checks (L1)
+	// has dbSize = lastLevelSize / LevelSizeMultiplier^(MaxLevels-2). Once the
+	// last level exceeds that (~1TB with defaults), baseLevel stays 0, and a
+	// non-empty L1 prevents the "bring down" loop from fixing it. Clamp to L1
+	// (the topmost real level) so we never try to compact L0 into itself, which
+	// would otherwise panic in fillTablesL0ToLbase.
+	if t.baseLevel == 0 {
+		t.baseLevel = 1
+	}
+  
 	return t
 }
 

@@ -3,11 +3,6 @@ name: ci-badger-tests
 on:
   workflow_dispatch: # allows manual trigger from GitHub
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - docs/**
-      - images/**
-      - contrib/**
     branches:
       - main
       - release/v*
@@ -16,7 +11,29 @@ permissions:
   contents: read
 
 jobs:
+  # Detect whether any non-doc files changed. The required jobs below always run
+  # so they report a status on every PR, then short-circuit to success when only
+  # docs changed. This keeps the test gate for code PRs while preventing
+  # docs-only PRs from deadlocking on a check that paths filtering would skip.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '!**/*.md'
+              - '!docs/**'
+              - '!images/**'
+              - '!contrib/**'
+
   cross-compile:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -48,14 +65,19 @@ jobs:
         run: go build ./...
 
   badger-tests:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - name: Setup Go
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v5
+      - if: needs.changes.outputs.code == 'true'
+        name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Install Dependencies
+      - if: needs.changes.outputs.code == 'true'
+        name: Install Dependencies
         run: make dependency
-      - name: Run Badger Tests
+      - if: needs.changes.outputs.code == 'true'
+        name: Run Badger Tests
         run: make test
