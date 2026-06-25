@@ -1500,6 +1500,8 @@ func TestLevelTargets(t *testing.T) {
 			}))
 		})
 	})
+}
+
 func TestBaseLevelZeroBySize(t *testing.T) {
 	const GB = int64(1) << 30
 	const TB = int64(1) << 40
