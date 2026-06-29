@@ -659,6 +659,20 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
+	// While a vlog GC rewrite is in flight, do not discard any version newer than
+	// the rewrite's start (gcDiscardTs is the DB's max committed version captured
+	// then). The rewrite may write a scanned value back, and a tombstone deleting
+	// that key — necessarily committed after the rewrite started, so with a version
+	// greater than gcDiscardTs — must survive to shadow the write-back; otherwise
+	// the deleted key reappears (#2286). The clamp is released when the rewrite
+	// finishes. Lowering discardTs only ever keeps more versions, so it is always
+	// safe; it costs deferred reclamation during a rewrite, nothing more.
+	if s.kv.gcActive.Load() {
+		if gcMax := s.kv.gcDiscardTs.Load(); gcMax > 0 && gcMax < discardTs {
+			discardTs = gcMax
+		}
+	}
+
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
