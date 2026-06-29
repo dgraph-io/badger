@@ -209,7 +209,18 @@ func (mt *memTable) UpdateSkipList() error {
 	if endOff < mt.wal.size.Load() && mt.opt.ReadOnly {
 		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size.Load())
 	}
-	return mt.wal.Truncate(int64(endOff))
+	if err := mt.wal.Truncate(int64(endOff)); err != nil {
+		// On Windows, truncation fails if another process has the file memory-mapped
+		// (ERROR_USER_MAPPED_FILE). Since the WAL data has already been successfully
+		// replayed into the skiplist, we can safely skip the truncation. The file
+		// will be truncated the next time it is opened without contention.
+		if isUserMappedFileError(err) {
+			mt.opt.Warningf("Skipping WAL truncation for %s: %v", mt.wal.Fd.Name(), err)
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // IncrRef increases the refcount
@@ -265,12 +276,21 @@ type logFile struct {
 }
 
 func (lf *logFile) Truncate(end int64) error {
-	if fi, err := lf.Fd.Stat(); err != nil {
+	fi, err := lf.Fd.Stat()
+	if err != nil {
 		return fmt.Errorf("while file.stat on file: %s, error: %v\n", lf.Fd.Name(), err)
-	} else if fi.Size() == end {
+	}
+	if fi.Size() == end {
 		return nil
 	}
 	y.AssertTrue(!lf.opt.ReadOnly)
+	// On Windows, MmapFile.Truncate does Munmap→Truncate→Mmap. If the file
+	// truncation fails (e.g. another process has it memory-mapped), the mmap
+	// is left in a broken state. Probe with Fd.Truncate first to fail fast
+	// without disturbing the existing memory mapping.
+	if err := probeFileTruncate(lf.Fd, end); err != nil {
+		return fmt.Errorf("while truncate file: %s, error: %v", lf.Fd.Name(), err)
+	}
 	lf.size.Store(uint32(end))
 	return lf.MmapFile.Truncate(end)
 }

@@ -638,6 +638,14 @@ func (vlog *valueLog) open(db *DB) error {
 		return y.Wrapf(err, "while iterating over: %s", last.path)
 	}
 	if err := last.Truncate(int64(lastOff)); err != nil {
+		// On Windows, truncation fails with ERROR_USER_MAPPED_FILE when another
+		// process has the file memory-mapped. Since probeFileTruncate prevents
+		// Munmap from running, the existing mmap remains valid. We skip creating
+		// a new vlog file and continue writing to the current one.
+		if isUserMappedFileError(err) {
+			vlog.opt.Warningf("Skipping vlog truncation for %s: %v", last.path, err)
+			return nil
+		}
 		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
 	}
 
@@ -663,7 +671,12 @@ func (vlog *valueLog) Close() error {
 			offset = int64(vlog.woffset())
 		}
 		if terr := lf.Close(offset); terr != nil && err == nil {
-			err = terr
+			// On Windows, Close may fail to truncate if another process has the
+			// file memory-mapped. The data is already synced, so this is safe to
+			// ignore; the file will be truncated on next open.
+			if !isUserMappedFileError(terr) {
+				err = terr
+			}
 		}
 	}
 	if vlog.discardStats != nil {
