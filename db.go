@@ -107,6 +107,16 @@ type DB struct {
 	blockWrites atomic.Int32
 	isClosed    atomic.Uint32
 
+	// gcActive is set while a vlog GC rewrite (scan + write-back) is in flight,
+	// and gcDiscardTs records the DB's max version captured at its start. While
+	// active, last-level compaction clamps its discard threshold to gcDiscardTs
+	// (see levelsController.subcompact) so it will not purge any version newer than
+	// the rewrite's start — in particular a tombstone for a key the rewrite is
+	// about to write back. That tombstone survives to shadow the write-back, so a
+	// key deleted mid-GC is not resurrected (#2286). Released when GC finishes.
+	gcActive    atomic.Bool
+	gcDiscardTs atomic.Uint64
+
 	orc              *oracle
 	bannedNamespaces *lockedKeys
 	threshold        *vlogThreshold

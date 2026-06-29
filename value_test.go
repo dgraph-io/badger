@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/y"
 )
 
@@ -951,7 +953,10 @@ func TestValueGCRewriteSkipsLSMGetOnlyForExpiredEntriesInMixedVlogFile(t *testin
 	lf := kv.vlog.filesMap[fids[0]]
 	kv.vlog.filesLock.RUnlock()
 
-	// Only the live entry should require an LSM lookup during rewrite.
+	// Live entries require exactly one LSM lookup during rewrite (the Phase 1
+	// liveness scan). The GC write-back race is guarded by clamping compaction's
+	// discard threshold during the rewrite (see subcompact), not by a second
+	// re-read, so no extra gets are incurred. Expired entries still require none.
 	clearAllMetrics()
 	require.NoError(t, kv.vlog.rewrite(lf))
 
@@ -1353,4 +1358,250 @@ func TestFirstVlogFile(t *testing.T) {
 	fids := db.vlog.sortedFids()
 	require.NotZero(t, len(fids))
 	require.Equal(t, uint32(1), fids[0])
+}
+
+// TestVlogGCRaceDeletedKeyReappearsReal is the end-to-end regression test for
+// #2286. It exercises the genuine bug machinery through real operations only:
+//
+//   - The delete is a REAL transaction (txn.Delete + CommitAt) → it flows through
+//     the normal write path (writeToLSM), exactly as a user's delete would.
+//   - The purge is a REAL last-level compaction (flush to L0 + runCompactDef into
+//     Lmax) → it drops both the tombstone and foo@v100 through the real
+//     subcompact drop path, exactly as background compaction would.
+//
+// The only non-production element is vlogGCPauseHook, which merely PAUSES the
+// rewrite between Phase 1 (scan) and Phase 2 (write-back) so the real
+// delete+compaction lands deterministically in the race window. No tombstone is
+// hand-built (no createAndOpen), and the LSM is never hand-edited. The test
+// reproduces the bug on unfixed code (verified) and is independent of how the fix
+// is implemented.
+func TestVlogGCRaceDeletedKeyReappearsReal(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-vlog-gc-real")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	openDB := func(compactOnClose bool) *DB {
+		opt := DefaultOptions(dir).
+			WithNumCompactors(0).
+			WithValueThreshold(1 << 10).  // 1 KB: 4 KB value → vlog
+			WithCompression(options.None) // predictable SST sizes
+		opt.managedTxns = true
+		opt = opt.WithCompactL0OnClose(compactOnClose)
+		db, err := Open(opt)
+		require.NoError(t, err)
+		return db
+	}
+
+	key := []byte("foo")
+	largeVal := bytes.Repeat([]byte("x"), 4<<10) // 4 KB > ValueThreshold
+
+	// ── Setup: write foo@v100 (large value → vlog), compact to L6. ──
+	db := openDB(true)
+	txn := db.NewTransactionAt(0, true)
+	require.NoError(t, txn.SetEntry(NewEntry(key, largeVal)))
+	require.NoError(t, txn.CommitAt(100, nil))
+	require.NoError(t, db.Close()) // value bytes → vlog; LSM pointer → L6
+
+	// ── Reopen, set hook, call rewrite(). ──
+	db = openDB(false)
+
+	db.vlogGCPauseHook = func() {
+		// (1) REAL delete through the normal write path. CommitAt(_, nil) blocks
+		// until the write is applied, so the tombstone@v101 is in the memtable
+		// (and has passed through writeToLSM) by the time this returns.
+		dtxn := db.NewTransactionAt(101, true)
+		require.NoError(t, dtxn.Delete(key))
+		require.NoError(t, dtxn.CommitAt(101, nil))
+
+		// discardTs set AFTER the commit (else lastCleanupTs would exceed the
+		// commit ts and trip an assert). 200 > 101 so the tombstone is droppable.
+		db.SetDiscardTs(200)
+
+		// (2) REAL flush: move the memtable holding the tombstone out to an L0
+		// SST via the production flush routine.
+		db.lock.Lock()
+		oldMt := db.mt
+		nmt, err := db.newMemTable()
+		require.NoError(t, err)
+		db.mt = nmt
+		db.lock.Unlock()
+		require.NoError(t, db.handleMemTableFlush(oldMt, nil))
+		oldMt.DecrRef()
+
+		// (3) REAL last-level compaction L0 → L6. nextLevel is Lmax, so there is
+		// no level below it: hasOverlap is false and the subcompact drop path
+		// purges BOTH the tombstone@v101 and foo@v100 (discardTs=200 ≥ 101).
+		targets := db.lc.levelTargets()
+		cdef := compactDef{
+			thisLevel: db.lc.levels[0],
+			nextLevel: db.lc.levels[6],
+			top:       db.lc.levels[0].tables,
+			bot:       db.lc.levels[6].tables,
+			t:         targets,
+		}
+		require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
+
+		db.vlogGCPauseHook = nil
+	}
+
+	db.vlog.filesLock.RLock()
+	maxFid := db.vlog.maxFid
+	var lf *logFile
+	for _, f := range db.vlog.filesMap {
+		if f.fid < maxFid {
+			lf = f
+			break
+		}
+	}
+	db.vlog.filesLock.RUnlock()
+	require.NotNil(t, lf, "data vlog file must exist after reopen")
+
+	require.NoError(t, db.vlog.rewrite(lf))
+
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get(key)
+		return err
+	})
+	require.Equal(t, ErrKeyNotFound, err,
+		"deleted key must not reappear after real delete + real compaction during GC")
+
+	require.NoError(t, db.Close())
+}
+
+// TestVlogGCRaceDeletedKeyReappearsMultiCycle runs several GC rewrites
+// back-to-back on the same DB, deleting a different key during each one. It
+// guards the cross-cycle correctness of the discardTs clamp: that gcActive is
+// re-set and released every cycle, that a fresh gcDiscardTs is pinned each time,
+// and that no key deleted in any cycle ever reappears in a later one.
+func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-vlog-gc-multicycle")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	openDB := func(compactOnClose bool) *DB {
+		opt := DefaultOptions(dir).
+			WithNumCompactors(0).
+			WithValueThreshold(1 << 10).
+			WithValueLogMaxEntries(1). // one value per vlog file → one GC-able file per key
+			WithCompression(options.None)
+		opt.managedTxns = true
+		opt = opt.WithCompactL0OnClose(compactOnClose)
+		db, err := Open(opt)
+		require.NoError(t, err)
+		return db
+	}
+
+	const cycles = 3
+	largeVal := bytes.Repeat([]byte("x"), 4<<10) // 4 KB > ValueThreshold → vlog
+
+	// Stage each key in its own vlog file; pointers compacted to L6 on close.
+	db := openDB(true)
+	for i := 0; i < cycles; i++ {
+		txn := db.NewTransactionAt(0, true)
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("foo%d", i)), largeVal)))
+		require.NoError(t, txn.CommitAt(uint64(10*(i+1)), nil))
+	}
+	require.NoError(t, db.Close())
+
+	db = openDB(false)
+	defer func() { require.NoError(t, db.Close()) }()
+	require.False(t, db.gcActive.Load(), "gcActive must be false before any GC")
+
+	deleted := map[string]bool{}
+
+	for c := 0; c < cycles; c++ {
+		// Pick a data vlog file (fid < maxFid) whose live key is not yet deleted,
+		// and learn which key it holds by iterating it (robust to fid ordering).
+		db.vlog.filesLock.RLock()
+		maxFid := db.vlog.maxFid
+		fids := make([]uint32, 0, len(db.vlog.filesMap))
+		for fid := range db.vlog.filesMap {
+			fids = append(fids, fid)
+		}
+		filesMap := db.vlog.filesMap
+		db.vlog.filesLock.RUnlock()
+		sort.Slice(fids, func(i, j int) bool { return fids[i] < fids[j] })
+
+		// A sealed file may hold more than one key, so scan the whole file for the
+		// first key that is still live (not deleted in a prior cycle).
+		var lf *logFile
+		var fileKey []byte
+		for _, fid := range fids {
+			if fid >= maxFid {
+				continue
+			}
+			cand := filesMap[fid]
+			var pick []byte
+			_, _ = cand.iterate(true, 0, func(e Entry, vp valuePointer) error {
+				if e.meta&bitDelete == 0 {
+					if uk := y.ParseKey(e.Key); len(uk) > 0 && !deleted[string(uk)] {
+						pick = append([]byte{}, uk...)
+						return errStop
+					}
+				}
+				return nil
+			})
+			if pick != nil {
+				lf, fileKey = cand, pick
+				break
+			}
+		}
+		require.NotNil(t, lf, "cycle %d: a data vlog file with an undeleted key must exist", c)
+
+		delTs := uint64(1000 + c*100)
+		var pinned uint64
+		db.vlogGCPauseHook = func() {
+			require.True(t, db.gcActive.Load(), "cycle %d: gcActive must be true during rewrite", c)
+			pinned = db.gcDiscardTs.Load()
+
+			// Real delete through the write path.
+			dtxn := db.NewTransactionAt(delTs, true)
+			require.NoError(t, dtxn.Delete(fileKey))
+			require.NoError(t, dtxn.CommitAt(delTs, nil))
+			db.SetDiscardTs(delTs + 50)
+
+			// Real purge: flush the tombstone to L0, then compact L0→L6 (Lmax).
+			// The clamp keeps the tombstone (version delTs >= gcDiscardTs); without
+			// the fix it would be dropped here together with the value.
+			db.lock.Lock()
+			oldMt := db.mt
+			nmt, err := db.newMemTable()
+			require.NoError(t, err)
+			db.mt = nmt
+			db.lock.Unlock()
+			require.NoError(t, db.handleMemTableFlush(oldMt, nil))
+			oldMt.DecrRef()
+
+			targets := db.lc.levelTargets()
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[6],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[6].tables,
+				t:         targets,
+			}
+			require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
+			db.vlogGCPauseHook = nil
+		}
+
+		require.NoError(t, db.vlog.rewrite(lf))
+
+		require.False(t, db.gcActive.Load(), "cycle %d: gcActive must reset to false after rewrite", c)
+		require.NotZero(t, pinned, "cycle %d: gcDiscardTs must be pinned during the rewrite", c)
+		require.GreaterOrEqual(t, delTs, pinned,
+			"cycle %d: delete ts must be >= the pinned discard ts for the clamp to protect it", c)
+
+		deleted[string(fileKey)] = true
+
+		// Every key deleted so far must stay gone.
+		for k := range deleted {
+			gotErr := db.View(func(txn *Txn) error {
+				_, e := txn.Get([]byte(k))
+				return e
+			})
+			require.Equal(t, ErrKeyNotFound, gotErr, "cycle %d: key %q must stay deleted", c, k)
+		}
+	}
+
+	require.Len(t, deleted, cycles, "each cycle must have deleted a distinct key")
 }
