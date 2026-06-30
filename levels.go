@@ -385,10 +385,26 @@ func (s *levelsController) levelTargets() targets {
 	for i := len(s.levels) - 1; i > 0; i-- {
 		ltarget := adjust(dbSize)
 		t.targetSz[i] = ltarget
-		if t.baseLevel == 0 && ltarget <= s.kv.opt.BaseLevelSize {
-			t.baseLevel = i
-		}
 		dbSize /= int64(s.kv.opt.LevelSizeMultiplier)
+	}
+
+	// Bring the base level down to the last empty level.
+	t.baseLevel = 1
+	for i := 1; i < len(s.levels)-1; i++ {
+		if s.levels[i].getTotalSize() > 0 {
+			break
+		}
+		t.baseLevel = i
+	}
+
+	// If the base level is empty and the next level size is less than the
+	// target size and less than base level size, pick the next level as the base level.
+	b := t.baseLevel
+	lvl := s.levels
+	baseLevelIsEmpty := lvl[b].getTotalSize() == 0
+	baseLevelIsNotLastLevel := b < len(lvl)-1
+	if baseLevelIsNotLastLevel && baseLevelIsEmpty && lvl[b+1].getTotalSize() < t.targetSz[b+1] && lvl[b+1].getTotalSize() < s.kv.opt.BaseLevelSize {
+		t.baseLevel++
 	}
 
 	tsz := s.kv.opt.BaseTableSize
@@ -407,22 +423,6 @@ func (s *levelsController) levelTargets() targets {
 		}
 	}
 
-	// Bring the base level down to the last empty level.
-	for i := t.baseLevel + 1; i < len(s.levels)-1; i++ {
-		if s.levels[i].getTotalSize() > 0 {
-			break
-		}
-		t.baseLevel = i
-	}
-
-	// If the base level is empty and the next level size is less than the
-	// target size, pick the next level as the base level.
-	b := t.baseLevel
-	lvl := s.levels
-	if b < len(lvl)-1 && lvl[b].getTotalSize() == 0 && lvl[b+1].getTotalSize() < t.targetSz[b+1] {
-		t.baseLevel++
-	}
-
 	// The base level must never be L0. For a very large LSM tree the size loop
 	// above can fail to assign a base level: it only sets baseLevel where
 	// adjust(dbSize) <= BaseLevelSize, and the smallest level it checks (L1)
@@ -434,6 +434,7 @@ func (s *levelsController) levelTargets() targets {
 	if t.baseLevel == 0 {
 		t.baseLevel = 1
 	}
+  
 	return t
 }
 
@@ -1432,6 +1433,15 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if len(cd.t.fileSz) == 0 {
 		return errors.New("Filesizes cannot be zero. Targets are not set")
 	}
+
+	if cd.thisLevel.level == 0 {
+		for i := cd.nextLevel.level - 1; i > 0; i-- {
+			if s.levels[i].getTotalSize() > 0 {
+				return fmt.Errorf("there is a non-empty level %d above base level %d", i, cd.nextLevel.level)
+			}
+		}
+	}
+
 	timeStart := time.Now()
 
 	thisLevel := cd.thisLevel
