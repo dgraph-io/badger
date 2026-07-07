@@ -555,17 +555,16 @@ func (db *DB) close() (err error) {
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs.Load()))
 
 	// Set blockWrites/isClosed and wake any writer parked in ensureRoomForWrite's
-	// flushCond.Wait ATOMICALLY under db.lock. ensureRoomForWrite checks
-	// blockWrites and calls flushCond.Wait while holding db.lock, so we must hold
-	// the same lock here; otherwise the wakeup can be lost in this interleaving:
-	// the writer reads blockWrites==0, then we Store(1)+Broadcast (writer not yet
-	// enqueued in Wait, so the Broadcast is lost), then the writer Waits forever
-	// and closers.writes.SignalAndWait below hangs (stopMemoryFlush, which would
-	// unstall the flush goroutine, is only reached later). Holding db.lock
-	// serializes the two: either the writer sees blockWrites==1 and returns
-	// errNoRoom without waiting, or it is already in Wait (which released db.lock)
-	// and the Broadcast reaches it. Either way the write goroutine can finish so
-	// SignalAndWait completes.
+	// flushCond.Wait ATOMICALLY under db.lock. ensureRoomForWrite checks IsClosed()
+	// and calls flushCond.Wait while holding db.lock, so we must hold the same lock
+	// here; otherwise the wakeup can be lost in this interleaving: the writer reads
+	// isClosed==0, then we Store(1)+Broadcast (writer not yet enqueued in Wait, so
+	// the Broadcast is lost), then the writer Waits forever and
+	// closers.writes.SignalAndWait below hangs (stopMemoryFlush, which would unstall
+	// the flush goroutine, is only reached later). Holding db.lock serializes the
+	// two: either the writer sees isClosed==1 and returns errNoRoom without waiting,
+	// or it is already in Wait (which released db.lock) and the Broadcast reaches it.
+	// Either way the write goroutine can finish so SignalAndWait completes.
 	db.lock.Lock()
 	db.blockWrites.Store(1)
 	db.isClosed.Store(1)
@@ -1070,12 +1069,19 @@ func (db *DB) ensureRoomForWrite() error {
 			// the flush goroutine drains a memtable from imm (which frees a slot in
 			// flushChan). flushCond.Wait atomically releases db.lock (allowing the
 			// flusher to update imm and push) and re-acquires it on wake; we then
-			// re-attempt the non-blocking push in this loop. We must bail out if the
-			// DB is closing so that Close's closers.writes.SignalAndWait() (which
-			// waits for the write goroutine) cannot hang here. errNoRoom is kept as
-			// the close-time sentinel so the caller's loop terminates and surfaces
-			// the failure rather than writing to a memtable that is being torn down.
-			if db.blockWrites.Load() == 1 || db.IsClosed() {
+			// re-attempt the non-blocking push in this loop.
+			//
+			// Bail out with errNoRoom ONLY when the DB is closing, so that Close's
+			// closers.writes.SignalAndWait() (which waits for the write goroutine)
+			// cannot hang here. The gate must be IsClosed() (set solely by close()),
+			// NOT blockWrites: blockWrites is also raised transiently by blockWrite()
+			// during DropPrefix/DropAll, and their prepareToDrop() drain flushes any
+			// already-accepted writes through this path expressly "so that we don't
+			// miss any entries". Bailing on blockWrites there would drop acknowledged
+			// writes under flushChan pressure (compaction is still running during the
+			// drain, so waiting for room is safe and cannot deadlock). This matches
+			// the pre-cond behavior, which looped until the push succeeded.
+			if db.IsClosed() {
 				return errNoRoom
 			}
 			db.flushCond.Wait()
