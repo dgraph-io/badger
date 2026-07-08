@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.9.4] - 2026-07-08
+
+**Fixed**
+
+- fix(db): don't drop acknowledged writes during DropPrefix/DropAll (#2313)
+- fix: fix an issue where the compactor causes previously deleted data to reappear (#2278)
+
+**Docs**
+
+- docs(changelog): backfill 4.9.2, add 4.9.3, fix 4.9.0 compare link (#2311)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.9.3...v4.9.4
+
 ## [4.9.3] - 2026-07-06
 
 **Performance**
