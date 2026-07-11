@@ -247,6 +247,51 @@ func TestIterateVersionWindow(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
+// TestUntilTsReverseReturnsInWindowVersion pins the reverse-iteration upper-bound
+// bug: a non-AllVersions scan must return the newest version <= UntilTs for a key,
+// identically in forward and reverse. Versions 3,4,7 with UntilTs=4 must yield v4;
+// before the fix the reverse walk-up climbed past UntilTs and returned v7. The
+// existing window test uses AllVersions=true, which returns before the reverse
+// walk-up, so it cannot catch this.
+func TestUntilTsReverseReturnsInWindowVersion(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(getTestOptions(dir))
+	require.NoError(t, err)
+	defer db.Close()
+
+	key := []byte("k")
+	for _, v := range []uint64{3, 4, 7} {
+		txn := db.NewTransactionAt(v-1, true)
+		require.NoError(t, txn.Set(key, []byte(fmt.Sprintf("v%d", v))))
+		require.NoError(t, txn.CommitAt(v, nil))
+	}
+	require.NoError(t, db.Flatten(2))
+
+	scan := func(reverse bool) uint64 {
+		iopt := DefaultIteratorOptions
+		iopt.Reverse = reverse
+		iopt.UntilTs = 4 // window (0, 4]; newest in-window version is 4
+		txn := db.NewTransactionAt(10, false)
+		defer txn.Discard()
+		it := txn.NewIterator(iopt)
+		defer it.Close()
+		var got uint64
+		n := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			got = it.Item().Version()
+			n++
+		}
+		require.Equalf(t, 1, n, "reverse=%v: expected exactly one key", reverse)
+		return got
+	}
+
+	require.Equal(t, uint64(4), scan(false), "forward: newest version <= UntilTs")
+	require.Equal(t, uint64(4), scan(true), "reverse: newest version <= UntilTs (must match forward)")
+}
+
 // TestUntilTsLowerBoundKeepsSmallestVersion is an end-to-end regression test for
 // the version-window lower-bound bug. badger rejects CommitTs==0, so the smallest
 // storable version is 1; we write a key at version 1, flush it to an SSTable, and

@@ -741,7 +741,15 @@ FILL:
 	// Reverse direction.
 	nextTs := y.ParseTs(mi.Key())
 	mik := y.ParseKey(mi.Key())
-	if nextTs <= it.readTs && bytes.Equal(mik, item.key) {
+	// A newer version is only a valid candidate if it is still inside the requested
+	// version window: <= readTs and, when UntilTs is set, <= UntilTs. Without the
+	// UntilTs check the walk-up climbs past the upper bound and returns a version
+	// > UntilTs (the forward path drops those at the per-entry filter above), so a
+	// reverse non-AllVersions scan would return a different version than the forward
+	// scan. SinceTs needs no re-check: candidates climb in increasing ts, so any
+	// version newer than the in-window entry we started from is also > SinceTs.
+	if nextTs <= it.readTs && (it.opt.UntilTs == 0 || nextTs <= it.opt.UntilTs) &&
+		bytes.Equal(mik, item.key) {
 		// This is a valid potential candidate.
 		goto FILL
 	}
