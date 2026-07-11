@@ -559,6 +559,27 @@ func (s *ConcatIterator) Rewind() {
 		s.setIdx(len(s.iters) - 1)
 	}
 	s.cur.Rewind()
+	s.skipInvalidTables()
+}
+
+// skipInvalidTables advances to the next table (in iteration direction) whose
+// iterator is valid, after Rewind/Seek positioned us on one that is not. Version-range
+// block skipping (SetVersionBounds) can leave a table iterator invalid when all its
+// blocks fall outside the window; without this, the ConcatIterator — and hence its
+// MergeIterator level — would look exhausted and strand later tables' in-window keys.
+// Mirrors the empty-table loop in Next(). When version bounds are disabled this is a
+// no-op, since a non-empty table is always valid after Rewind.
+func (s *ConcatIterator) skipInvalidTables() {
+	for s.cur != nil && !s.cur.Valid() {
+		if s.options&REVERSED == 0 {
+			s.setIdx(s.idx + 1)
+		} else {
+			s.setIdx(s.idx - 1)
+		}
+		if s.cur != nil {
+			s.cur.Rewind()
+		}
+	}
 }
 
 // Valid implements y.Interface

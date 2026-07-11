@@ -344,3 +344,38 @@ func TestOldFormatTableNeverSkipped(t *testing.T) {
 	}
 	require.Equal(t, 50, count)
 }
+
+// TestConcatIteratorSkipsFullyPrunedFirstTable is a regression test for the
+// ConcatIterator stranding later tables when the first table's blocks are all
+// outside the version window. Table 1 (keys a1,a2) holds only old versions and is
+// fully block-pruned by the window [5,10]; table 2 (key m1) holds an in-window
+// version. A version-bounded ConcatIterator's Rewind must still surface table 2's key
+// instead of treating the whole level as exhausted, which dropped in-window data
+// before the fix. (Seek can't hit this: seekFrom does not version-skip blocks, and the
+// binary search guarantees the chosen table holds a key >= the seek key.)
+func TestConcatIteratorSkipsFullyPrunedFirstTable(t *testing.T) {
+	lower, upper := uint64(5), uint64(10)
+
+	t1 := buildVersionTable(t, []vkv{
+		{key: "a1", version: 1, value: "x"},
+		{key: "a2", version: 2, value: "x"},
+	}, 512)
+	defer func() { require.NoError(t, t1.DecrRef()) }()
+	t2 := buildVersionTable(t, []vkv{
+		{key: "m1", version: 7, value: "y"},
+	}, 512)
+	defer func() { require.NoError(t, t2.DecrRef()) }()
+
+	require.Less(t, t1.MaxVersion(), lower, "table1 must lie entirely below the window")
+
+	ci := NewConcatIterator([]*Table{t1, t2}, 0)
+	ci.SetVersionBounds(lower, upper)
+	defer func() { require.NoError(t, ci.Close()) }()
+
+	var got []string
+	for ci.Rewind(); ci.Valid(); ci.Next() {
+		got = append(got, string(y.ParseKey(ci.Key())))
+	}
+	require.Equal(t, []string{"m1"}, got,
+		"Rewind must surface the in-window key in table 2 despite table 1 being fully pruned")
+}
