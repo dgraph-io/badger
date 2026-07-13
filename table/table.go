@@ -553,7 +553,7 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
 		return nil, y.Wrapf(err,
 			"failed to read from file: %s at offset: %d, len: %d",
-			t.Fd.Name(), blk.offset, ko.Len())
+			t.Filename(), blk.offset, ko.Len())
 	}
 
 	if t.shouldDecrypt() {
@@ -568,7 +568,7 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 	if err = t.decompress(blk); err != nil {
 		return nil, y.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
-			t.Fd.Name(), blk.offset, ko.Len())
+			t.Filename(), blk.offset, ko.Len())
 	}
 
 	// Read meta data related to block.
@@ -659,7 +659,12 @@ func (t *Table) Smallest() []byte { return t.smallest }
 func (t *Table) Biggest() []byte { return t.biggest }
 
 // Filename is NOT the file name.  Just kidding, it is.
-func (t *Table) Filename() string { return t.Fd.Name() }
+func (t *Table) Filename() string {
+	if t.Fd == nil {
+		return IDToFilename(t.id)
+	}
+	return t.Fd.Name()
+}
 
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
