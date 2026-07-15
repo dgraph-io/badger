@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
+	"os"
 	"runtime"
 
 	"github.com/dustin/go-humanize"
@@ -19,6 +20,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "completion" {
+		cmd.Execute()
+		return
+	}
+
 	go func() {
 		for i := 8080; i < 9080; i++ {
 			fmt.Printf("Listening for /debug HTTP requests at port: %d\n", i)
