@@ -1684,7 +1684,7 @@ func (s *levelsController) getBatch(keys [][]byte,
 		if h.level < startLevel {
 			continue
 		}
-		vs, err := h.getBatch(keys, keysRead, version) // Calls h.RLock() and h.RUnlock().
+		vs, err := h.getBatch(keys, keysRead) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return []y.ValueStruct{}, y.Wrapf(err, "get keys: %q", keys)
 		}

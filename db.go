@@ -834,7 +834,7 @@ func (db *DB) getBatch(keys [][]byte, keysRead []bool, version uint64) ([]y.Valu
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	if db.opt.useGetBatch {
 		done := make([]bool, 1)
-		vals, err := db.getBatch([][]byte{key}, done)
+		vals, err := db.getBatch([][]byte{key}, done, y.ParseTs(key))
 		if len(vals) != 0 {
 			return vals[0], err
 		}
