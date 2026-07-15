@@ -128,6 +128,7 @@ type DB struct {
 	orc              *oracle
 	bannedNamespaces *lockedKeys
 	threshold        *vlogThreshold
+	snapshots        snapshotList
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -263,6 +264,7 @@ func Open(opt Options) (*DB, error) {
 		threshold:        initVlogThreshold(&opt),
 	}
 
+	db.snapshots.init()
 	db.flushCond = sync.NewCond(&db.lock)
 	db.syncChan = opt.syncChan
 

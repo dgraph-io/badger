@@ -92,6 +92,7 @@ type Stream struct {
 	SinceTs      uint64
 	readTs       uint64
 	db           *DB
+	snap         *Snapshot
 	rangeCh      chan keyRange
 	kvChan       chan *z.Buffer
 	nextStreamId atomic.Uint32
@@ -175,7 +176,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	defer st.numProducers.Add(-1)
 
 	var txn *Txn
-	if st.readTs > 0 {
+	if st.snap != nil {
+		txn = st.snap.NewTransaction()
+	} else if st.readTs > 0 {
 		txn = st.db.NewTransactionAt(st.readTs, false)
 	} else {
 		txn = st.db.NewTransaction(false)
@@ -415,6 +418,13 @@ outer:
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if st.readTs == 0 && !st.db.opt.managedTxns {
+		st.snap = st.db.NewSnapshot()
+		st.readTs = st.snap.ReadTs()
+		defer st.snap.Close()
+	}
+
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
