@@ -64,6 +64,7 @@ type Options struct {
 	// read from the block index stored at the end of the table.
 	BlockSize          int
 	BloomFalsePositive float64
+	BloomPrefixLength  int
 	BlockCacheSize     int64
 	IndexCacheSize     int64
 
@@ -187,6 +188,7 @@ func buildTableOptions(db *DB) table.Options {
 		TableSize:            uint64(opt.BaseTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
+		BloomPrefixLength:    opt.BloomPrefixLength,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
@@ -543,6 +545,29 @@ func (opt Options) WithMemTableSize(val int64) Options {
 // Setting this to 0 disables the bloom filter completely.
 func (opt Options) WithBloomFalsePositive(val float64) Options {
 	opt.BloomFalsePositive = val
+	return opt
+}
+
+// WithBloomPrefixLength returns a new Options value with BloomPrefixLength set
+// to the given value.
+//
+// When BloomPrefixLength is greater than 0, each SSTable additionally stores a
+// bloom filter built over the first BloomPrefixLength bytes of every user key.
+// Prefix-bounded iterators (those that set IteratorOptions.Prefix) can then
+// consult this filter to skip whole SSTables that provably contain no key with
+// the scan prefix, instead of relying on key-range pruning alone.
+//
+// The prefix bloom is only effective for scan prefixes at least
+// BloomPrefixLength bytes long; shorter prefixes never prune. Choose a value
+// matching the common length of the prefixes you scan by.
+//
+// This is fully backward compatible: tables written with BloomPrefixLength == 0
+// (the default) behave exactly as before, and tables written with a prefix
+// bloom remain readable by code that ignores it.
+//
+// The default value of BloomPrefixLength is 0 (disabled).
+func (opt Options) WithBloomPrefixLength(val int) Options {
+	opt.BloomPrefixLength = val
 	return opt
 }
 
