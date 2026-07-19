@@ -606,7 +606,8 @@ func (db *DB) close() (err error) {
 					select {
 					case db.flushChan <- db.mt:
 						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-						db.mt = nil                    // Will segfault if we try writing!
+						db.mt.releaseWAL()
+						db.mt = nil // Will segfault if we try writing!
 						db.opt.Debugf("pushed to flush chan\n")
 						return true
 					default:
@@ -1058,6 +1059,7 @@ func (db *DB) ensureRoomForWrite() error {
 				db.mt.sl.MemSize(), len(db.flushChan))
 			// We manage to push this task. Let's modify imm.
 			db.imm = append(db.imm, db.mt)
+			db.mt.releaseWAL()
 			db.mt, err = db.newMemTable()
 			if err != nil {
 				return y.Wrapf(err, "cannot create new mem table")
@@ -1882,6 +1884,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	defer db.lock.Unlock()
 
 	db.imm = append(db.imm, db.mt)
+	db.mt.releaseWAL()
 	for _, memtable := range db.imm {
 		if memtable.sl.Empty() {
 			memtable.DecrRef()
