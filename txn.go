@@ -429,6 +429,106 @@ func (txn *Txn) Delete(key []byte) error {
 	return txn.modify(e)
 }
 
+func (txn *Txn) GetBatch(keys [][]byte) (items []*Item, rerr error) {
+	if txn.discarded {
+		return nil, ErrDiscardedTxn
+	}
+
+	for _, key := range keys {
+		if len(key) == 0 {
+			return nil, ErrEmptyKey
+		}
+		if err := txn.db.isBanned(key); err != nil {
+			return nil, err
+		}
+	}
+
+	items = make([]*Item, len(keys))
+	// fromPending marks slots answered from this txn's pendingWrites: their items must
+	// not be rebuilt (or nil'ed) from the LSM results below. done additionally feeds
+	// db.getBatch as its keysRead scratch space, which SETS entries when a search finds
+	// the exact requested version — so it must never be used to decide whether a slot
+	// was pendingWrites-fulfilled (aliasing the two made versions committed exactly at
+	// readTs read back as absent).
+	fromPending := make([]bool, len(keys))
+	done := make([]bool, len(keys))
+
+	if txn.update {
+		doneAll := 0
+		for i, key := range keys {
+			if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+				if isDeletedOrExpired(e.meta, e.ExpiresAt) {
+					// The transaction deleted (or expired) this key: it reads as absent,
+					// and the LSM must not be consulted (it would resurrect the older
+					// committed version). Matches Get's ErrKeyNotFound for this case.
+					items[i] = nil
+					fromPending[i] = true
+					done[i] = true
+					doneAll += 1
+					continue
+				}
+				// Fulfill from cache, mirroring Get's pendingWrites branch.
+				items[i] = &Item{
+					meta:      e.meta,
+					val:       e.Value,
+					userMeta:  e.UserMeta,
+					key:       key,
+					status:    prefetched,
+					version:   txn.readTs,
+					expiresAt: e.ExpiresAt,
+					// We probably don't need to set db on item here.
+				}
+				fromPending[i] = true
+				done[i] = true
+				doneAll += 1
+				continue
+			}
+			// Only track reads if this is update txn. No need to track read if txn serviced it
+			// internally.
+			txn.addReadKey(key)
+		}
+		if doneAll == len(keys) {
+			return items, nil
+		}
+	}
+
+	seeks := make([][]byte, len(keys))
+	for i, key := range keys {
+		seeks[i] = y.KeyWithTs(key, txn.readTs)
+	}
+	vss, err := txn.db.getBatch(seeks, done, txn.readTs)
+	if err != nil {
+		return nil, y.Wrapf(err, "DB::Get keys: %q", keys)
+	}
+
+	for i, vs := range vss {
+		// Keys already answered from pendingWrites (including pending deletes) must not
+		// be clobbered by their (unused) LSM slots. done[i] is NOT usable here: getBatch
+		// sets it for exact-version LSM hits too.
+		if fromPending[i] {
+			continue
+		}
+		// Absent, or deleted/expired at this read timestamp: a nil item, the batched
+		// analogue of Get's ErrKeyNotFound.
+		if (vs.Value == nil && vs.Meta == 0) || isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+			items[i] = nil
+			continue
+		}
+
+		items[i] = new(Item)
+		items[i].key = keys[i]
+		items[i].version = vs.Version
+		items[i].meta = vs.Meta
+		items[i].userMeta = vs.UserMeta
+		items[i].vptr = y.SafeCopy(items[i].vptr, vs.Value)
+		items[i].txn = txn
+		items[i].expiresAt = vs.ExpiresAt
+	}
+
+	return items, nil
+
+}
+
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
