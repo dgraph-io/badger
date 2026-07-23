@@ -43,6 +43,7 @@ effects of those using Badger in applications built with older versions of Go.
   - [Badger Documentation](#badger-documentation)
   - [Resources](#resources)
     - [Blog Posts](#blog-posts)
+  - [Multi-Tenancy](#multi-tenancy)
   - [Design](#design)
     - [Comparisons](#comparisons)
     - [Benchmarks](#benchmarks)
@@ -87,6 +88,38 @@ Badger Documentation is available at [https://badger.dgraph.io](https://badger.d
 2. [Make Badger crash resilient with ALICE](https://hypermode.com/blog/alice/)
 3. [Badger vs LMDB vs BoltDB: Benchmarking key-value databases in Go](https://hypermode.com/blog/badger-lmdb-boltdb/)
 4. [Concurrent ACID Transactions in Badger](https://hypermode.com/blog/badger-txn/)
+
+## Multi-Tenancy
+
+Badger can host multiple logical tenants inside a single `DB` instance, keeping each
+tenant's keys strongly isolated. Each tenant owns a unique namespace that Badger prefixes
+onto its keys, so your application works with plain logical keys and never sees another
+tenant's data. Enable it with `WithMultiTenancy(true)` (it is off by default):
+
+```go
+db, err := badger.Open(badger.DefaultOptions(dir).WithMultiTenancy(true))
+if err != nil { ... }
+defer db.Close()
+
+// Register a tenant, then access its data through a scope.
+tenant, err := db.Tenants().Create("acme")
+if err != nil { ... }
+
+scope, err := db.TenantScope(tenant.ID)
+if err != nil { ... }
+
+if err := scope.Set([]byte("user:1"), []byte("alice")); err != nil { ... }
+val, err := scope.Get([]byte("user:1"))
+```
+
+The tenant registry (`db.Tenants()`) manages the lifecycle: `Create`, `Get`, `GetByName`,
+`List`, `Ban`/`Unban`, `Delete` (deregister, keep data), and `Purge` (deregister and
+reclaim data). A `TenantScope` provides namespaced access — one-shot `Set`/`Get`/`Delete`,
+scoped `Update`/`View` transactions, iteration, and `NewWriteBatch` for bulk ingest. Writes
+to unregistered namespaces are rejected with `ErrUnknownTenant`, and tenant metadata
+persists across restarts.
+
+See [`docs/multi-tenancy.md`](docs/multi-tenancy.md) for the full guide.
 
 ## Design
 

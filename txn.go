@@ -106,6 +106,16 @@ func (o *oracle) incrementNextTs() {
 	o.nextTxnTs++
 }
 
+// incrementNextTsAndGet atomically increments the next transaction timestamp and
+// returns the new value. Used by internal subsystems (e.g. the tenant registry) that
+// must consume a fresh, collision-free timestamp when running under managed mode.
+func (o *oracle) incrementNextTsAndGet() uint64 {
+	o.Lock()
+	defer o.Unlock()
+	o.nextTxnTs++
+	return o.nextTxnTs
+}
+
 // Any deleted or invalid versions at or below ts would be discarded during
 // compaction to reclaim disk space in LSM tree and thence value log.
 func (o *oracle) setDiscardTs(ts uint64) {
@@ -255,6 +265,8 @@ type Txn struct {
 	discarded    bool
 	doneRead     bool
 	update       bool // update is used to conditionally keep track of reads.
+	// internalAccess allows writing keys carrying the reserved !badger! prefix.
+	internalAccess bool
 }
 
 type pendingWritesIterator struct {
@@ -358,7 +370,7 @@ func (txn *Txn) modify(e *Entry) error {
 		return ErrDiscardedTxn
 	case len(e.Key) == 0:
 		return ErrEmptyKey
-	case bytes.HasPrefix(e.Key, badgerPrefix):
+	case bytes.HasPrefix(e.Key, badgerPrefix) && !txn.internalAccess:
 		return ErrInvalidKey
 	case len(e.Key) > maxKeySize:
 		// Key length can't be more than uint16, as determined by table::header.  To
@@ -372,6 +384,9 @@ func (txn *Txn) modify(e *Entry) error {
 	}
 
 	if err := txn.db.isBanned(e.Key); err != nil {
+		return err
+	}
+	if err := txn.db.isAllowedTenant(e.Key); err != nil {
 		return err
 	}
 
@@ -779,6 +794,15 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	if !isManaged {
 		txn.readTs = db.orc.readTs()
 	}
+	return txn
+}
+
+// newInternalTransaction returns a transaction that may write keys carrying the reserved
+// !badger! prefix. Used by internal subsystems (e.g. the tenant registry) that store
+// metadata under the reserved prefix.
+func (db *DB) newInternalTransaction(update bool) *Txn {
+	txn := db.newTransaction(update, false)
+	txn.internalAccess = true
 	return txn
 }
 
