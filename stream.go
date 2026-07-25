@@ -89,7 +89,10 @@ type Stream struct {
 	Send func(buf *z.Buffer) error
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
-	SinceTs      uint64
+	SinceTs uint64
+	// UntilTs, when non-zero, only includes versions with version <= UntilTs.
+	// Combined with SinceTs the window is SinceTs < version <= UntilTs.
+	UntilTs      uint64
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
@@ -196,6 +199,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = true
 		iterOpts.SinceTs = st.SinceTs
+		iterOpts.UntilTs = st.UntilTs
 		itr := txn.NewIterator(iterOpts)
 		itr.ThreadId = threadId
 		defer itr.Close()
@@ -413,6 +417,9 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	if st.UntilTs > 0 && st.UntilTs <= st.SinceTs {
+		return ErrInvalidTsWindow
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.

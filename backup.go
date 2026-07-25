@@ -43,6 +43,22 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	return stream.Backup(w, since)
 }
 
+// BackupWindow is like Backup, but only dumps entries with versions in the half-open
+// window (since, until]. That is: version > since and version <= until.
+// until must be greater than since; otherwise ErrInvalidTsWindow is returned.
+// Passing until == 0 is invalid when used through this helper — use Backup for an
+// unbounded upper end.
+func (db *DB) BackupWindow(w io.Writer, since, until uint64) (uint64, error) {
+	if until == 0 || until <= since {
+		return 0, ErrInvalidTsWindow
+	}
+	stream := db.NewStream()
+	stream.LogPrefix = "DB.BackupWindow"
+	stream.SinceTs = since
+	stream.UntilTs = until
+	return stream.Backup(w, since)
+}
+
 // Backup dumps a protobuf-encoded list of all entries in the database into the
 // given writer, that are newer than or equal to the specified version. It returns a
 // timestamp(version) indicating the version of last entry that was dumped, which
@@ -63,6 +79,10 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			if item.Version() < since {
 				return nil, fmt.Errorf("Backup: Item Version: %d less than sinceTs: %d",
 					item.Version(), since)
+			}
+			if stream.UntilTs > 0 && item.Version() > stream.UntilTs {
+				// Newer than the upper bound; keep walking older versions of this key.
+				continue
 			}
 
 			var valCopy []byte
