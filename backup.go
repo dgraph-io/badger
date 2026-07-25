@@ -43,11 +43,17 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	return stream.Backup(w, since)
 }
 
-// BackupWindow is like Backup, but only dumps entries with versions in the half-open
-// window (since, until]. That is: version > since and version <= until.
-// until must be greater than since; otherwise ErrInvalidTsWindow is returned.
-// Passing until == 0 is invalid when used through this helper — use Backup for an
-// unbounded upper end.
+// BackupWindow is like DB.Backup, except that it also bounds the newest version it
+// will dump. Only entries whose version falls in the window (since, until] are written,
+// which makes it possible to back up a range of history rather than everything that has
+// happened since a given version. Every matching version of a key is dumped, not only
+// the newest one in the window.
+//
+// Like DB.Backup it returns the version of the last entry dumped, which after
+// incrementing by 1 can be passed as since to a later invocation.
+//
+// until has to be greater than since, otherwise the window holds nothing and
+// ErrInvalidTsWindow is returned. Use DB.Backup when the upper end should be open.
 func (db *DB) BackupWindow(w io.Writer, since, until uint64) (uint64, error) {
 	if until == 0 || until <= since {
 		return 0, ErrInvalidTsWindow
@@ -66,7 +72,9 @@ func (db *DB) BackupWindow(w io.Writer, since, until uint64) (uint64, error) {
 // incremental dump of entries that have been added/modified since the last
 // invocation of Stream.Backup().
 //
-// This can be used to backup the data in a database at a given point in time.
+// This can be used to backup the data in a database at a given point in time. Setting
+// Stream.UntilTs also bounds the newest version dumped, so the backup covers a window
+// of history rather than everything up to the present.
 func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
 		list := &pb.KVList{}

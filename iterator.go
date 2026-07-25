@@ -318,9 +318,18 @@ type IteratorOptions struct {
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
 	SinceTs     uint64 // Only read data that has version > SinceTs.
-	// UntilTs, when non-zero, only returns versions with version <= UntilTs.
-	// Combined with SinceTs, the visible window is SinceTs < version <= UntilTs.
-	// UntilTs must be greater than SinceTs when both are non-zero.
+
+	// UntilTs is the upper bound matching SinceTs. When non-zero, versions above it are
+	// invisible, so the window on offer is SinceTs < version <= UntilTs. Zero leaves the
+	// upper end open.
+	//
+	// Versions above the window are treated as if they had never been written. A key
+	// deleted above UntilTs therefore still reads as live if it holds a value inside the
+	// window, and the value seen for a key is the newest one the window contains,
+	// whichever direction the iterator runs in.
+	//
+	// UntilTs has to be greater than SinceTs when both are set. Anything else describes
+	// an empty window, which NewIterator rejects with a panic.
 	UntilTs uint64
 }
 

@@ -90,8 +90,10 @@ type Stream struct {
 
 	// Read data above the sinceTs. All keys with version =< sinceTs will be ignored.
 	SinceTs uint64
-	// UntilTs, when non-zero, only includes versions with version <= UntilTs.
-	// Combined with SinceTs the window is SinceTs < version <= UntilTs.
+	// UntilTs is the upper bound matching SinceTs. When non-zero, only versions with
+	// version <= UntilTs are streamed, so the window is SinceTs < version <= UntilTs.
+	// Zero leaves the upper end open. UntilTs has to be greater than SinceTs when both
+	// are set, otherwise Orchestrate reports ErrInvalidTsWindow rather than running.
 	UntilTs      uint64
 	readTs       uint64
 	db           *DB
