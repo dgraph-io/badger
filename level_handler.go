@@ -334,7 +334,14 @@ func (s *levelHandler) getBatch(keys [][]byte, keysRead []bool) ([]y.ValueStruct
 		hash := y.Hash(keyNoTs)
 		var maxVs y.ValueStruct
 		for _, th := range tables {
-			if th.DoesNotHave(hash) {
+			// At level 0 tables overlap, and the iterator set built here is REUSED for
+			// the other keys of the batch. Bloom-skipping a table that merely lacks THIS
+			// key would hide it from later keys whose newest version lives there — a
+			// reused set must cover every L0 table. Levels >= 1 are non-overlapping (a
+			// key's versions live in exactly one table per level), so skipping is safe:
+			// a later key not present in the reused table falls back via the
+			// not-found path below.
+			if s.level != 0 && th.DoesNotHave(hash) {
 				y.NumLSMBloomHitsAdd(s.db.opt.MetricsEnabled, s.strLevel, 1)
 				continue
 			}
@@ -373,15 +380,22 @@ func (s *levelHandler) getBatch(keys [][]byte, keysRead []bool) ([]y.ValueStruct
 		if keysRead[i] {
 			continue
 		}
-		// If there are no iterators present, create new iterators
+		// If there are no iterators present, create new iterators. Release the table
+		// references of any previous create first — a create can return zero iterators
+		// (bloom missed in every table) while still holding table refs through decr.
 		if len(itrs) == 0 {
+			if err := decr(); err != nil {
+				return nil, err
+			}
 			results[i], decr, itrs = createIteratorsForEachTable(keys[i])
 		} else {
 			results[i] = findInIterators(keys[i], itrs)
-			// If we can't find in the current tables, then data is there in other tables. We would
-			// then need to close iterators, call decr() and then recreate new iterators.
-			if len(results[i].Value) == 0 {
+			// Version == 0 means no version of this key was seen in the reused tables
+			// (an empty Value alone is not "not found": tombstones and empty writes are
+			// real answers). The key may live in other tables: close, release, recreate.
+			if results[i].Version == 0 {
 				close_iters()
+				itrs = itrs[:0]
 				if err := decr(); err != nil {
 					return nil, err
 				}
