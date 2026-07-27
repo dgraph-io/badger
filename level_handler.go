@@ -370,7 +370,7 @@ func (s *levelHandler) getBatch(keys [][]byte, keysRead []bool) ([]y.ValueStruct
 
 	close_iters := func() {
 		for _, itr := range itrs {
-			itr.Close()
+			_ = itr.Close()
 		}
 	}
 
@@ -421,7 +421,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		}
 
 		it := th.NewIterator(0)
-		defer it.Close()
+		defer func() { _ = it.Close() }()
 
 		s.checkInsideIterator(key, it, &maxVs)
 	}
