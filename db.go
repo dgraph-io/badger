@@ -1261,12 +1261,23 @@ func (db *DB) updateSize(lc *z.Closer) {
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
-// during compactions.  If no such statistics are available, then log files are
-// picked in random order. The process stops as soon as the first log file is
-// encountered which does not result in garbage collection.
+// during LSM tree compactions. If no such statistics are available, no file is
+// picked and ErrNoRewrite is returned. A file is rewritten only if the discard
+// statistics recorded for it account for at least discardRatio of its size.
 //
-// When a log file is picked, it is first sampled. If the sample shows that we
-// can discard at least discardRatio space of that file, it would be rewritten.
+// Because those statistics come only from compactions, two preconditions are
+// easy to miss, and both surface as "GC never reclaims anything":
+//
+//   - Only values stored in the value log can be reclaimed here. Values smaller
+//     than Options.ValueThreshold (1 MB by default) are kept inline in the LSM
+//     tree, so a database of small values has nothing for this method to
+//     collect, however much of it has expired.
+//
+//   - Expiring a key via TTL, or deleting it, does not by itself make space
+//     reclaimable. That happens only once a compaction rewrites the table
+//     holding the key, and compactions are driven by incoming writes. A
+//     database that has stopped taking writes will not shrink, however often
+//     this method is called.
 //
 // If a call to RunValueLogGC results in no rewrites, then an ErrNoRewrite is
 // thrown indicating that the call resulted in no file rewrites.
