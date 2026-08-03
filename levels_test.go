@@ -1495,12 +1495,78 @@ func TestLevelTargets(t *testing.T) {
 			createAndOpen(db, data, opt.MaxLevels-2)
 			createAndOpen(db, data, opt.MaxLevels-1)
 
-			// Level 5 size exactly equals BaseLevelSize; should NOT bump past it.
+			// Level 5 size exactly equals BaseLevelSize. The size-ratio target
+			// for L5 is BaseLevelSize (L6 / LevelSizeMultiplier, clamped up), so
+			// L5 is the desired base level, and since every level above L5 is
+			// empty it is safe to compact L0 directly into it. Choosing the
+			// empty L4 above it instead would make L4 non-empty and ratchet the
+			// base level toward L1 (#2327).
 			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize
 			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 2
 
 			target := db.lc.levelTargets()
-			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
+		})
+	})
+}
+
+// TestLevelTargetsStrayLevels covers base-level selection when data is
+// stranded in a level above the size-ratio base level (issue #2327). The base
+// level must be clamped up to the stray level (never compact L0 below existing
+// data, #2278), but it must never be placed on an empty level above a
+// non-empty one — that ratchets the base level to L1 on every compaction and
+// forces data to cascade through every intermediate level.
+func TestLevelTargetsStrayLevels(t *testing.T) {
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+
+	t.Run("stray level above the size-ratio base clamps base to the stray", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			createAndOpen(db, data, 2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			// A small stray at L2, everything else at a large L6. The size
+			// ratio puts the base level deep, but L0 must compact into the
+			// stray level itself, not below it and not into empty L1.
+			db.lc.levels[2].totalSize = opt.BaseLevelSize / 4
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 2, target.baseLevel)
+		})
+	})
+
+	t.Run("collapsed tree keeps base at the shallowest non-empty level", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			// A collapsed tree, as left behind by the base level falling to L1:
+			// small remnants at L1-L3, bulk of the data at L6.
+			for _, lvl := range []int{1, 2, 3, opt.MaxLevels - 1} {
+				createAndOpen(db, data, lvl)
+				db.lc.levels[lvl].totalSize = opt.BaseLevelSize / 4
+			}
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			// L1 holds data, so it is the only safe target for L0 compactions.
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("base level recovers once shallow levels are empty", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			createAndOpen(db, data, opt.MaxLevels-1)
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			// Same tree as above once the strays have been compacted away: the
+			// base level must return to its natural depth, not stay at L1.
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
 		})
 	})
 }
