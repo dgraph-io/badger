@@ -1,0 +1,122 @@
+name: ci-badger-lsm-bench
+
+# Bulk-load LSM performance benchmark (issue #2327 regression gate).
+#
+# Builds the same harness (integration/lsmbench) against the PR's base and the
+# PR's head, runs both on this runner, and fails if:
+#   - the head run shows the structural #2327 signature (base level collapsed
+#     to L1/L2 on a >2GB tree, tables stranded in L1/L2 at any checkpoint,
+#     or lifetime L0 stall > 30s), or
+#   - the head wall clock is >25% slower than the base run on the same
+#     hardware (self-baselining: no hardcoded absolute time, so the gate is
+#     meaningful regardless of runner speed).
+#
+# Runs independently of the unit tests and badger-bank; ~2x a single bulk
+# load of ~302M entries (~10GB on disk per run, cleaned between runs).
+
+on:
+  workflow_dispatch: # allows manual trigger from GitHub
+  pull_request:
+    branches:
+      - main
+      - release/v*
+
+permissions:
+  contents: read
+
+env:
+  LSMBENCH_ROWS: 500000 # ~302M entries, ~10GB LSM
+
+jobs:
+  # Detect whether any non-doc files changed, mirroring the other CI
+  # workflows: the job always reports a status, and short-circuits to success
+  # for docs-only PRs.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '!**/*.md'
+              - '!docs/**'
+              - '!images/**'
+
+  lsm-bench:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v5
+      - if: needs.changes.outputs.code == 'true'
+        name: Checkout baseline (PR base)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: base-checkout
+      - if: needs.changes.outputs.code == 'true'
+        name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - if: needs.changes.outputs.code == 'true'
+        name: Build harnesses (head + baseline)
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+          # Head: harness compiled against this checkout.
+          go build -o /tmp/lsmbench-head ./integration/lsmbench/
+          # Baseline: same harness source compiled against the base checkout,
+          # via a scratch module so the import resolves to the old tree.
+          mkdir /tmp/base-mod && cp integration/lsmbench/main.go /tmp/base-mod/
+          cd /tmp/base-mod
+          go mod init lsmbench-base
+          go mod edit -require=github.com/dgraph-io/badger/v4@v4.0.0 \
+            -replace=github.com/dgraph-io/badger/v4="$GITHUB_WORKSPACE/base-checkout"
+          go mod tidy
+          go build -o /tmp/lsmbench-base .
+      - if: needs.changes.outputs.code == 'true'
+        name: Run baseline benchmark
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+          # No gates on the baseline run: it only provides the wall-clock
+          # reference, and the base commit may itself carry a known regression.
+          /tmp/lsmbench-base -dir /tmp/bench-base -rows "$LSMBENCH_ROWS" | tee /tmp/base.out
+          rm -rf /tmp/bench-base
+      - if: needs.changes.outputs.code == 'true'
+        name: Run head benchmark (structural gates enforced)
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+          /tmp/lsmbench-head -dir /tmp/bench-head -rows "$LSMBENCH_ROWS" \
+            -min-base 3 -max-stall 30s -max-shallow-occupied 0 | tee /tmp/head.out
+          rm -rf /tmp/bench-head
+      - if: needs.changes.outputs.code == 'true'
+        name: Compare wall clock (head vs baseline)
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+          base_ms=$(grep LSMBENCH_RESULT /tmp/base.out | grep -o 'wall_ms=[0-9]*' | cut -d= -f2)
+          head_ms=$(grep LSMBENCH_RESULT /tmp/head.out | grep -o 'wall_ms=[0-9]*' | cut -d= -f2)
+          limit_ms=$(( base_ms * 125 / 100 ))
+          {
+            echo "### LSM bulk-load benchmark (${LSMBENCH_ROWS} rows)"
+            echo ""
+            echo "| run | result |"
+            echo "|---|---|"
+            echo "| baseline | $(grep LSMBENCH_RESULT /tmp/base.out) |"
+            echo "| head | $(grep LSMBENCH_RESULT /tmp/head.out) |"
+            echo ""
+            echo "Wall clock: head ${head_ms}ms vs baseline ${base_ms}ms (limit: ${limit_ms}ms = 125% of baseline)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "baseline=${base_ms}ms head=${head_ms}ms limit=${limit_ms}ms"
+          if [ "$head_ms" -gt "$limit_ms" ]; then
+            echo "::error::head wall clock ${head_ms}ms is more than 25% slower than baseline ${base_ms}ms"
+            exit 1
+          fi
