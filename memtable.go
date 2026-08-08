@@ -73,6 +73,12 @@ func (db *DB) openMemTables(opt Options) error {
 			flags = os.O_RDONLY
 		}
 		mt, err := db.openMemTable(fid, flags)
+		if err == z.NewFile {
+			// This memtable's WAL was empty (0 bytes), so it was
+			// bootstrapped. There's nothing to recover; discard it.
+			mt.DecrRef()
+			continue
+		}
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
