@@ -68,17 +68,23 @@ func (db *DB) openMemTables(opt Options) error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
+		// Skip empty .mem files that can be left behind by a crash
+		// between file creation and the first write. Stat-and-skip
+		// avoids opening them at all, which works for both read-write
+		// and read-only modes (no truncation required).
+		fi, err := os.Stat(db.mtFilePath(fid))
+		if err != nil {
+			return errFile(err, db.mtFilePath(fid), "Unable to stat mem file.")
+		}
+		if fi.Size() == 0 {
+			continue
+		}
+
 		flags := os.O_RDWR
 		if db.opt.ReadOnly {
 			flags = os.O_RDONLY
 		}
 		mt, err := db.openMemTable(fid, flags)
-		if err == z.NewFile {
-			// This memtable's WAL was empty (0 bytes), so it was
-			// bootstrapped. There's nothing to recover; discard it.
-			mt.DecrRef()
-			continue
-		}
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
