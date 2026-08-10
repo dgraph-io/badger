@@ -2740,8 +2740,9 @@ func TestCloseDBWhileReading(t *testing.T) {
 
 // TestOpenWithEmptyMemFile verifies that badger.Open handles empty .mem files
 // gracefully. An empty .mem file can be left behind after a crash that occurs
-// between file creation and the first write. Before the fix for #2207,
-// openMemTables would treat z.NewFile as a fatal error and refuse to open the DB.
+// between file creation and the first write. The fix for #2207 stats each .mem
+// file during discovery and skips 0-byte files, which works for both read-write
+// and read-only modes without mutating the file.
 func TestOpenWithEmptyMemFile(t *testing.T) {
 	dir := t.TempDir()
 	opt := getTestOptions(dir)
@@ -2787,6 +2788,13 @@ func TestOpenWithEmptyMemFile(t *testing.T) {
 	// Step 3: Re-open the DB. This must succeed despite the empty .mem file.
 	db2, err := Open(opt)
 	require.NoError(t, err, "Open should succeed with an empty .mem file")
+
+	// The empty file should still exist — the stat-and-skip approach is
+	// intentionally non-mutating so it works in read-only mode as well.
+	require.FileExists(t, emptyFile)
+	fi, err := os.Stat(emptyFile)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), fi.Size(), "empty .mem file should be left untouched")
 
 	// Step 4: Verify existing data is intact.
 	err = db2.View(func(txn *Txn) error {
