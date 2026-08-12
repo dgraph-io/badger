@@ -604,6 +604,23 @@ func (vlog *valueLog) open(db *DB) error {
 		y.AssertTrue(ok)
 
 		lf.opt = vlog.opt
+
+		// Skip 0-byte .vlog files left behind by a crash between file
+		// creation and the first write. Stat-and-skip avoids opening them at
+		// all, which works in both read-write and read-only modes (no
+		// truncation required). The file stays on disk but is harmless.
+		fi, err := os.Stat(lf.path)
+		if err != nil {
+			return y.Wrapf(err, "Unable to stat file: %q", lf.path)
+		}
+		if fi.Size() == 0 {
+			// Since the logfile, corresponding to this fid, does not
+			// have MmapFile initialized, susceptible to nil deref panic.
+			// Like that in vlog.Close()
+			delete(vlog.filesMap, fid)
+			continue
+		}
+
 		flags := os.O_RDWR
 		if vlog.opt.ReadOnly {
 			flags = os.O_RDONLY
@@ -627,18 +644,19 @@ func (vlog *valueLog) open(db *DB) error {
 	}
 	// Now we can read the latest value log file, and see if it needs truncation. We could
 	// technically do this over all the value log files, but that would mean slowing down the value
-	// log open.
-	last, ok := vlog.filesMap[vlog.maxFid]
-	y.AssertTrue(ok)
-	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize,
-		func(_ Entry, vp valuePointer) error {
-			return nil
-		})
-	if err != nil {
-		return y.Wrapf(err, "while iterating over: %s", last.path)
-	}
-	if err := last.Truncate(int64(lastOff)); err != nil {
-		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+	// log open. If the maxFid file was a 0-byte crash artifact skipped above, it's no longer in
+	// filesMap and there's nothing to recover, so skip straight to creating a fresh file.
+	if last, ok := vlog.filesMap[vlog.maxFid]; ok {
+		lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize,
+			func(_ Entry, vp valuePointer) error {
+				return nil
+			})
+		if err != nil {
+			return y.Wrapf(err, "while iterating over: %s", last.path)
+		}
+		if err := last.Truncate(int64(lastOff)); err != nil {
+			return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+		}
 	}
 
 	// Don't write to the old log file. Always create a new one.
