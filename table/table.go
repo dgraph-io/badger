@@ -331,15 +331,11 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	return t, nil
 }
 
-func (t *Table) initBiggestAndSmallest() error {
+func (t *Table) initBiggestAndSmallest() (err error) {
 	// This defer will help gathering debugging info in case initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
-			// Use defer for printing info because there may be an intermediate panic.
 			var debugBuf bytes.Buffer
-			defer func() {
-				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
-			}()
 
 			// Get the count of null bytes at the end of file. This is to make sure if there was an
 			// issue with mmap sync or file copy.
@@ -383,10 +379,11 @@ func (t *Table) initBiggestAndSmallest() error {
 			t.indexStart = readPos
 			indexData := t.readNoFail(readPos, t.indexLen)
 			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
+
+			err = fmt.Errorf("initIndex crashed: %v\n%s", r, debugBuf.String())
 		}
 	}()
 
-	var err error
 	var ko *fb.BlockOffset
 	if ko, err = t.initIndex(); err != nil {
 		return y.Wrapf(err, "failed to read index.")
@@ -423,8 +420,8 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
-	if checksumLen < 0 {
-		return nil, errors.New("checksum length less than zero. Data corrupted")
+	if checksumLen <= 0 || checksumLen >= t.tableSize {
+		return nil, errors.New("invalid checksum length in footer. Data corrupted")
 	}
 
 	// Read checksum.
@@ -439,6 +436,9 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
 	t.indexLen = int(y.BytesToU32(buf))
+	if t.indexLen <= 0 || t.indexLen >= t.tableSize {
+		return nil, errors.New("invalid index length in footer. Data corrupted")
+	}
 
 	// Read index.
 	readPos -= t.indexLen

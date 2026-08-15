@@ -119,6 +119,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		go func(fname string, tf TableManifest) {
 			var rerr error
 			defer func() {
+				if r := recover(); r != nil {
+					rerr = fmt.Errorf("error opening table %s: %v", fname, r)
+				}
 				throttle.Done(rerr)
 				numOpened.Add(1)
 			}()
