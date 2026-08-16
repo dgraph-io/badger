@@ -201,7 +201,9 @@ func (e *Entry) WithDiscard() *Entry {
 }
 
 // WithTTL adds time to live duration to Entry e. Entry stored with a TTL would automatically expire
-// after the time has elapsed, and will be eligible for garbage collection.
+// after the time has elapsed, and will no longer be retrievable. The space it occupies is not
+// reclaimed at that point: that happens once a later compaction drops the entry, and for a value
+// held in the value log, once DB.RunValueLogGC then reclaims the file.
 func (e *Entry) WithTTL(dur time.Duration) *Entry {
 	e.ExpiresAt = uint64(time.Now().Add(dur).Unix())
 	return e
