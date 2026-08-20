@@ -126,6 +126,10 @@ func TestMultiGetMatchesKeyIterator(t *testing.T) {
 		for i := range keys {
 			want := refVersions(t, txn, keys[i])
 			sameVersions(t, want, got[i].Versions)
+			// KeyResult.Key echoes the requested key in input order so
+			// callers don't have to keep a parallel array.
+			require.Equal(t, string(keys[i]), string(got[i].Key),
+				"KeyResult.Key[%d]", i)
 		}
 	}
 	t.Run("memtable", func(t *testing.T) { run(t, false) })
@@ -201,11 +205,18 @@ func TestMultiGetRejectsBadKeys(t *testing.T) {
 	_, err = txn.MultiGet([][]byte{banned})
 	require.ErrorIs(t, err, ErrBannedKey)
 
-	// Mixed batch with one bad key still fails the whole call, matching
-	// Txn.Get's first-error-wins behavior.
+	// Mixed batch with one bad key fails the whole call. The reported key
+	// is whichever bad key is encountered first on the sorted walk — for
+	// {good, nil} that is nil (empty sorts before any non-empty key).
 	good := []byte("ok")
 	_, err = txn.MultiGet([][]byte{good, nil})
 	require.ErrorIs(t, err, ErrEmptyKey)
+
+	// Banned-first in sorted order reports ErrBannedKey even when a good
+	// key sits before it in input order — the walk visits keys in sorted
+	// order, not input order.
+	_, err = txn.MultiGet([][]byte{good, banned})
+	require.ErrorIs(t, err, ErrBannedKey)
 }
 
 // TestMultiGetMaxVersionsPerKey verifies the MaxVersionsPerKey cap is
@@ -239,7 +250,7 @@ func TestMultiGetMaxVersionsPerKey(t *testing.T) {
 
 	// Cap returns the newest N only.
 	cap3 := [][]byte{key}
-	withCap, err := readTxn.MultiGetWithOptions(cap3, DefaultMultiGetOptions().WithMaxVersionsPerKey(3))
+	withCap, err := readTxn.MultiGetN(cap3, 3)
 	require.NoError(t, err)
 	require.Len(t, withCap[0].Versions, 3)
 	require.Equal(t, uint64(total), withCap[0].Versions[0].Version)
@@ -318,71 +329,27 @@ func TestMultiGetReadSet(t *testing.T) {
 	require.True(t, readSet[z.MemHash(mk(49))], "mk(49) should be in read set")
 }
 
-// loadFrontierDB builds a managed DB shaped like a dgraph predicate: dense
-// keys, a few MVCC versions each, flushed to disk.
-func loadFrontierDB(b *testing.B, nKeys, versions int) (*DB, [][]byte) {
-	b.Helper()
-	dir := b.TempDir()
-	db, err := OpenManaged(DefaultOptions(dir).
-		WithSyncWrites(false).WithLoggingLevel(WARNING).
-		WithNumVersionsToKeep(math.MaxInt32).WithDetectConflicts(false))
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.Cleanup(func() { _ = db.Close() })
-	val := make([]byte, 64)
-	mk := func(uid uint64) []byte {
-		k := make([]byte, 16)
-		for i := 0; i < 8; i++ {
-			k[i] = byte(uid >> (8 * (7 - i)))
-		}
-		return k
-	}
-	ts := uint64(1)
-	for v := 0; v < versions; v++ {
-		txn := db.NewTransactionAt(math.MaxUint64, true)
-		for i := 0; i < nKeys; i++ {
-			if err := txn.SetEntry(&Entry{Key: mk(uint64(i + 1)), Value: val}); err != nil {
-				b.Fatal(err)
-			}
-		}
-		if err := txn.CommitAt(ts, nil); err != nil {
-			b.Fatal(err)
-		}
-		ts++
-	}
-	if err := db.Flatten(2); err != nil {
-		b.Fatal(err)
-	}
-	keys := make([][]byte, nKeys)
-	for i := range keys {
-		keys[i] = mk(uint64(i + 1))
-	}
-	return db, keys
-}
-
-// loadDeepChainDB builds a DB with deep MVCC version chains and
-// value-log-sized values, so benchmarks exercise the case that matters
-// for dgraph: a candidate's sibling reads may sit on a delta chain atop
-// a complete posting, and MultiGet must materialize every visible
-// version (unless the caller caps MaxVersionsPerKey).
-func loadDeepChainDB(b *testing.B, nKeys, versions int, valueSize int) (*DB, [][]byte) {
+// loadBenchDB builds a managed DB shaped like a dgraph predicate: dense
+// 16-byte big-endian keys, nKeys of them, each with `versions` MVCC
+// versions of `valueSize`-byte values, flushed to disk. Extra Options
+// tweaks (e.g. ValueThreshold to push values into the vlog) go through
+// tweak.
+func loadBenchDB(b *testing.B, nKeys, versions, valueSize int, tweak func(*Options)) (*DB, [][]byte) {
 	b.Helper()
 	dir := b.TempDir()
 	opt := DefaultOptions(dir).
 		WithSyncWrites(false).
 		WithLoggingLevel(WARNING).
 		WithNumVersionsToKeep(math.MaxInt32).
-		WithDetectConflicts(false).
-		WithValueThreshold(64) // force most values into the vlog.
-	// Shrink the vlog so the file actually rotates during setup.
-	opt.ValueLogFileSize = 1 << 20
+		WithDetectConflicts(false)
+	if tweak != nil {
+		tweak(&opt)
+	}
 	db, err := OpenManaged(opt)
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { _ = db.Close() })
-	val := make([]byte, valueSize)
 	mk := func(uid uint64) []byte {
 		k := make([]byte, 16)
 		for i := 0; i < 8; i++ {
@@ -390,6 +357,7 @@ func loadDeepChainDB(b *testing.B, nKeys, versions int, valueSize int) (*DB, [][
 		}
 		return k
 	}
+	val := make([]byte, valueSize)
 	ts := uint64(1)
 	for v := 0; v < versions; v++ {
 		txn := db.NewTransactionAt(math.MaxUint64, true)
@@ -417,7 +385,7 @@ func loadDeepChainDB(b *testing.B, nKeys, versions int, valueSize int) (*DB, [][
 // independent NewKeyIterator reads (today's dgraph HNSW path) vs one MultiGet.
 func BenchmarkMultiGetVsKeyIterator(b *testing.B) {
 	const nKeys, versions = 100000, 3
-	db, keys := loadFrontierDB(b, nKeys, versions)
+	db, keys := loadBenchDB(b, nKeys, versions, 64, nil)
 	rng := rand.New(rand.NewSource(7))
 
 	frontier := func(k int) [][]byte {
@@ -477,7 +445,10 @@ func BenchmarkMultiGetDeepChainVsKeyIterator(b *testing.B) {
 		versionsPerKey   = 200
 		valueSize        = 4 << 10 // 4 KiB, well above ValueThreshold so it lands in vlog.
 	)
-	db, keys := loadDeepChainDB(b, nKeys, versionsPerKey, valueSize)
+	db, keys := loadBenchDB(b, nKeys, versionsPerKey, valueSize, func(o *Options) {
+			o.WithValueThreshold(64) // force values into the vlog.
+			o.ValueLogFileSize = 1 << 20
+		})
 	rng := rand.New(rand.NewSource(11))
 	const K = 64
 	frontier := func() [][]byte {
@@ -515,8 +486,7 @@ func BenchmarkMultiGetDeepChainVsKeyIterator(b *testing.B) {
 						b.Fatal(err)
 					}
 				case "MultiGetCap1":
-					if _, err := txn.MultiGetWithOptions(fr,
-						DefaultMultiGetOptions().WithMaxVersionsPerKey(1)); err != nil {
+					if _, err := txn.MultiGetN(fr, 1); err != nil {
 						b.Fatal(err)
 					}
 				}
