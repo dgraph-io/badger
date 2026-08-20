@@ -1656,17 +1656,14 @@ func TestPickLogWalksCandidates(t *testing.T) {
 		t.Fatalf("need at least two vlog files, got %d", len(fids))
 	}
 
-	// Delete entries in the first file to create discard.
-	for i := 0; i < 10; i++ {
-		txnDelete(t, kv, []byte(fmt.Sprintf("key%03d", i)))
-	}
+	// Manually set discard stats for the active file (highest) and an old file.
+	// The old file's discard must exceed the threshold to be eligible.
+	const fileSize = 1 << 20 // 1 MB
+	vlog.discardStats.Update(maxFid, 1<<30)      // active: large discard, but ineligible
+	vlog.discardStats.Update(fids[0], int64(0.3*fileSize)) // old file: 30% > 10% threshold
 
-	// Manually give the active file a larger discard so it becomes the top
-	// candidate, which the old code would abort on.
-	vlog.discardStats.Update(maxFid, 1<<30)
-
-	// Now pickLog should skip the active file and return an older one.
-	lf := vlog.pickLog(0.1) // 10% threshold — delete 10 keys × 32KB ≈ 320KB > 0.1 × 1MB
+	// Now pickLog should skip the active file and return the older one.
+	lf := vlog.pickLog(0.1)
 	if lf == nil {
 		vlog.discardStats.Lock()
 		vlog.discardStats.Iterate(func(fid, stats uint64) {
