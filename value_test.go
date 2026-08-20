@@ -1616,7 +1616,7 @@ func TestPickLogWalksCandidates(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20 // 1 MB minimum, write enough data to force multiple files
+	opt.ValueLogFileSize = 1 << 20
 	opt.ValueThreshold = 1 << 10
 	opt.NumCompactors = 0
 
@@ -1627,51 +1627,45 @@ func TestPickLogWalksCandidates(t *testing.T) {
 	vlog := kv.vlog
 	sz := 32 << 10
 
-	// Write data to create the first vlog files (fid 1, 2, 3...).
+	// Write data to create several vlog files.
 	txn := kv.NewTransaction(true)
-	for i := 0; i < 45; i++ {
+	for i := 0; i < 80; i++ {
 		v := make([]byte, sz)
 		rand.Read(v)
 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
 	}
 	require.NoError(t, txn.Commit())
 
-	// Delete entries in the first file to create discard.
-	for i := 0; i < 3; i++ {
-		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
-	}
-
-	// Both files now have discard stats.  The active file (maxFid) may have
-	// accumulated discard too.  If it does, the old code would abort when
-	// MaxDiscard returned the active file; the new code should skip it and
-	// return the older file.
+	// Store fid and maxFid before any deletions.
 	vlog.filesLock.RLock()
-	maxFid := vlog.maxFid
 	fids := vlog.sortedFids()
+	maxFid := vlog.maxFid
 	vlog.filesLock.RUnlock()
 
 	if len(fids) < 2 {
-		t.Skip("need at least two vlog files for this test")
+		t.Skip("need at least two vlog files")
 	}
 
-	// Run pickLog — it should not return nil when at least one eligible file exists.
+	// Delete entries likely to be in the first file.
+	for i := 0; i < 20; i++ {
+		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
+	}
+
+	// Manually give the active file a larger discard so it becomes the top
+	// candidate, which the old code would abort on.
+	activeDiscard := int64(1 << 30) // well above any real discard
+	vlog.discardStats.Update(maxFid, activeDiscard)
+
+	// Now pickLog should skip the active file and return an older one.
 	lf := vlog.pickLog(0.5)
 	if lf == nil {
-		// If the active file is the only file with any discard, the test
-		// is inconclusive — there is no other candidate.  Skip.
 		vlog.discardStats.Lock()
-		defer vlog.discardStats.Unlock()
-		var hasOldDiscard bool
 		vlog.discardStats.Iterate(func(fid, stats uint64) {
-			if fid < uint64(maxFid) && stats > 0 {
-				hasOldDiscard = true
-			}
+			t.Logf("  discardStats[%d]=%d", fid, stats)
 		})
-		if !hasOldDiscard {
-			t.Skip("no non-active file has discard — test is inconclusive")
-		}
-		t.Errorf("pickLog returned nil even though an older file has discard; "+
-			"maxFid=%d fids=%v", maxFid, fids)
+		vlog.discardStats.Unlock()
+		t.Fatalf("pickLog returned nil; expected an old file (fid < %d)", maxFid)
 	}
 	require.Less(t, lf.fid, maxFid, "pickLog must return an older file, not the active one")
+	t.Logf("pickLog returned fid=%d (maxFid=%d)", lf.fid, maxFid)
 }
