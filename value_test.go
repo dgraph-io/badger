@@ -1660,7 +1660,7 @@ func TestPickLogWalksCandidates(t *testing.T) {
 	// The old file's discard must exceed the threshold to be eligible.
 	const fileSize = 1 << 20 // 1 MB
 	vlog.discardStats.Update(maxFid, 1<<30)      // active: large discard, but ineligible
-	vlog.discardStats.Update(fids[0], int64(0.3*float64(fileSize))) // old file: 30% > 10% threshold
+	vlog.discardStats.Update(fids[0], 3*fileSize/10) // old file: 30% > 10% threshold
 
 	// Now pickLog should skip the active file and return the older one.
 	lf := vlog.pickLog(0.1)
