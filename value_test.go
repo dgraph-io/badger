@@ -1666,7 +1666,7 @@ func TestPickLogWalksCandidates(t *testing.T) {
 	vlog.discardStats.Update(maxFid, 1<<30)
 
 	// Now pickLog should skip the active file and return an older one.
-	lf := vlog.pickLog(0.5)
+	lf := vlog.pickLog(0.1) // 10% threshold — delete 10 keys × 32KB ≈ 320KB > 0.1 × 1MB
 	if lf == nil {
 		vlog.discardStats.Lock()
 		vlog.discardStats.Iterate(func(fid, stats uint64) {
