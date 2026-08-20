@@ -1616,7 +1616,7 @@ func TestPickLogWalksCandidates(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 128 << 10 // 128 KB: several small vlog files
+	opt.ValueLogFileSize = 1 << 20 // 1 MB minimum, write enough data to force multiple files
 	opt.ValueThreshold = 1 << 10
 	opt.NumCompactors = 0
 
@@ -1629,7 +1629,7 @@ func TestPickLogWalksCandidates(t *testing.T) {
 
 	// Write data to create the first vlog files (fid 1, 2, 3...).
 	txn := kv.NewTransaction(true)
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 45; i++ {
 		v := make([]byte, sz)
 		rand.Read(v)
 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
