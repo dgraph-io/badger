@@ -67,7 +67,8 @@ func flatten(cmd *cobra.Command, args []string) error {
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
 		WithCompression(options.CompressionType(fo.compressionType)).
-		WithEncryptionKey(encKey)
+		WithEncryptionKey(encKey).
+		WithMaxLevels(vMaxLevels)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {

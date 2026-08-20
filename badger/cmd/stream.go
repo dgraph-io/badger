@@ -71,7 +71,8 @@ func stream(cmd *cobra.Command, args []string) error {
 		WithNumVersionsToKeep(so.numVersions).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
-		WithEncryptionKey(encKey)
+		WithEncryptionKey(encKey).
+		WithMaxLevels(vMaxLevels)
 
 	// Options for output DB.
 	if so.compressionType > 2 {
