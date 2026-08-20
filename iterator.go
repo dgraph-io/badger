@@ -311,20 +311,28 @@ type IteratorOptions struct {
 	Reverse        bool // Direction of iteration. False is forward, true is backward.
 	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.
-	// NoReadTracking disables the per-Item/Seek conflict-detection read
+	// noReadTracking disables the per-Item/Seek conflict-detection read
 	// tracking that read-write transactions use to detect concurrent
 	// writes. Set this when the caller knows exactly which keys to record
 	// (e.g. Txn.MultiGet, which walks arbitrary intermediate keys but
 	// only cares about the requested keys). Has no effect on read-only
 	// transactions, where addReadKey is already a no-op.
-	NoReadTracking bool
+	noReadTracking bool
 
 	// The following option is used to narrow down the SSTables that iterator
 	// picks up. If Prefix is specified, only tables which could have this
 	// prefix are picked based on their range of keys.
-	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
-	Prefix      []byte // Only iterate over this given prefix.
-	SinceTs     uint64 // Only read data that has version > SinceTs.
+	prefixIsKey    bool   // If set, use the prefix for bloom filter lookup.
+	Prefix         []byte // Only iterate over this given prefix.
+	SinceTs        uint64 // Only read data that has version > SinceTs.
+
+	// MaxVersionsPerKey caps how many MVCC versions a single iterator
+	// walk returns for the same key. Zero (the default) means unlimited,
+	// matching today's AllVersions behavior. Used by Txn.MultiGet to bound
+	// the cost of deep version chains: callers that fold deltas on top of
+	// a complete record (e.g. dgraph's ReadPostingList) can stop once
+	// they have enough versions without paying the value-log read for the rest.
+	MaxVersionsPerKey int
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -548,13 +556,43 @@ func (iv *ItemVersion) DiscardEarlierVersions() bool {
 	return iv.meta&bitDiscardEarlierVersions != 0
 }
 
-// KeyResult holds all versions (commit ts <= the transaction's read ts) of
-// one requested key, ordered newest-first — the same order an AllVersions
-// iterator yields. Versions is empty if the key does not exist (or has no
-// version visible at the read ts); there is no separate not-found error
-// per key.
+// KeyResult is the per-key payload returned by Txn.MultiGet. It is a
+// wrapper (rather than a bare []ItemVersion) so future fields — the
+// requested key itself, a per-key error, a found/not-found flag — can be
+// added without breaking the public result slice shape. Versions holds
+// all visible MVCC versions ordered newest-first; it is empty if the key
+// does not exist (or has no version visible at the read ts); there is no
+// separate not-found error per key.
 type KeyResult struct {
 	Versions []ItemVersion
+}
+
+// MultiGetOptions tweaks Txn.MultiGetWithOptions beyond its defaults.
+// Use DefaultMultiGetOptions as a starting point.
+type MultiGetOptions struct {
+	// MaxVersionsPerKey caps how many MVCC versions are materialized per
+	// requested key. Zero (the default) returns the full chain — matching
+	// today's NewKeyIterator(AllVersions) + Seek + walk. Callers that fold
+	// deltas on top of a complete record (e.g. dgraph's ReadPostingList,
+	// which breaks on BitCompletePosting) can set this to stop once they
+	// have enough versions, avoiding value-log reads for the rest of the
+	// chain. Versions are returned newest-first; the cap trims the oldest
+	// tail.
+	MaxVersionsPerKey int
+}
+
+// DefaultMultiGetOptions returns a MultiGetOptions with no caps set
+// (i.e. every visible MVCC version is returned per key), matching the
+// behavior of NewKeyIterator(AllVersions) + Seek + walk.
+func DefaultMultiGetOptions() MultiGetOptions {
+	return MultiGetOptions{}
+}
+
+// WithMaxVersionsPerKey returns a copy of opts with MaxVersionsPerKey
+// set to max. Use 0 (the default) to return every visible version.
+func (opts MultiGetOptions) WithMaxVersionsPerKey(max int) MultiGetOptions {
+	opts.MaxVersionsPerKey = max
+	return opts
 }
 
 // MultiGet reads many keys in a single iterator pass at the transaction's
@@ -576,20 +614,43 @@ type KeyResult struct {
 // lets adjacent keys reuse decoded SSTable blocks; the original order is
 // restored before returning.
 //
-// Semantics match the existing iterator path: versions newer than the read
-// ts are skipped, badger-internal keys and banned-namespace keys are
-// filtered. For a read-write transaction, only the requested keys are added
-// to the read set for conflict detection — exactly as NewKeyIterator(key)
-// would do — even though the shared iterator walks arbitrary intermediate
-// keys; NoReadTracking suppresses per-Item/Seek tracking and the outer loop
+// Semantics match Txn.Get: an empty key in the request returns ErrEmptyKey,
+// and a key in a banned namespace returns ErrBannedKey — the same errors
+// Txn.Get would produce — instead of silently looking absent. Within the
+// shared iterator pass, badger-internal keys and banned-namespace keys
+// (i.e. keys not in the request slice) are filtered as today. For a
+// read-write transaction, only the requested keys are added to the read
+// set for conflict detection — exactly as NewKeyIterator(key) would do —
+// even though the shared iterator walks arbitrary intermediate keys;
+// noReadTracking suppresses per-Item/Seek tracking and the outer loop
 // records each requested key once.
+//
+// For per-key version caps use MultiGetWithOptions.
 func (txn *Txn) MultiGet(keys [][]byte) ([]KeyResult, error) {
+	return txn.MultiGetWithOptions(keys, DefaultMultiGetOptions())
+}
+
+// MultiGetWithOptions is MultiGet with caller-supplied options. See
+// MultiGet for the overall contract; see MultiGetOptions for what can be
+// tuned.
+func (txn *Txn) MultiGetWithOptions(keys [][]byte, mopts MultiGetOptions) ([]KeyResult, error) {
 	if txn.discarded {
 		return nil, ErrDiscardedTxn
 	}
 	res := make([]KeyResult, len(keys))
 	if len(keys) == 0 {
 		return res, nil
+	}
+
+	// Match Txn.Get's pre-flight checks so callers don't silently turn a
+	// banned or empty key into an empty Versions.
+	for _, k := range keys {
+		if len(k) == 0 {
+			return nil, ErrEmptyKey
+		}
+		if err := txn.db.isBanned(k); err != nil {
+			return nil, err
+		}
 	}
 
 	// Visit keys in sorted order so the shared iterator only seeks forward.
@@ -604,17 +665,15 @@ func (txn *Txn) MultiGet(keys [][]byte) ([]KeyResult, error) {
 	opt := DefaultIteratorOptions
 	opt.AllVersions = true
 	opt.PrefetchValues = false
-	opt.NoReadTracking = true
+	opt.noReadTracking = true
+	opt.MaxVersionsPerKey = mopts.MaxVersionsPerKey
 	it := txn.NewIterator(opt)
 	defer it.Close()
 
 	for _, idx := range order {
 		key := keys[idx]
-		if len(key) == 0 {
-			continue
-		}
 		// Record the requested key for conflict detection. The iterator
-		// itself does not track reads because NoReadTracking is set; it
+		// itself does not track reads because noReadTracking is set; it
 		// would otherwise record every walked key.
 		txn.addReadKey(key)
 		var versions []ItemVersion
@@ -637,6 +696,9 @@ func (txn *Txn) MultiGet(keys [][]byte) ([]KeyResult, error) {
 			}
 			iv.Value = val
 			versions = append(versions, iv)
+			if opt.MaxVersionsPerKey > 0 && len(versions) >= opt.MaxVersionsPerKey {
+				break
+			}
 		}
 		res[idx].Versions = versions
 	}
@@ -655,7 +717,7 @@ func (it *Iterator) newItem() *Item {
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
 	tx := it.txn
-	if !it.opt.NoReadTracking {
+	if !it.opt.noReadTracking {
 		tx.addReadKey(it.item.Key())
 	}
 	return it.item
@@ -892,7 +954,7 @@ func (it *Iterator) Seek(key []byte) {
 	if it.iitr == nil {
 		return
 	}
-	if len(key) > 0 && !it.opt.NoReadTracking {
+	if len(key) > 0 && !it.opt.noReadTracking {
 		it.txn.addReadKey(key)
 	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {

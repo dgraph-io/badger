@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © 2017-2025 Dgraph Labs, Inc.
+ * SPDX-FileCopyrightText: © 2017-2026 Dgraph Labs, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"sort"
 	"testing"
 
@@ -177,20 +176,93 @@ func TestMultiGetEmpty(t *testing.T) {
 	require.Len(t, got, 0)
 }
 
+// TestMultiGetRejectsBadKeys exercises Txn.Get parity: an empty key in
+// the request returns ErrEmptyKey and a key in a banned namespace
+// returns ErrBannedKey. Otherwise the caller could not distinguish
+// banned from absent — exactly the bug dgraph would hit if its posting
+// reads went through MultiGet.
+func TestMultiGetRejectsBadKeys(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenManaged(DefaultOptions(dir).
+		WithNamespaceOffset(1).
+		WithLoggingLevel(WARNING))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+	require.NoError(t, db.BanNamespace(42))
+	txn := db.NewTransactionAt(1, false)
+	defer txn.Discard()
+
+	_, err = txn.MultiGet([][]byte{nil})
+	require.ErrorIs(t, err, ErrEmptyKey)
+
+	// 8-byte namespace at offset 1; big-endian 42 == bytes 0,0,0,0,0,0,0,42.
+	// isBanned requires len(key) > NamespaceOffset+8, so add a trailing byte.
+	banned := []byte{0xff, 0, 0, 0, 0, 0, 0, 0, 42, 0x01}
+	_, err = txn.MultiGet([][]byte{banned})
+	require.ErrorIs(t, err, ErrBannedKey)
+
+	// Mixed batch with one bad key still fails the whole call, matching
+	// Txn.Get's first-error-wins behavior.
+	good := []byte("ok")
+	_, err = txn.MultiGet([][]byte{good, nil})
+	require.ErrorIs(t, err, ErrEmptyKey)
+}
+
+// TestMultiGetMaxVersionsPerKey verifies the MaxVersionsPerKey cap is
+// applied per key: the walk stops once the requested number of versions
+// is materialized, so callers that fold deltas on top of a complete
+// record don't pay for the rest of the chain. Versions are returned
+// newest-first, so the cap trims the oldest tail.
+func TestMultiGetMaxVersionsPerKey(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenManaged(DefaultOptions(dir).
+		WithNumVersionsToKeep(math.MaxInt32).
+		WithLoggingLevel(WARNING))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	key := []byte("k")
+	const total = 10
+	for v := uint64(1); v <= total; v++ {
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		require.NoError(t, txn.SetEntry(&Entry{Key: key, Value: []byte(fmt.Sprintf("v%d", v))}))
+		require.NoError(t, txn.CommitAt(v, nil))
+	}
+
+	readTxn := db.NewTransactionAt(total+1, false)
+	defer readTxn.Discard()
+
+	// Without the cap we get every version.
+	full, err := readTxn.MultiGet([][]byte{key})
+	require.NoError(t, err)
+	require.Len(t, full[0].Versions, total)
+
+	// Cap returns the newest N only.
+	cap3 := [][]byte{key}
+	withCap, err := readTxn.MultiGetWithOptions(cap3, DefaultMultiGetOptions().WithMaxVersionsPerKey(3))
+	require.NoError(t, err)
+	require.Len(t, withCap[0].Versions, 3)
+	require.Equal(t, uint64(total), withCap[0].Versions[0].Version)
+	require.Equal(t, uint64(total-1), withCap[0].Versions[1].Version)
+	require.Equal(t, uint64(total-2), withCap[0].Versions[2].Version)
+}
+
 // TestMultiGetReadSet is the regression test for the read-write conflict
-// tracking contract. Without NoReadTracking on the iterator, MultiGet would
+// tracking contract. Without noReadTracking on the iterator, MultiGet would
 // record every walked key between successive Seeks as a read, causing
 // spurious conflicts in dgraph's HNSW-style fan-out.
 //
 // What we assert:
 //   - Only the requested keys end up in the txn's read set (len(txn.reads)
 //     equals the unique-key count, not the walked-key count).
-//   - The read set contains exactly the requested keys, with the requested
-//     duplicates collapsed.
+//   - The read set contains exactly the requested keys, with duplicates
+//     in the request collapsed to a single fingerprint.
 //
 // We populate the DB with 50 dense keys and ask MultiGet for a sparse
-// frontier [k0, k49]. The naive implementation would walk k0, k1, ..., k49
-// (50 keys added to reads); the correct implementation adds only {k0, k49}.
+// frontier [k0, k49, k0] (mk(0) repeated to exercise collapsing). The
+// naive implementation would walk k0, k1, ..., k49 (50 keys added to
+// reads); the correct implementation adds only {k0, k49} — the
+// fingerprint of mk(0) appears once even though it was requested twice.
 func TestMultiGetReadSet(t *testing.T) {
 	dir := t.TempDir()
 	db, err := OpenManaged(DefaultOptions(dir).
@@ -215,17 +287,21 @@ func TestMultiGetReadSet(t *testing.T) {
 	}
 	readTs := uint64(nKeys + 1)
 
-	// Read-write txn: ask for a sparse frontier across the full key range.
-	requested := [][]byte{mk(0), mk(49)}
+	// Read-write txn: ask for a sparse frontier across the full key range,
+	// with mk(0) repeated so the result exercises duplicate collapsing.
+	requested := [][]byte{mk(0), mk(49), mk(0)}
 	txn := db.NewTransactionAt(readTs, true) // update = true
 	defer txn.Discard()
 
 	got, err := txn.MultiGet(requested)
 	require.NoError(t, err)
+	require.Len(t, got, len(requested))
 	require.Len(t, got[0].Versions, 1)
 	require.Len(t, got[1].Versions, 1)
+	require.Len(t, got[2].Versions, 1)
 	require.Equal(t, versions[string(mk(0))], got[0].Versions[0].Version)
 	require.Equal(t, versions[string(mk(49))], got[1].Versions[0].Version)
+	require.Equal(t, versions[string(mk(0))], got[2].Versions[0].Version)
 
 	// Assert: txn.reads contains exactly the fingerprints of {mk(0), mk(49)}
 	// — the two requested keys — and NOT the 48 intermediate keys the
@@ -246,18 +322,67 @@ func TestMultiGetReadSet(t *testing.T) {
 // keys, a few MVCC versions each, flushed to disk.
 func loadFrontierDB(b *testing.B, nKeys, versions int) (*DB, [][]byte) {
 	b.Helper()
-	dir, err := os.MkdirTemp(".", "badger-mget")
-	if err != nil {
-		b.Fatal(err)
-	}
+	dir := b.TempDir()
 	db, err := OpenManaged(DefaultOptions(dir).
 		WithSyncWrites(false).WithLoggingLevel(WARNING).
 		WithNumVersionsToKeep(math.MaxInt32).WithDetectConflicts(false))
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { db.Close(); removeDir(dir) })
+	b.Cleanup(func() { _ = db.Close() })
 	val := make([]byte, 64)
+	mk := func(uid uint64) []byte {
+		k := make([]byte, 16)
+		for i := 0; i < 8; i++ {
+			k[i] = byte(uid >> (8 * (7 - i)))
+		}
+		return k
+	}
+	ts := uint64(1)
+	for v := 0; v < versions; v++ {
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		for i := 0; i < nKeys; i++ {
+			if err := txn.SetEntry(&Entry{Key: mk(uint64(i + 1)), Value: val}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := txn.CommitAt(ts, nil); err != nil {
+			b.Fatal(err)
+		}
+		ts++
+	}
+	if err := db.Flatten(2); err != nil {
+		b.Fatal(err)
+	}
+	keys := make([][]byte, nKeys)
+	for i := range keys {
+		keys[i] = mk(uint64(i + 1))
+	}
+	return db, keys
+}
+
+// loadDeepChainDB builds a DB with deep MVCC version chains and
+// value-log-sized values, so benchmarks exercise the case that matters
+// for dgraph: a candidate's sibling reads may sit on a delta chain atop
+// a complete posting, and MultiGet must materialize every visible
+// version (unless the caller caps MaxVersionsPerKey).
+func loadDeepChainDB(b *testing.B, nKeys, versions int, valueSize int) (*DB, [][]byte) {
+	b.Helper()
+	dir := b.TempDir()
+	opt := DefaultOptions(dir).
+		WithSyncWrites(false).
+		WithLoggingLevel(WARNING).
+		WithNumVersionsToKeep(math.MaxInt32).
+		WithDetectConflicts(false).
+		WithValueThreshold(64) // force most values into the vlog.
+	// Shrink the vlog so the file actually rotates during setup.
+	opt.ValueLogFileSize = 1 << 20
+	db, err := OpenManaged(opt)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = db.Close() })
+	val := make([]byte, valueSize)
 	mk := func(uid uint64) []byte {
 		k := make([]byte, 16)
 		for i := 0; i < 8; i++ {
@@ -334,6 +459,66 @@ func BenchmarkMultiGetVsKeyIterator(b *testing.B) {
 				txn := db.NewTransactionAt(math.MaxUint64, false)
 				if _, err := txn.MultiGet(fr); err != nil {
 					b.Fatal(err)
+				}
+				txn.Discard()
+			}
+		})
+	}
+}
+
+// BenchmarkMultiGetDeepChainVsKeyIterator exercises the workload that
+// MultiGet's per-key version walk was questioned on in review: many
+// MVCC versions per key, with value-log-sized values that force a vlog
+// resolve on every version. Without MaxVersionsPerKey the per-version
+// cost dominates; with the cap, MultiGet is bounded.
+func BenchmarkMultiGetDeepChainVsKeyIterator(b *testing.B) {
+	const (
+		nKeys            = 1000
+		versionsPerKey   = 200
+		valueSize        = 4 << 10 // 4 KiB, well above ValueThreshold so it lands in vlog.
+	)
+	db, keys := loadDeepChainDB(b, nKeys, versionsPerKey, valueSize)
+	rng := rand.New(rand.NewSource(11))
+	const K = 64
+	frontier := func() [][]byte {
+		out := make([][]byte, K)
+		base := rng.Intn(nKeys - K)
+		for i := 0; i < K; i++ {
+			out[i] = keys[base+i]
+		}
+		return out
+	}
+	for _, name := range []string{"KeyIterator", "MultiGet", "MultiGetCap1"} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				fr := frontier()
+				txn := db.NewTransactionAt(math.MaxUint64, false)
+				switch name {
+				case "KeyIterator":
+					for _, key := range fr {
+						opt := DefaultIteratorOptions
+						opt.AllVersions = true
+						opt.PrefetchValues = false
+						it := txn.NewKeyIterator(key, opt)
+						for it.Seek(key); it.Valid(); it.Next() {
+							item := it.Item()
+							if string(item.Key()) != string(key) {
+								break
+							}
+							_, _ = item.ValueCopy(nil)
+						}
+						it.Close()
+					}
+				case "MultiGet":
+					if _, err := txn.MultiGet(fr); err != nil {
+						b.Fatal(err)
+					}
+				case "MultiGetCap1":
+					if _, err := txn.MultiGetWithOptions(fr,
+						DefaultMultiGetOptions().WithMaxVersionsPerKey(1)); err != nil {
+						b.Fatal(err)
+					}
 				}
 				txn.Discard()
 			}
