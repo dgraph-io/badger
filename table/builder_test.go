@@ -19,6 +19,7 @@ import (
 	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 func TestTableIndex(t *testing.T) {
@@ -133,14 +134,25 @@ func TestInvalidCompression(t *testing.T) {
 	opts := Options{BlockSize: 4 << 10, Compression: options.ZSTD}
 	tbl := buildTestTable(t, keyPrefix, 1000, opts)
 	defer func() { require.NoError(t, tbl.DecrRef()) }()
-	mf := tbl.MmapFile
-	t.Run("with correct decompression algo", func(t *testing.T) {
-		_, err := OpenTable(mf, opts)
+
+	// OpenTable takes ownership of the mmap it is given, so each subtest must
+	// hand it a fresh mmap rather than reusing tbl.MmapFile.
+	openMmap := func() *z.MmapFile {
+		mf, err := z.OpenMmapFile(tbl.Filename(), os.O_RDONLY, 0)
 		require.NoError(t, err)
+		return mf
+	}
+
+	t.Run("with correct decompression algo", func(t *testing.T) {
+		mf := openMmap()
+		table, err := OpenTable(mf, opts)
+		require.NoError(t, err)
+		require.NoError(t, table.Close(-1))
 	})
 	t.Run("with incorrect decompression algo", func(t *testing.T) {
 		// Set incorrect compression algorithm.
 		opts.Compression = options.Snappy
+		mf := openMmap()
 		_, err := OpenTable(mf, opts)
 		require.Error(t, err)
 	})

@@ -50,30 +50,46 @@ func TestInitIndexFooterValidation(t *testing.T) {
 	require.NoError(t, err)
 	checksumLen := uint32(len(validChecksum))
 
-	// Note: checksumLen/indexLen are read via y.BytesToU32 (uint32) and cast to
-	// int, so on a 64-bit platform they can never be negative. The "< 0" half
-	// of the `<= 0` guard is therefore unreachable from a real file; the "= 0"
-	// cases below exercise the reachable branch of the same condition.
+	// The footer is read by walking backwards from EOF (readPos starts at
+	// tableSize), so each length must fit in the bytes remaining *before*
+	// readPos — not merely be smaller than the whole table. checksumLen == 0 is
+	// legal (a zero checksum marshals to no bytes), so only the bounds are
+	// checked for checksumLen; a zero indexLen is always corruption since a
+	// table always has at least one block.
 	tests := []struct {
 		name    string
 		data    []byte
 		wantErr string
 	}{
 		{
-			name:    "checksumLen=0",
-			data:    buildFooterData(0, nil, 0, nil),
+			name:    "tableSize<4",
+			data:    make([]byte, 2),
+			wantErr: "invalid table size in footer. Data corrupted",
+		},
+		{
+			// 8-byte file since checksumLen and inddexLen are both unit32.
+			// checksumLen field reads 8, exceeding the 4 bytes
+			// remaining before readPos.
+			name:    "checksumLen=tableSize",
+			data:    buildFooterData(0, nil, 8, nil),
 			wantErr: "invalid checksum length in footer. Data corrupted",
 		},
 		{
-			// 8-byte file: [indexLen=0:4][checksumLen=8:4] => checksumLen == tableSize.
-			name:    "checksumLen=tableSize",
-			data:    buildFooterData(0, nil, 8, nil),
+			name:    "checksumLen=tableSize-1",
+			data:    buildFooterData(0, nil, 7, nil),
 			wantErr: "invalid checksum length in footer. Data corrupted",
 		},
 		{
 			name:    "checksumLen>tableSize",
 			data:    buildFooterData(0, nil, 100, nil),
 			wantErr: "invalid checksum length in footer. Data corrupted",
+		},
+		{
+			// checksumLen=0 is legal, so it must fall through to the empty
+			// index length related error.
+			name:    "checksumLen=0 falls through to indexLen",
+			data:    buildFooterData(0, nil, 0, nil),
+			wantErr: "invalid index length in footer. Data corrupted",
 		},
 		{
 			name:    "indexLen=0",

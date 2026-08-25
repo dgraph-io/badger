@@ -14,6 +14,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -120,7 +121,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			var rerr error
 			defer func() {
 				if r := recover(); r != nil {
-					rerr = fmt.Errorf("error opening table %s: %v", fname, r)
+					rerr = fmt.Errorf("error opening table %s: %v\n%s", fname, r, debug.Stack())
 				}
 				throttle.Done(rerr)
 				numOpened.Add(1)

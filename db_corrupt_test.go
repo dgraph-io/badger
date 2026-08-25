@@ -91,10 +91,8 @@ func TestOpenWithCorruptedBlockDataSucceeds(t *testing.T) {
 }
 
 // TestOpenWithTinySSTableReturnsError truncates an SST below the 4-byte footer.
-// initIndex then reads at a negative offset and panics, and the recover defer's
-// debug collection panics again, so the panic escapes the table package
-// and must be caught by the recover() in the newLevelsController goroutine.
-// The result is a graceful Open error, not a crash.
+// initIndex now rejects it with a footer-validation error, which must surface
+// as a graceful Open error (not a crash) through the table package.
 func TestOpenWithTinySSTableReturnsError(t *testing.T) {
 	dir, opts, sstPath := writeDBWithSST(t)
 	defer removeDir(dir)
@@ -103,5 +101,5 @@ func TestOpenWithTinySSTableReturnsError(t *testing.T) {
 
 	_, err := Open(opts)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "opening table")
+	require.Contains(t, err.Error(), "Data corrupted")
 }
