@@ -269,7 +269,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	// BlockSize is used to compute the approximate size of the decompressed
 	// block. It should not be zero if the table is compressed.
 	if opts.BlockSize == 0 && opts.Compression != options.None {
-		mf.Close(-1)
+		_ = mf.Close(-1)
 		return nil, errors.New("Block size cannot be zero")
 	}
 	fileInfo, err := mf.Fd.Stat()
@@ -296,7 +296,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	t.ref.Store(1)
 
 	if err := t.initBiggestAndSmallest(); err != nil {
-		mf.Close(-1)
+		_ = mf.Close(-1)
 		return nil, y.Wrapf(err, "failed to initialize table")
 	}
 
