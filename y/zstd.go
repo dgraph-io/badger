@@ -13,9 +13,12 @@ import (
 
 var (
 	decoder *zstd.Decoder
-	encoder *zstd.Encoder
+	decOnce sync.Once
 
-	encOnce, decOnce sync.Once
+	// encoders caches one zstd.Encoder per resolved encoder level. A zstd.Encoder
+	// is safe for concurrent use and its level is fixed once created, so a single
+	// encoder per level can be shared across all callers.
+	encoders sync.Map // zstd.EncoderLevel -> *zstd.Encoder
 )
 
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
@@ -28,15 +31,28 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 	return decoder.DecodeAll(src, dst[:0])
 }
 
-// ZSTDCompress compresses a block using ZSTD algorithm.
+// ZSTDCompress compresses a block using ZSTD algorithm. The compression level is
+// resolved using zstd.EncoderLevelFromZstd, which maps an arbitrary integer onto
+// one of a small number of encoder levels. A single encoder is cached per resolved
+// level, so callers with different levels each get their own encoder.
 func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
-	encOnce.Do(func() {
-		var err error
-		level := zstd.EncoderLevelFromZstd(compressionLevel)
-		encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
-		Check(err)
-	})
-	return encoder.EncodeAll(src, dst[:0]), nil
+	level := zstd.EncoderLevelFromZstd(compressionLevel)
+
+	if enc, ok := encoders.Load(level); ok {
+		return enc.(*zstd.Encoder).EncodeAll(src, dst[:0]), nil
+	}
+
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+	if err != nil {
+		return nil, err
+	}
+	actual, loaded := encoders.LoadOrStore(level, enc)
+	if loaded {
+		// We lost the race to populate this level; drop our duplicate encoder.
+		_ = enc.Close()
+		enc = actual.(*zstd.Encoder)
+	}
+	return enc.EncodeAll(src, dst[:0]), nil
 }
 
 // ZSTDCompressBound returns the worst case size needed for a destination buffer.
