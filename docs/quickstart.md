@@ -342,9 +342,9 @@ res, _ := m.Get() // res should have value 6 encoded
 ## Setting time to live and user metadata on keys
 
 Badger allows setting an optional Time to Live (TTL) value on keys. Once the TTL has elapsed, the
-key is no longer retrievable, but the disk space it occupies is not reclaimed at that point. See
-the Garbage collection section below for what actually frees it. A TTL can be set as a
-`time.Duration` value using the `Entry.WithTTL()` and `Txn.SetEntry()` API methods.
+key is no longer retrievable, but the disk space it occupies is not reclaimed at that point. See the
+Garbage collection section below for what actually frees it. A TTL can be set as a `time.Duration`
+value using the `Entry.WithTTL()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
@@ -633,13 +633,12 @@ the following method, which can be invoked at an appropriate time:
   automatically discards older/invalid versions of keys.
 
 <Note>
-  The `RunValueLogGC` method would not garbage collect the latest value log.
-
-  It also reclaims space only for values that live in the value log, and only once a compaction has
-  accounted for them. Values smaller than `ValueThreshold` (1 MB by default) are stored inline in
-  the LSM tree and are never collected by this method. Expiring keys with a TTL, or deleting them,
-  does not reclaim space on its own either: compactions are driven by incoming writes, so a
-  database that has stopped taking writes will not shrink.
+  The `RunValueLogGC` method would not garbage collect the latest value log. It also reclaims space
+  only for values that live in the value log, and only once a compaction has accounted for them.
+  Values smaller than `ValueThreshold` (1 MB by default) are stored inline in the LSM tree and are
+  never collected by this method. Expiring keys with a TTL, or deleting them, does not reclaim space
+  on its own either: compactions are driven by incoming writes, so a database that has stopped
+  taking writes will not shrink.
 </Note>
 
 ## Database backup
