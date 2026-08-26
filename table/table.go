@@ -269,6 +269,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	// BlockSize is used to compute the approximate size of the decompressed
 	// block. It should not be zero if the table is compressed.
 	if opts.BlockSize == 0 && opts.Compression != options.None {
+		mf.Close(-1)
 		return nil, errors.New("Block size cannot be zero")
 	}
 	fileInfo, err := mf.Fd.Stat()
@@ -295,7 +296,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	t.ref.Store(1)
 
 	if err := t.initBiggestAndSmallest(); err != nil {
-		_ = mf.Close(-1)
+		mf.Close(-1)
 		return nil, y.Wrapf(err, "failed to initialize table")
 	}
 
@@ -434,8 +435,10 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
 	// checksumLen == 0 is legal (a zero checksum marshals to nothing), so only
-	// reject lengths that don't fit in the bytes remaining before readPos.
-	if checksumLen > readPos {
+	// reject negative lengths and lengths that don't fit in the bytes remaining
+	// before readPos. The < 0 guard catches a uint32 value >= 2^31 wrapping to a
+	// negative int on 32-bit platforms.
+	if checksumLen < 0 || checksumLen > readPos {
 		return nil, errors.New("invalid checksum length in footer. Data corrupted")
 	}
 

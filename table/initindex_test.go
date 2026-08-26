@@ -67,7 +67,7 @@ func TestInitIndexFooterValidation(t *testing.T) {
 			wantErr: "invalid table size in footer. Data corrupted",
 		},
 		{
-			// 8-byte file since checksumLen and inddexLen are both unit32.
+			// 8-byte file since checksumLen and indexLen are both uint32.
 			// checksumLen field reads 8, exceeding the 4 bytes
 			// remaining before readPos.
 			name:    "checksumLen=tableSize",
