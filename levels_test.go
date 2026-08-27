@@ -1679,3 +1679,60 @@ func TestDeletedKeyReappears(t *testing.T) {
 	require.Equal(t, ErrKeyNotFound, err, "deleted foo must not reappear after compaction")
 	require.NoError(t, db.Close())
 }
+
+// TestOpenWithLevelBeyondMaxLevels covers a manifest that records a table at a
+// level at or beyond opt.MaxLevels. The tables slice in newLevelsController is
+// sized by MaxLevels, so the append used to panic with an index-out-of-range.
+// That panic is now recovered by the table-opening goroutine, and if the mutex
+// guarding tables were released without a defer the recover would leave it held
+// and every remaining goroutine would park on it, hanging Open forever with no
+// error. Assert instead that Open returns promptly with a usable message.
+func TestOpenWithLevelBeyondMaxLevels(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	// Build enough on-disk tables to exceed the size-3 throttle, so a leaked
+	// mutex would strand the goroutines behind it rather than surfacing early.
+	opts := getTestOptions(dir).WithNumCompactors(0)
+	opts.MemTableSize = 1 << 20
+	opts.BaseTableSize = 1 << 18
+	opts.ValueThreshold = 32
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	for i := 0; i < 40000; i++ {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key:%08d", i)), []byte(fmt.Sprintf("val:%08d", i)))
+		}))
+	}
+	require.NoError(t, db.Close())
+
+	// Rewrite the manifest so every table claims level 6.
+	mfFile, mf, err := helpOpenOrCreateManifestFile(dir, false, 0, 0, opts)
+	require.NoError(t, err)
+	var changes []*pb.ManifestChange
+	for id, tm := range mf.Tables {
+		changes = append(changes, newDeleteChange(id))
+		changes = append(changes, newCreateChange(id, 6, tm.KeyID, tm.Compression))
+	}
+	require.Greater(t, len(changes), 0)
+	require.NoError(t, mfFile.addChanges(changes, opts))
+	require.NoError(t, mfFile.close())
+
+	reopen := getTestOptions(dir).WithNumCompactors(0).WithMaxLevels(3)
+	reopen.MemTableSize = 1 << 20
+	reopen.BaseTableSize = 1 << 18
+	reopen.ValueThreshold = 32
+
+	errCh := make(chan error, 1)
+	go func() { _, e := Open(reopen); errCh <- e }()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "MaxLevels")
+	case <-time.After(30 * time.Second):
+		t.Fatal("Open hung instead of returning an error")
+	}
+}
