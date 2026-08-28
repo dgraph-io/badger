@@ -115,6 +115,7 @@ type DB struct {
 	blockWrites atomic.Int32
 	isClosed    atomic.Uint32
 
+	writeChInFlight atomic.Int32
 	// gcActive is set while a vlog GC rewrite (scan + write-back) is in flight,
 	// and gcDiscardTs records the DB's max version captured at its start. While
 	// active, last-level compaction clamps its discard threshold to gcDiscardTs
@@ -581,6 +582,10 @@ func (db *DB) close() (err error) {
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
+	// Drain pending requests and wait for in-flight senders to resolve
+	// before closing writeCh, so no goroutine sends on a closed channel.
+	db.drainWriteCh()
+
 	// Don't accept any more write.
 	close(db.writeCh)
 
@@ -914,7 +919,12 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	// Increment the in-flight counter so close() knows a sender is inside this
+	// function and will not close writeCh until we bail out or succeed.
+	db.writeChInFlight.Add(1)
+
 	if db.blockWrites.Load() == 1 {
+		db.writeChInFlight.Add(-1)
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
@@ -924,6 +934,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	y.NumBytesWrittenUserAdd(db.opt.MetricsEnabled, size)
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
+		db.writeChInFlight.Add(-1)
 		return nil, ErrTxnTooBig
 	}
 
@@ -933,11 +944,44 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.reset()
 	req.Entries = entries
 	req.Wg.Add(1)
-	req.IncrRef()     // for db write
-	db.writeCh <- req // Handled in doWrites.
-	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
+	req.IncrRef() // for db write
 
+	// Use select to avoid sending on writeCh after the writes closer has been
+	// signaled. If close() has initiated shutdown, HasBeenClosed() fires and we
+	// bail out cleanly instead of sending on a channel that is about to be closed
+	// (which would panic).
+	select {
+	case db.writeCh <- req:
+		// Successfully sent - doWrites will handle it.
+	case <-db.closers.writes.HasBeenClosed():
+		// Shutdown in progress - do not send. Release the request back to the
+		// pool and return an error so the caller can clean up (e.g. roll back
+		// the transaction).
+		req.DecrRef()
+		db.writeChInFlight.Add(-1)
+		return nil, ErrBlockedWrites
+	}
+
+	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
+	db.writeChInFlight.Add(-1)
 	return req, nil
+}
+
+// drainWriteCh drains and rejects all pending requests from writeCh with
+// ErrBlockedWrites. It also waits for in-flight senders to resolve before
+// returning, so close() can safely close writeCh afterwards.
+func (db *DB) drainWriteCh() {
+	for {
+		select {
+		case req := <-db.writeCh:
+			req.Err = ErrBlockedWrites
+			req.Wg.Done()
+		default:
+			if db.writeChInFlight.Load() == 0 {
+				return
+			}
+		}
+	}
 }
 
 func (db *DB) doWrites(lc *z.Closer) {
