@@ -165,6 +165,8 @@ Below is a list of known projects that use Badger:
 - [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed
   application data analytics.
 - [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
+- [gracedb](https://github.com/dshmyz/gracedb) - Lightweight Go-embedded AI memory and knowledge graph database built on Badger, with vector search, full-text search, property graph, RDF/SPARQL, and MCP server support.
+
 - [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the
   same redis protocol.
 - [BBVA](https://github.com/BBVA/raft-badger) - Raft backend implementation using BadgerDB for
