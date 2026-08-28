@@ -14,6 +14,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -119,9 +120,21 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		go func(fname string, tf TableManifest) {
 			var rerr error
 			defer func() {
+				if r := recover(); r != nil {
+					rerr = fmt.Errorf("error opening table %s: %v\n%s", fname, r, debug.Stack())
+				}
 				throttle.Done(rerr)
 				numOpened.Add(1)
 			}()
+			// tables is sized by opt.MaxLevels, and nothing upstream constrains
+			// the level recorded in the manifest, so reject an out-of-range level
+			// here rather than letting the append below panic.
+			if int(tf.Level) >= len(tables) {
+				rerr = fmt.Errorf(
+					"manifest records table %s at level %d, but MaxLevels is %d",
+					fname, tf.Level, len(tables))
+				return
+			}
 			dk, err := db.registry.DataKey(tf.KeyID)
 			if err != nil {
 				rerr = y.Wrapf(err, "Error while reading datakey")
@@ -149,9 +162,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			mu.Lock()
-			tables[tf.Level] = append(tables[tf.Level], t)
-			mu.Unlock()
+			func() {
+				mu.Lock()
+				defer mu.Unlock()
+				tables[tf.Level] = append(tables[tf.Level], t)
+			}()
 		}(fname, tf)
 	}
 	if err := throttle.Finish(); err != nil {

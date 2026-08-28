@@ -269,6 +269,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	// BlockSize is used to compute the approximate size of the decompressed
 	// block. It should not be zero if the table is compressed.
 	if opts.BlockSize == 0 && opts.Compression != options.None {
+		_ = mf.Close(-1)
 		return nil, errors.New("Block size cannot be zero")
 	}
 	fileInfo, err := mf.Fd.Stat()
@@ -295,6 +296,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	t.ref.Store(1)
 
 	if err := t.initBiggestAndSmallest(); err != nil {
+		_ = mf.Close(-1)
 		return nil, y.Wrapf(err, "failed to initialize table")
 	}
 
@@ -331,14 +333,20 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	return t, nil
 }
 
-func (t *Table) initBiggestAndSmallest() error {
+func (t *Table) initBiggestAndSmallest() (err error) {
 	// This defer will help gathering debugging info in case initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
-			// Use defer for printing info because there may be an intermediate panic.
 			var debugBuf bytes.Buffer
+
+			// Best-effort debug collection: a panic here must not escape and
+			// re-trigger the fatalpanic we are trying to fix. Setting err inside
+			// this defer (rather than after the reads below) ensures whatever
+			// debug info was gathered so far is attached even if one of the
+			// reads panics.
 			defer func() {
-				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
+				_ = recover()
+				err = fmt.Errorf("initIndex crashed: %v\n%s", r, debugBuf.String())
 			}()
 
 			// Get the count of null bytes at the end of file. This is to make sure if there was an
@@ -378,15 +386,15 @@ func (t *Table) initBiggestAndSmallest() error {
 			indexLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "indexLen: %d ", indexLen)
 
-			// Read index.
-			readPos -= t.indexLen
+			// Read index. Use the local indexLen read above so the debug output
+			// describes the same region it actually reads.
+			readPos -= indexLen
 			t.indexStart = readPos
-			indexData := t.readNoFail(readPos, t.indexLen)
+			indexData := t.readNoFail(readPos, indexLen)
 			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
 		}
 	}()
 
-	var err error
 	var ko *fb.BlockOffset
 	if ko, err = t.initIndex(); err != nil {
 		return y.Wrapf(err, "failed to read index.")
@@ -420,11 +428,18 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	readPos := t.tableSize
 
 	// Read checksum len from the last 4 bytes.
+	if readPos < 4 {
+		return nil, errors.New("invalid table size in footer. Data corrupted")
+	}
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
-	if checksumLen < 0 {
-		return nil, errors.New("checksum length less than zero. Data corrupted")
+	// checksumLen == 0 is legal (a zero checksum marshals to nothing), so only
+	// reject negative lengths and lengths that don't fit in the bytes remaining
+	// before readPos. The < 0 guard catches a uint32 value >= 2^31 wrapping to a
+	// negative int on 32-bit platforms.
+	if checksumLen < 0 || checksumLen > readPos {
+		return nil, errors.New("invalid checksum length in footer. Data corrupted")
 	}
 
 	// Read checksum.
@@ -436,9 +451,17 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	}
 
 	// Read index size from the footer.
+	if readPos < 4 {
+		return nil, errors.New("invalid table size in footer. Data corrupted")
+	}
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
 	t.indexLen = int(y.BytesToU32(buf))
+	// A table always has at least one block, so a zero indexLen is always
+	// corruption, and the index must fit in the bytes remaining before readPos.
+	if t.indexLen <= 0 || t.indexLen > readPos {
+		return nil, errors.New("invalid index length in footer. Data corrupted")
+	}
 
 	// Read index.
 	readPos -= t.indexLen
@@ -469,7 +492,9 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
 	var bo fb.BlockOffset
-	y.AssertTrue(index.Offsets(&bo, 0))
+	if !index.Offsets(&bo, 0) {
+		return nil, errors.New("failed to read block offset from index. Data corrupted")
+	}
 	return &bo, nil
 }
 
