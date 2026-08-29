@@ -7,6 +7,7 @@ package badger
 
 import (
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,3 +65,40 @@ func TestReloadDiscardStats(t *testing.T) {
 	require.Zero(t, ds2.Update(uint32(1), 0))
 	require.Equal(t, 1, int(ds2.Update(uint32(2), 0)))
 }
+
+
+func TestDiscardStats_ConcurrentRace(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+	ds := db.vlog.discardStats
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id uint32) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				ds.Update(id, int64(j*10))
+			}
+		}(uint32(i))
+	}
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				ds.Iterate(func(id, val uint64) {})
+				ds.MaxDiscard()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
