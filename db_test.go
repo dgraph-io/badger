@@ -18,7 +18,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2734,4 +2736,84 @@ func TestCloseDBWhileReading(t *testing.T) {
 	time.Sleep(time.Second)
 	require.NoError(t, db.Close())
 	wg.Wait()
+}
+
+// countingLogger records how many times badger logs the issue #2116 message:
+// "Got error while calculating total size of directory".
+type countingLogger struct {
+	hits *int64
+}
+
+func (l *countingLogger) Errorf(string, ...interface{})   {}
+func (l *countingLogger) Warningf(string, ...interface{}) {}
+func (l *countingLogger) Infof(string, ...interface{})    {}
+func (l *countingLogger) Debugf(format string, args ...interface{}) {
+	if strings.Contains(fmt.Sprintf(format, args...), "Got error while calculating total size of directory") {
+		atomic.AddInt64(l.hits, 1)
+	}
+}
+
+// TestCalculateSizeIgnoresConcurrentDeletes reproduces the issue #2116 scenario:
+// compactions delete .sst/.mem files while calculateSize() walks the directory.
+// The fixed calculateSize() must ignore files deleted because of compaction.
+func TestCalculateSizeIgnoresConcurrentDeletes(t *testing.T) {
+	dir := t.TempDir()
+	var hits int64
+
+	opts := DefaultOptions(dir).
+		WithLogger(&countingLogger{hits: &hits}).
+		WithSyncWrites(false).
+		// Aggressive flush/compaction so .sst/.mem files churn constantly.
+		WithNumMemtables(1).
+		WithMemTableSize(1 << 20).
+		WithBaseTableSize(1 << 20).
+		WithBaseLevelSize(4 << 20).
+		WithNumLevelZeroTables(1).
+		WithNumLevelZeroTablesStall(2).
+		WithNumCompactors(2).
+		WithValueThreshold(1 << 16)
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer db.Close()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var seq int64
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				n := atomic.AddInt64(&seq, 1)
+				_ = db.Update(func(txn *Txn) error {
+					return txn.Set(
+						[]byte(fmt.Sprintf("key:%d:%d", id, n)),
+						[]byte(fmt.Sprintf("val:%d:%d:abcdefghijklmnopqrstuvwxyz", id, n)))
+				})
+			}
+		}(w)
+	}
+
+	// Call calculateSize() in a tight loop for 3 seconds while the writers keep
+	// flushing/compacting, so it walks over .sst files that are being deleted.
+	// Tiiggering "db.calculateSize()" continuously leads to calling
+	// "calculateDirSize" and ~40 hits to "os.IsNotExist(err)" i.e
+	// we observe multiple occurences of us ignoring the deleted files.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		db.calculateSize()
+	}
+
+	close(stop)
+	wg.Wait()
+
+	if got := atomic.LoadInt64(&hits); got != 0 {
+		t.Fatalf("calculateSize() logged error %d times; it should tolerate files deleted during compaction", got)
+	}
 }
