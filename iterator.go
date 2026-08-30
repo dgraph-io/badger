@@ -435,6 +435,11 @@ type Iterator struct {
 
 	lastKey []byte // Used to skip over multiple versions of the same key.
 
+	// forceStepSkip disables the seek-ahead MVCC version-skipping optimization in
+	// parseItem, falling back to stepping one mi.Next() at a time. Only used by
+	// differential tests to verify the seek-skip produces byte-identical iteration.
+	forceStepSkip bool
+
 	closed  bool
 	scanned int // Used to estimate the size of data scanned by iterator.
 
@@ -587,6 +592,28 @@ func (it *Iterator) Next() {
 	}
 }
 
+// seekToNextUserKey returns the seek target that lands on the first (newest)
+// version of the smallest user key strictly greater than userKey, skipping over
+// every remaining version of userKey itself.
+//
+// Every version of userKey is stored as userKey + 8-byte ts suffix. Appending a
+// 0x00 byte to userKey yields the smallest byte slice that has userKey as a
+// strict prefix, so for any timestamps t and t':
+//
+//	userKey + tsSuffix(t)  <  (userKey+0x00) + tsSuffix(t')
+//
+// because CompareKeys first compares the user-key portions (userKey vs
+// userKey+0x00) and the longer one with userKey as a prefix sorts after. Pairing
+// it with ts=MaxUint64 (the smallest encoded suffix) means we land on the first
+// version of whatever user key comes next, without overshooting prefix-extension
+// keys (e.g. for "k1" we must still visit "k10", and "k1\x00" < "k10").
+func seekToNextUserKey(userKey []byte) []byte {
+	next := make([]byte, len(userKey)+1)
+	copy(next, userKey)
+	// next[len(userKey)] is already 0x00 from make.
+	return y.KeyWithTs(next, math.MaxUint64)
+}
+
 func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
 	if meta&bitDelete > 0 {
 		return true
@@ -627,6 +654,24 @@ func (it *Iterator) parseItem() bool {
 	version := y.ParseTs(key)
 	// Ignore everything that is above the readTs and below or at the sinceTs.
 	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
+		// Seek-ahead optimization (forward, non-AllVersions only): when the current
+		// version is above readTs, every version of this user key newer than (and up
+		// to) the current one is also above readTs and unreturnable. Instead of
+		// stepping one mi.Next() at a time through that whole chain, jump straight to
+		// the first version <= readTs of this same user key. Versions skipped this way
+		// all have version > readTs, so this can never skip a returnable version. The
+		// landing version may still be <= SinceTs (or deleted/expired); parseItem
+		// applies those filters as usual on re-entry.
+		//
+		// Guarded to forward, non-AllVersions: reverse iteration relies on stepping
+		// (see the reverse handling at the bottom of parseItem) and AllVersions must
+		// see every version. We also only seek on the version>readTs branch, never on
+		// the version<=SinceTs branch (those are the OLDEST versions; seeking forward
+		// would land further into older data and can't skip anything useful).
+		if !it.forceStepSkip && !it.opt.Reverse && !it.opt.AllVersions && version > it.readTs {
+			it.iitr.Seek(y.KeyWithTs(y.ParseKey(key), it.readTs))
+			return false
+		}
 		mi.Next()
 		return false
 	}
@@ -651,6 +696,22 @@ func (it *Iterator) parseItem() bool {
 	// be sufficient.
 	if !it.opt.Reverse {
 		if y.SameKey(it.lastKey, key) {
+			// Seek-ahead optimization (forward, non-AllVersions): we already yielded the
+			// newest visible version of this user key. Every remaining version of it must
+			// be skipped regardless of readTs/SinceTs/deleted state. Instead of stepping
+			// one mi.Next() at a time through the whole (possibly long) version chain,
+			// jump straight to the newest version of the NEXT user key.
+			//
+			// The correct seek target is KeyWithTs(userKey+0x00, MaxUint64) (see
+			// seekToNextUserKey): the smallest key strictly greater than every version
+			// of userKey, which never overshoots prefix-extension keys (e.g. for "k1"
+			// we must still visit "k10", and "k1\x00" sorts before "k10"). We must NOT
+			// seek to KeyWithTs(userKey, 0): that encodes to the LARGEST suffix and
+			// sorts AFTER every version of intervening user keys, overshooting them.
+			if !it.forceStepSkip && !it.opt.AllVersions {
+				it.iitr.Seek(seekToNextUserKey(y.ParseKey(key)))
+				return false
+			}
 			mi.Next()
 			return false
 		}
