@@ -251,6 +251,7 @@ Below is a list of known projects that use Badger:
   Fortuna smart contract on the Cardano blockchain
 - [cDNSd](https://github.com/blinklabs-io/cdnsd) - A Cardano blockchain backed DNS server daemon
 - [Dingo](https://github.com/blinklabs-io/dingo) - A Cardano blockchain data node
+- [Warpnet](https://github.com/Warp-net/warpnet) - A decentralized, peer-to-peer social network
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
