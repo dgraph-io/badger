@@ -1605,3 +1605,73 @@ func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 
 	require.Len(t, deleted, cycles, "each cycle must have deleted a distinct key")
 }
+
+
+// TestPickLogWalksCandidates verifies that pickLog does not give up when the
+// single highest-discard file is the active (write) value log file. Instead it
+// should skip the active file and return the next-best eligible candidate.
+func TestPickLogWalksCandidates(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	opt.ValueThreshold = 1 << 10
+	opt.NumCompactors = 0
+	opt.ValueLogMaxEntries = 16
+
+	kv, err := Open(opt)
+	require.NoError(t, err)
+	defer kv.Close()
+
+	vlog := kv.vlog
+	sz := 32 << 10
+
+	// Write data to create several vlog files.
+	func() {
+		txn := kv.NewTransaction(true)
+		for i := 0; i < 80; i++ {
+			v := make([]byte, sz)
+			rand.Read(v)
+			require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%03d", i)), v)))
+		}
+		require.NoError(t, txn.Commit())
+	}()
+
+	// Close and reopen to get a consistent view of on-disk files.
+	require.NoError(t, kv.Close())
+	kv, err = Open(opt)
+	require.NoError(t, err)
+	defer kv.Close()
+	vlog = kv.vlog
+
+	vlog.filesLock.RLock()
+	fids := vlog.sortedFids()
+	maxFid := vlog.maxFid
+	vlog.filesLock.RUnlock()
+	t.Logf("fids=%v maxFid=%d", fids, maxFid)
+
+	if len(fids) < 2 {
+		t.Fatalf("need at least two vlog files, got %d", len(fids))
+	}
+
+	// Manually set discard stats for the active file (highest) and an old file.
+	// The old file's discard must exceed the threshold to be eligible.
+	const fileSize = 1 << 20 // 1 MB
+	vlog.discardStats.Update(maxFid, 1<<30)      // active: large discard, but ineligible
+	vlog.discardStats.Update(fids[0], 3*fileSize/10) // old file: 30% > 10% threshold
+
+	// Now pickLog should skip the active file and return the older one.
+	lf := vlog.pickLog(0.1)
+	if lf == nil {
+		vlog.discardStats.Lock()
+		vlog.discardStats.Iterate(func(fid, stats uint64) {
+			t.Logf("  discardStats[%d]=%d", fid, stats)
+		})
+		vlog.discardStats.Unlock()
+		t.Fatalf("pickLog returned nil; expected an old file (fid < %d) with fids=%v", maxFid, fids)
+	}
+	require.Less(t, lf.fid, maxFid, "pickLog must return an older file, not the active one")
+	t.Logf("pickLog returned fid=%d (maxFid=%d)", lf.fid, maxFid)
+}
