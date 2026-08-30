@@ -444,6 +444,20 @@ type Iterator struct {
 	ThreadId int
 
 	Alloc *z.Allocator
+
+	// prefilledItems are seeded into the waste pool at iterator construction
+	// so the first two newItem() calls return them instead of heap-allocating.
+	// Sized to 2 because that is the maximum prefetch demand on the
+	// AllVersions=true, PrefetchValues=false hot path (dgraph posting-list
+	// rollup) where prefetch() uses prefetchSize=2 — the most common newItem
+	// burst pattern for short, version-walk iterators. Larger prefetch counts
+	// (PrefetchValues=true with PrefetchSize>2) continue to heap-allocate
+	// once these two are consumed.
+	//
+	// MUST be accessed only via &it.prefilledItems[i] (never copied), since
+	// Item contains a sync.WaitGroup. Iterator itself is always used through
+	// *Iterator, so the array never moves.
+	prefilledItems [2]Item
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
@@ -487,6 +501,14 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		opt:    opt,
 		readTs: txn.readTs,
 	}
+	// Seed the waste pool with the embedded items so newItem's first two
+	// pops return them rather than allocating fresh Items on the heap.
+	// txn must be set here because newItem only sets txn on freshly
+	// allocated items; waste-recycled items inherit it from prior use.
+	res.prefilledItems[0].txn = txn
+	res.prefilledItems[1].txn = txn
+	res.waste.push(&res.prefilledItems[0])
+	res.waste.push(&res.prefilledItems[1])
 	return res
 }
 
