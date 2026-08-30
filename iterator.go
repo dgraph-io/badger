@@ -320,6 +320,48 @@ type IteratorOptions struct {
 	SinceTs     uint64 // Only read data that has version > SinceTs.
 }
 
+// WithPrefetchSize returns a new IteratorOptions value with PrefetchSize set to the given value.
+func (opt IteratorOptions) WithPrefetchSize(size int) IteratorOptions {
+	opt.PrefetchSize = size
+	return opt
+}
+
+// WithPrefetchValues returns a new IteratorOptions value with PrefetchValues set to the given value.
+func (opt IteratorOptions) WithPrefetchValues(prefetch bool) IteratorOptions {
+	opt.PrefetchValues = prefetch
+	return opt
+}
+
+// WithReverse returns a new IteratorOptions value with Reverse set to the given value.
+func (opt IteratorOptions) WithReverse(reverse bool) IteratorOptions {
+	opt.Reverse = reverse
+	return opt
+}
+
+// WithAllVersions returns a new IteratorOptions value with AllVersions set to the given value.
+func (opt IteratorOptions) WithAllVersions(all bool) IteratorOptions {
+	opt.AllVersions = all
+	return opt
+}
+
+// WithInternalAccess returns a new IteratorOptions value with InternalAccess set to the given value.
+func (opt IteratorOptions) WithInternalAccess(access bool) IteratorOptions {
+	opt.InternalAccess = access
+	return opt
+}
+
+// WithPrefix returns a new IteratorOptions value with Prefix set to the given prefix.
+func (opt IteratorOptions) WithPrefix(prefix []byte) IteratorOptions {
+	opt.Prefix = prefix
+	return opt
+}
+
+// WithSinceTs returns a new IteratorOptions value with SinceTs set to the given value.
+func (opt IteratorOptions) WithSinceTs(ts uint64) IteratorOptions {
+	opt.SinceTs = ts
+	return opt
+}
+
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 	// We should compare key without timestamp. For example key - a[TS] might be > "aa" prefix.
 	key = y.ParseKey(key)

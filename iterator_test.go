@@ -114,6 +114,25 @@ func TestPickSortTables(t *testing.T) {
 	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
 }
 
+func TestIteratorOptionsBuilderMethods(t *testing.T) {
+	opt := DefaultIteratorOptions.
+		WithPrefetchSize(0).
+		WithPrefetchValues(false).
+		WithReverse(true).
+		WithAllVersions(true).
+		WithInternalAccess(true).
+		WithPrefix([]byte("prefix")).
+		WithSinceTs(123)
+
+	require.Equal(t, 0, opt.PrefetchSize)
+	require.False(t, opt.PrefetchValues)
+	require.True(t, opt.Reverse)
+	require.True(t, opt.AllVersions)
+	require.True(t, opt.InternalAccess)
+	require.Equal(t, []byte("prefix"), opt.Prefix)
+	require.Equal(t, uint64(123), opt.SinceTs)
+}
+
 func TestIterateSinceTs(t *testing.T) {
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%04d", i))
