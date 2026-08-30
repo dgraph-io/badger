@@ -7,6 +7,7 @@ package table
 
 import (
 	"crypto/aes"
+	"encoding/binary"
 	"errors"
 	"math"
 	"runtime"
@@ -235,12 +236,22 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	// store current entry's offset
 	b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, uint32(b.curBlock.end))
 
-	// Layout: header, diffKey, value.
-	b.append(h.Encode())
-	b.append(diffKey)
-
-	dst := b.allocate(int(v.EncodedSize()))
-	v.Encode(dst)
+	// Layout: header (headerSize bytes), diffKey, value. Fuse into a single
+	// allocate to avoid 3 capacity checks and the heap-escaping intermediate
+	// buffer from h.Encode(). We write the two header fields with
+	// binary.NativeEndian, which reproduces the exact byte layout of the
+	// unsafe struct store used by header.Encode/Decode, while remaining safe
+	// at the unaligned offsets b.allocate may return (it hands back a
+	// sub-slice of the block buffer at an arbitrary offset). Same on-disk
+	// bytes as before.
+	hsz := int(headerSize)
+	dlen := len(diffKey)
+	vsz := int(v.EncodedSize())
+	dst := b.allocate(hsz + dlen + vsz)
+	binary.NativeEndian.PutUint16(dst[0:2], h.overlap)
+	binary.NativeEndian.PutUint16(dst[2:4], h.diff)
+	copy(dst[hsz:hsz+dlen], diffKey)
+	v.Encode(dst[hsz+dlen:])
 
 	// Add the vpLen to the onDisk size. We'll add the size of the block to
 	// onDisk size in Finish() function.
