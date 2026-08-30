@@ -77,6 +77,12 @@ func (lk *lockedKeys) all() []uint64 {
 	return keys
 }
 
+func (lk *lockedKeys) remove(key uint64) {
+	lk.Lock()
+	defer lk.Unlock()
+	delete(lk.keys, key)
+}
+
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
@@ -128,6 +134,7 @@ type DB struct {
 	orc              *oracle
 	bannedNamespaces *lockedKeys
 	threshold        *vlogThreshold
+	tenants          *TenantManager // non-nil when MultiTenancy is enabled
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -187,6 +194,19 @@ func checkAndSetOptions(opt *Options) error {
 	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
 	if needCache && opt.BlockCacheSize == 0 {
 		panic("BlockCacheSize should be set since compression/encryption are enabled")
+	}
+
+	// Multi-tenancy requires NamespaceOffset to be 0 because the tenant-scope iterator
+	// relies on the tenant id being a simple byte prefix. If the caller enabled
+	// MultiTenancy directly on the struct without WithMultiTenancy, default it to 0.
+	// If the caller explicitly set a non-zero offset, return an error instead of
+	// silently overriding it.
+	if opt.MultiTenancy {
+		if opt.NamespaceOffset < 0 {
+			opt.NamespaceOffset = 0
+		} else if opt.NamespaceOffset != 0 {
+			return fmt.Errorf("MultiTenancy requires NamespaceOffset to be 0, got %d", opt.NamespaceOffset)
+		}
 	}
 	return nil
 }
@@ -392,6 +412,13 @@ func Open(opt Options) (*DB, error) {
 
 	if err := db.initBannedNamespaces(); err != nil {
 		return db, fmt.Errorf("While setting banned keys: %w", err)
+	}
+
+	if opt.MultiTenancy {
+		db.tenants = newTenantManager(db)
+		if err := db.tenants.load(); err != nil {
+			return db, fmt.Errorf("While loading tenants: %w", err)
+		}
 	}
 
 	db.closers.writes = z.NewCloser(1)
@@ -1947,6 +1974,29 @@ func (db *DB) isBanned(key []byte) error {
 	return nil
 }
 
+// isAllowedTenant is the multi-tenancy enforcement hook invoked from the write path
+// (Txn.modify). It returns ErrUnknownTenant when MultiTenancy is enabled and the key's
+// namespace is not a registered tenant. Internal keys (the registry itself) are always
+// allowed. Returns nil when MultiTenancy is disabled.
+func (db *DB) isAllowedTenant(key []byte) error {
+	if !db.opt.MultiTenancy {
+		return nil
+	}
+	if bytes.HasPrefix(key, badgerPrefix) {
+		return nil
+	}
+	// A key must be long enough to contain the 8-byte namespace at NamespaceOffset.
+	// Use "<" (not "<=") so a key of exactly NamespaceOffset+8 bytes — a registered
+	// tenant id with an empty logical key — is accepted.
+	if db.opt.NamespaceOffset < 0 || len(key) < db.opt.NamespaceOffset+8 {
+		return ErrUnknownTenant
+	}
+	if !db.tenants.isKnown(y.BytesToU64(key[db.opt.NamespaceOffset:])) {
+		return ErrUnknownTenant
+	}
+	return nil
+}
+
 // BanNamespace bans a namespace. Read/write to keys belonging to any of such namespace is denied.
 func (db *DB) BanNamespace(ns uint64) error {
 	if db.opt.NamespaceOffset < 0 {
@@ -1976,6 +2026,34 @@ func (db *DB) BanNamespace(ns uint64) error {
 // BannedNamespaces returns the list of prefixes banned for DB.
 func (db *DB) BannedNamespaces() []uint64 {
 	return db.bannedNamespaces.all()
+}
+
+// Tenants returns the TenantManager for this DB. It returns nil if multi-tenancy is
+// not enabled (Options.MultiTenancy == false).
+func (db *DB) Tenants() *TenantManager {
+	return db.tenants
+}
+
+// TenantScope returns a TenantScope bound to the given tenant id. All operations on
+// the scope automatically prefix user keys with the tenant's namespace at
+// Options.NamespaceOffset and reject cross-tenant access. Returns an error if multi-
+// tenancy is disabled, the DB is in managed mode, or the tenant is unknown.
+//
+// TenantScope is not available in managed mode: its one-shot and Update/View operations
+// assign timestamps internally, which conflicts with managed mode's user-supplied
+// timestamps. Managed-mode users should namespace keys themselves via NewTransactionAt
+// while still using DB.Tenants() for the tenant registry.
+func (db *DB) TenantScope(id uint64) (*TenantScope, error) {
+	if !db.opt.MultiTenancy {
+		return nil, ErrMultiTenancyNotEnabled
+	}
+	if db.opt.managedTxns {
+		return nil, ErrTenantScopeManaged
+	}
+	if !db.tenants.isKnown(id) {
+		return nil, ErrTenantNotFound
+	}
+	return newTenantScope(db, id), nil
 }
 
 // KVList contains a list of key-value pairs.
