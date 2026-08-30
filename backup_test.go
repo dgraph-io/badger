@@ -7,18 +7,26 @@ package badger
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 func TestBackupRestore1(t *testing.T) {
@@ -551,4 +559,183 @@ func TestBackupBitClear(t *testing.T) {
 		require.Equal(t, val, v)
 		return nil
 	}))
+}
+
+// TestOrchestrateWorkersShareReadTs verifies that Stream.Orchestrate pins a
+// single read timestamp that every worker shares, rather than letting each
+// worker open its own transaction at a (potentially) different time. The latter
+// is what caused inconsistent/torn backups (#2049).
+func TestOrchestrateWorkersShareReadTs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	// Pre-populate enough keys so Stream.Ranges splits the keyspace into
+	// multiple ranges that get handled by different workers.
+	const nKeys = 20000
+	wb := db.NewWriteBatch()
+	for i := 0; i < nKeys; i++ {
+		require.NoError(t, wb.Set([]byte(fmt.Sprintf("key-%05d", i)), []byte(strconv.Itoa(i))))
+	}
+	require.NoError(t, wb.Flush())
+
+	// Churn writer: keeps committing while the stream runs. If workers each
+	// opened their own transaction at different times, this would cause them to
+	// observe different read timestamps.
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		j := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("churn"), []byte(strconv.Itoa(j)))
+			})
+			j++
+		}
+	}()
+
+	// Record the read timestamp observed by each worker via the iterator.
+	var mu sync.Mutex
+	readTs := make(map[uint64]struct{})
+	stream := db.NewStream()
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		mu.Lock()
+		readTs[itr.readTs] = struct{}{}
+		mu.Unlock()
+		return stream.ToList(key, itr)
+	}
+	// Discard the streamed output; we only care about the readTs observed above.
+	stream.Send = func(buf *z.Buffer) error { return nil }
+
+	require.NoError(t, stream.Orchestrate(context.Background()))
+
+	close(stop)
+	wg.Wait()
+
+	// With a single shared read transaction, every worker must observe the same
+	// timestamp. If workers read different timestamps, a backup built from them
+	// could observe a torn transaction.
+	require.Len(t, readTs, 1, "workers did not share a single read timestamp: %v", readTs)
+}
+
+// TestBackupConsistentSnapshot ensures that DB.Backup produces a point-in-time
+// snapshot even while writes are happening concurrently. Each writer commits a
+// pair of keys (one at each end of the keyspace, so they land in different
+// stream ranges and are handled by different workers) in a single transaction.
+// A backup must observe either both keys of a pair or neither — never a torn
+// half (one key visible without the other).
+func TestBackupConsistentSnapshot(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	const prePopulate = 20000
+	wb := db.NewWriteBatch()
+	for i := 0; i < prePopulate; i++ {
+		require.NoError(t, wb.Set([]byte(fmt.Sprintf("key-%05d", i)), []byte(strconv.Itoa(i))))
+	}
+	require.NoError(t, wb.Flush())
+
+	const numWriters = 16
+	const pairsPerWriter = 500
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, numWriters)
+
+	for w := 0; w < numWriters; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for j := 0; j < pairsPerWriter; j++ {
+				err := db.Update(func(txn *Txn) error {
+					val := []byte(strconv.Itoa(j))
+					// Two keys at opposite ends of the keyspace, committed
+					// atomically in a single transaction.
+					if err := txn.Set([]byte(fmt.Sprintf("a-%d-%d", w, j)), val); err != nil {
+						return err
+					}
+					return txn.Set([]byte(fmt.Sprintf("z-%d-%d", w, j)), val)
+				})
+				if err != nil {
+					errCh <- err
+					return
+				}
+				// Yield so the backup goroutine below keeps getting scheduled
+				// while writers are still active.
+				runtime.Gosched()
+			}
+		}(w)
+	}
+
+	// Run several backups while writers are churning and assert none of them
+	// observe a torn transaction.
+	for b := 0; b < 30; b++ {
+		var buf bytes.Buffer
+		_, err := db.Backup(&buf, 0)
+		require.NoError(t, err)
+		checkBackupConsistency(t, &buf)
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("writer failed: %v", err)
+	}
+}
+
+// checkBackupConsistency parses a backup stream and fails the test if it
+// contains one half of a paired write without the other.
+func checkBackupConsistency(t *testing.T, buf *bytes.Buffer) {
+	t.Helper()
+
+	r := bytes.NewReader(buf.Bytes())
+	keys := make(map[string][]byte)
+	for {
+		var sz uint64
+		if err := binary.Read(r, binary.LittleEndian, &sz); err != nil {
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+		}
+		chunk := make([]byte, sz)
+		if _, err := io.ReadFull(r, chunk); err != nil {
+			require.NoError(t, err)
+		}
+		var list pb.KVList
+		require.NoError(t, proto.Unmarshal(chunk, &list))
+		for _, kv := range list.Kv {
+			keys[string(kv.Key)] = kv.Value
+		}
+	}
+
+	for k, v := range keys {
+		var partner string
+		switch {
+		case strings.HasPrefix(k, "a-"):
+			partner = "z-" + strings.TrimPrefix(k, "a-")
+		case strings.HasPrefix(k, "z-"):
+			partner = "a-" + strings.TrimPrefix(k, "z-")
+		default:
+			continue
+		}
+		pv, ok := keys[partner]
+		require.True(t, ok, "backup contains %q but not its partner %q: torn transaction", k, partner)
+		require.Equal(t, v, pv, "values of %q and %q differ", k, partner)
+	}
 }
