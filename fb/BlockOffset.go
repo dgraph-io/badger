@@ -84,8 +84,72 @@ func (rcv *BlockOffset) MutateLen(n uint32) bool {
 	return rcv._tab.MutateUint32Slot(8, n)
 }
 
+// MinVersion is the smallest key version (timestamp) among the keys in this
+// block. Stored in an appended flatbuffer field (vtable slot 3, offset 10) so
+// that blocks written without it decode to 0.
+func (rcv *BlockOffset) MinVersion() uint64 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
+	if o != 0 {
+		return rcv._tab.GetUint64(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *BlockOffset) MutateMinVersion(n uint64) bool {
+	return rcv._tab.MutateUint64Slot(10, n)
+}
+
+// MaxVersion is the largest key version (timestamp) among the keys in this
+// block. Stored in an appended flatbuffer field (vtable slot 4, offset 12).
+func (rcv *BlockOffset) MaxVersion() uint64 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		return rcv._tab.GetUint64(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *BlockOffset) MutateMaxVersion(n uint64) bool {
+	return rcv._tab.MutateUint64Slot(12, n)
+}
+
+// VersionRangePresent reports whether this block carries a [min,max] version
+// range (i.e. it was produced by version-range-aware code). A block written by
+// older code returns false and must never be pruned.
+func (rcv *BlockOffset) VersionRangePresent() bool {
+	return rcv._tab.Offset(10) != 0 && rcv._tab.Offset(12) != 0
+}
+
+// UncompressedLen is the uncompressed byte length of this block. Stored in an
+// appended flatbuffer field (vtable slot 5, offset 14); 0 when absent.
+func (rcv *BlockOffset) UncompressedLen() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *BlockOffset) MutateUncompressedLen(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(14, n)
+}
+
+// KeyCount is the number of entries in this block. Stored in an appended
+// flatbuffer field (vtable slot 6, offset 16); 0 when absent.
+func (rcv *BlockOffset) KeyCount() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *BlockOffset) MutateKeyCount(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(16, n)
+}
+
 func BlockOffsetStart(builder *flatbuffers.Builder) {
-	builder.StartObject(3)
+	builder.StartObject(7)
 }
 func BlockOffsetAddKey(builder *flatbuffers.Builder, key flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(key), 0)
@@ -98,6 +162,18 @@ func BlockOffsetAddOffset(builder *flatbuffers.Builder, offset uint32) {
 }
 func BlockOffsetAddLen(builder *flatbuffers.Builder, len uint32) {
 	builder.PrependUint32Slot(2, len, 0)
+}
+func BlockOffsetAddMinVersion(builder *flatbuffers.Builder, minVersion uint64) {
+	builder.PrependUint64Slot(3, minVersion, 0)
+}
+func BlockOffsetAddMaxVersion(builder *flatbuffers.Builder, maxVersion uint64) {
+	builder.PrependUint64Slot(4, maxVersion, 0)
+}
+func BlockOffsetAddUncompressedLen(builder *flatbuffers.Builder, uncompressedLen uint32) {
+	builder.PrependUint32Slot(5, uncompressedLen, 0)
+}
+func BlockOffsetAddKeyCount(builder *flatbuffers.Builder, keyCount uint32) {
+	builder.PrependUint32Slot(6, keyCount, 0)
 }
 func BlockOffsetEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

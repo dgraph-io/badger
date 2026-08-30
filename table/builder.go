@@ -62,6 +62,13 @@ type bblock struct {
 	baseKey      []byte   // Base key for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	end          int      // Points to the end offset of the block.
+
+	// minVersion/maxVersion are a conservative [min,max] over the versions
+	// (timestamps) of every key added to this block, including tombstones.
+	// minVersion is initialized to MaxUint64 so the first key sets the range.
+	// They are emitted into the BlockOffset for version-range scan pruning.
+	minVersion uint64
+	maxVersion uint64
 }
 
 // Builder is used in building a table.
@@ -72,12 +79,18 @@ type Builder struct {
 	compressedSize   atomic.Uint32
 	uncompressedSize atomic.Uint32
 
-	lenOffsets    uint32
-	keyHashes     []uint32 // Used for building the bloomfilter.
-	opts          *Options
-	maxVersion    uint64
-	onDiskSize    uint32
-	staleDataSize int
+	lenOffsets uint32
+	keyHashes  []uint32 // Used for building the bloomfilter.
+	opts       *Options
+	maxVersion uint64
+	minVersion uint64 // Smallest key version across the whole table (MaxUint64 until first key).
+	onDiskSize uint32
+
+	// omitVersionRange, when true, suppresses emitting the appended version-range
+	// fields, reproducing the on-disk layout written by code predating this
+	// feature. Test-only; production always emits the range.
+	omitVersionRange bool
+	staleDataSize    int
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -120,12 +133,14 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc: opts.AllocPool.Get(sz, "TableBuilder"),
-		opts:  &opts,
+		alloc:      opts.AllocPool.Get(sz, "TableBuilder"),
+		opts:       &opts,
+		minVersion: math.MaxUint64,
 	}
 	b.alloc.Tag = "Builder"
 	b.curBlock = &bblock{
-		data: b.alloc.Allocate(opts.BlockSize + padding),
+		data:       b.alloc.Allocate(opts.BlockSize + padding),
+		minVersion: math.MaxUint64,
 	}
 	b.opts.tableCapacity = uint64(float64(b.opts.TableSize) * 0.95)
 
@@ -209,8 +224,21 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
-	if version := y.ParseTs(key); version > b.maxVersion {
+	version := y.ParseTs(key)
+	if version > b.maxVersion {
 		b.maxVersion = version
+	}
+	if version < b.minVersion {
+		b.minVersion = version
+	}
+	// Track a conservative per-block [min,max] over every key's version,
+	// including tombstones (their version is part of the key). The first key in
+	// a block sets the range since minVersion starts at MaxUint64.
+	if version > b.curBlock.maxVersion {
+		b.curBlock.maxVersion = version
+	}
+	if version < b.curBlock.minVersion {
+		b.curBlock.minVersion = version
 	}
 
 	// diffKey stores the difference of key with baseKey.
@@ -342,7 +370,8 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, 
 		b.finishBlock()
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
-			data: b.alloc.Allocate(b.opts.BlockSize + padding),
+			data:       b.alloc.Allocate(b.opts.BlockSize + padding),
+			minVersion: math.MaxUint64,
 		}
 	}
 	b.addHelper(key, value, valueLen)
@@ -542,10 +571,19 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 		bfoff = builder.CreateByteVector(bloom)
 	}
 	b.onDiskSize += dataSize
+	// Normalize the table-wide min version: if no keys were added, minVersion is
+	// still MaxUint64; emit 0 so we don't advertise a bogus range.
+	minVersion := b.minVersion
+	if minVersion == math.MaxUint64 {
+		minVersion = 0
+	}
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
+	if !b.omitVersionRange {
+		fb.TableIndexAddMinVersion(builder, minVersion)
+	}
 	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize.Load())
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
@@ -584,5 +622,17 @@ func (b *Builder) writeBlockOffset(
 	fb.BlockOffsetAddKey(builder, k)
 	fb.BlockOffsetAddOffset(builder, startOffset)
 	fb.BlockOffsetAddLen(builder, uint32(bl.end))
+	if b.omitVersionRange {
+		return fb.BlockOffsetEnd(builder)
+	}
+	// Per-block version range for scan pruning, plus near-free decompress sizing.
+	// A finished block always has at least one key, so [minVersion,maxVersion] is
+	// a valid conservative range. Note: when minVersion==0 (and/or maxVersion==0)
+	// the field is omitted by flatbuffers (value==default), and the reader will
+	// treat the block range as absent and never prune it — a safe fallback.
+	fb.BlockOffsetAddMinVersion(builder, bl.minVersion)
+	fb.BlockOffsetAddMaxVersion(builder, bl.maxVersion)
+	fb.BlockOffsetAddUncompressedLen(builder, uint32(bl.end))
+	fb.BlockOffsetAddKeyCount(builder, uint32(len(bl.entryOffsets)))
 	return fb.BlockOffsetEnd(builder)
 }
