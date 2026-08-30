@@ -473,9 +473,21 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := txn.db.getMemTables()
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
-	var iters []y.Iterator
-	if itr := txn.newPendingWritesIterator(opt.Reverse); itr != nil {
-		iters = append(iters, itr)
+	// Pre-size for the deterministic memtable-pass plus the optional
+	// pending-writes iterator. appendIterators may still grow the slice
+	// for level iterators, but eliminating the per-memtable growslice
+	// path is a measurable win in dgraph's posting list rollup, where
+	// len(tables) is typically 6 and the original append-from-nil
+	// pattern hit growslice 3 times (0→1→2→4→8) just to fit the
+	// memtable iterators.
+	pendingItr := txn.newPendingWritesIterator(opt.Reverse)
+	itersCap := len(tables)
+	if pendingItr != nil {
+		itersCap++
+	}
+	iters := make([]y.Iterator, 0, itersCap)
+	if pendingItr != nil {
+		iters = append(iters, pendingItr)
 	}
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
