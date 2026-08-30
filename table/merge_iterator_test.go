@@ -273,6 +273,22 @@ func TestMergeIteratorSeekInvalidReversed(t *testing.T) {
 	closeAndCheck(t, mergeIt, 4)
 }
 
+// TestMergeIteratorNextOnInvalid exercises the early-return guard in Next()
+// for the case where Next is called on an iterator that has already become
+// invalid (Seek past the end). The call must be a safe no-op.
+func TestMergeIteratorNextOnInvalid(t *testing.T) {
+	it1 := newSimpleIterator([]string{"1", "3"}, []string{"a1", "a3"}, false)
+	it2 := newSimpleIterator([]string{"2", "4"}, []string{"b2", "b4"}, false)
+	mergeIt := NewMergeIterator([]y.Iterator{it1, it2}, false)
+	// Seek past the end so the iterator is invalid.
+	mergeIt.Seek([]byte("z"))
+	require.False(t, mergeIt.Valid())
+	// Next on an invalid iterator must not panic and must remain invalid.
+	mergeIt.Next()
+	require.False(t, mergeIt.Valid())
+	closeAndCheck(t, mergeIt, 2)
+}
+
 func TestMergeIteratorDuplicate(t *testing.T) {
 	it1 := newSimpleIterator([]string{"0", "1", "2"}, []string{"a0", "a1", "a2"}, false)
 	it2 := newSimpleIterator([]string{"1", "3"}, []string{"b1", "b3"}, false)
