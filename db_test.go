@@ -2889,6 +2889,11 @@ func TestOpenWithEmptyVlogFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(0), fi.Size(), "empty .vlog file should be left untouched")
 
+	// The skipped fid must have been removed from filesMap; a lingering entry
+	// would hold a nil MmapFile and panic on Close.
+	_, ok := db2.vlog.filesMap[uint32(emptyFid)]
+	require.False(t, ok, "skipped 0-byte .vlog file must not remain in filesMap")
+
 	// Step 4: Verify existing data is intact.
 	err = db2.View(func(txn *Txn) error {
 		for i := 0; i < 100; i++ {
@@ -2915,7 +2920,10 @@ func TestOpenWithEmptyVlogFile(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, db2.Close())
+	// Close must not panic.
+	require.NotPanics(t, func() {
+		require.NoError(t, db2.Close())
+	})
 
 	// Step 6: Read-only Open must also succeed with the empty .vlog file present.
 	roOpt := opt
@@ -2923,55 +2931,4 @@ func TestOpenWithEmptyVlogFile(t *testing.T) {
 	db3, err := Open(roOpt)
 	require.NoError(t, err, "read-only Open should succeed with an empty .vlog file")
 	require.NoError(t, db3.Close())
-}
-
-// TestVlogCloseWithEmptyFile verifies that vlog.Close() does not panic when a
-// 0-byte .vlog file was skipped during Open. The skip must remove the unopened
-// logFile from filesMap, otherwise Close() iterates over it and dereferences its
-// nil MmapFile, causing a panic.
-func TestVlogCloseWithEmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	opt := getTestOptions(dir)
-
-	// Create a DB with a value so a non-empty .vlog file exists.
-	db, err := Open(opt)
-	require.NoError(t, err)
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("key"), []byte("value"))
-	}))
-	require.NoError(t, db.Close())
-
-	// Plant a 0-byte .vlog file with a higher fid than any existing .vlog file.
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	var maxFid uint32
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".vlog") {
-			continue
-		}
-		if fid, err := strconv.ParseUint(name[:len(name)-len(".vlog")], 10, 32); err == nil {
-			if uint32(fid) > maxFid {
-				maxFid = uint32(fid)
-			}
-		}
-	}
-	emptyFid := maxFid + 1
-	emptyFile := filepath.Join(dir, fmt.Sprintf("%06d.vlog", emptyFid))
-	f, err := os.Create(emptyFile)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-
-	db2, err := Open(opt)
-	require.NoError(t, err)
-
-	// The skipped 0-byte file's fid must be removed from filesMap; a lingering
-	// entry would hold a nil MmapFile and panic on Close.
-	_, ok := db2.vlog.filesMap[emptyFid]
-	require.False(t, ok, "skipped 0-byte .vlog file must not remain in filesMap")
-
-	// Close must not panic.
-	require.NotPanics(t, func() {
-		require.NoError(t, db2.Close())
-	})
 }
