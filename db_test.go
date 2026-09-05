@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2734,4 +2736,199 @@ func TestCloseDBWhileReading(t *testing.T) {
 	time.Sleep(time.Second)
 	require.NoError(t, db.Close())
 	wg.Wait()
+}
+
+// TestOpenWithEmptyMemFile verifies that badger.Open handles empty .mem files
+// gracefully. An empty .mem file can be left behind after a crash that occurs
+// between file creation and the first write. The fix for #2207 stats each .mem
+// file during discovery and skips 0-byte files, which works for both read-write
+// and read-only modes without mutating the file.
+func TestOpenWithEmptyMemFile(t *testing.T) {
+	dir := t.TempDir()
+	opt := getTestOptions(dir)
+
+	// Step 1: Create a DB with some data.
+	db, err := Open(opt)
+	require.NoError(t, err)
+	for i := 0; i < 100; i++ {
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key:%05d", i)),
+				[]byte(fmt.Sprintf("value:%05d", i)))
+		})
+		require.NoError(t, err)
+	}
+	require.NoError(t, db.Close())
+
+	// Step 2: Find the highest file ID in the directory and create an empty
+	// .mem file with a higher ID. After a clean close, memtable WALs are
+	// flushed and deleted, so we may need to pick fid 1 from scratch.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	maxFid := 0
+	for _, e := range entries {
+		name := e.Name()
+		// Match both .mem and .sst files to find the highest ID.
+		for _, ext := range []string{memFileExt, ".sst", ".vlog"} {
+			if strings.HasSuffix(name, ext) {
+				fidStr := name[:len(name)-len(ext)]
+				if fid, err := strconv.ParseInt(fidStr, 10, 64); err == nil {
+					if int(fid) > maxFid {
+						maxFid = int(fid)
+					}
+				}
+			}
+		}
+	}
+	emptyFid := maxFid + 1
+	emptyFile := filepath.Join(dir, fmt.Sprintf("%05d%s", emptyFid, memFileExt))
+	f, err := os.Create(emptyFile)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// Step 3: Re-open the DB. This must succeed despite the empty .mem file.
+	db2, err := Open(opt)
+	require.NoError(t, err, "Open should succeed with an empty .mem file")
+
+	// The empty file should still exist — the stat-and-skip approach is
+	// intentionally non-mutating so it works in read-only mode as well.
+	require.FileExists(t, emptyFile)
+	fi, err := os.Stat(emptyFile)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), fi.Size(), "empty .mem file should be left untouched")
+
+	// Step 4: Verify existing data is intact.
+	err = db2.View(func(txn *Txn) error {
+		for i := 0; i < 100; i++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key:%05d", i)))
+			if err != nil {
+				return err
+			}
+			err = item.Value(func(val []byte) error {
+				expected := fmt.Sprintf("value:%05d", i)
+				require.Equal(t, expected, string(val))
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Step 5: Write more data to ensure the DB is fully functional.
+	err = db2.Update(func(txn *Txn) error {
+		return txn.Set([]byte("new-key"), []byte("new-value"))
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db2.Close())
+
+	// Step 6: Read-only Open must also succeed with the empty .mem file
+	// present, since the stat-and-skip approach avoids truncation entirely.
+	roOpt := opt
+	roOpt.ReadOnly = true
+	db3, err := Open(roOpt)
+	require.NoError(t, err, "read-only Open should succeed with an empty .mem file")
+	require.NoError(t, db3.Close())
+}
+
+// TestOpenWithEmptyVlogFile verifies that badger.Open handles empty .vlog files
+// gracefully. Like an empty .mem file, a 0-byte .vlog file can be left behind
+// after a crash between file creation and the first write. The fix stats each
+// .vlog file during open and skips 0-byte files, which works for both read-write
+// and read-only modes without mutating the file.
+func TestOpenWithEmptyVlogFile(t *testing.T) {
+	dir := t.TempDir()
+	opt := getTestOptions(dir)
+
+	// Step 1: Create a DB with some data.
+	db, err := Open(opt)
+	require.NoError(t, err)
+	for i := 0; i < 100; i++ {
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key:%05d", i)),
+				[]byte(fmt.Sprintf("value:%05d", i)))
+		})
+		require.NoError(t, err)
+	}
+	require.NoError(t, db.Close())
+
+	// Step 2: Find the highest file ID and plant an empty .vlog file with a
+	// higher ID. Value log files use %06d.vlog (6-digit zero padding).
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	maxFid := 0
+	for _, e := range entries {
+		name := e.Name()
+		for _, ext := range []string{".vlog", ".sst", memFileExt} {
+			if strings.HasSuffix(name, ext) {
+				fidStr := name[:len(name)-len(ext)]
+				if fid, err := strconv.ParseInt(fidStr, 10, 64); err == nil {
+					if int(fid) > maxFid {
+						maxFid = int(fid)
+					}
+				}
+			}
+		}
+	}
+	emptyFid := maxFid + 1
+	emptyFile := filepath.Join(dir, fmt.Sprintf("%06d.vlog", emptyFid))
+	f, err := os.Create(emptyFile)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// Step 3: Re-open the DB. This must succeed despite the empty .vlog file.
+	db2, err := Open(opt)
+	require.NoError(t, err, "Open should succeed with an empty .vlog file")
+
+	// The empty file should still exist — stat-and-skip is non-mutating so it
+	// works in read-only mode as well.
+	require.FileExists(t, emptyFile)
+	fi, err := os.Stat(emptyFile)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), fi.Size(), "empty .vlog file should be left untouched")
+
+	// The skipped fid must have been removed from filesMap; a lingering entry
+	// would hold a nil MmapFile and panic on Close.
+	_, ok := db2.vlog.filesMap[uint32(emptyFid)]
+	require.False(t, ok, "skipped 0-byte .vlog file must not remain in filesMap")
+
+	// Step 4: Verify existing data is intact.
+	err = db2.View(func(txn *Txn) error {
+		for i := 0; i < 100; i++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key:%05d", i)))
+			if err != nil {
+				return err
+			}
+			err = item.Value(func(val []byte) error {
+				expected := fmt.Sprintf("value:%05d", i)
+				require.Equal(t, expected, string(val))
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Step 5: Write more data to ensure the DB is fully functional.
+	err = db2.Update(func(txn *Txn) error {
+		return txn.Set([]byte("new-key"), []byte("new-value"))
+	})
+	require.NoError(t, err)
+
+	// Close must not panic.
+	require.NotPanics(t, func() {
+		require.NoError(t, db2.Close())
+	})
+
+	// Step 6: Read-only Open must also succeed with the empty .vlog file present.
+	roOpt := opt
+	roOpt.ReadOnly = true
+	db3, err := Open(roOpt)
+	require.NoError(t, err, "read-only Open should succeed with an empty .vlog file")
+	require.NoError(t, db3.Close())
 }
