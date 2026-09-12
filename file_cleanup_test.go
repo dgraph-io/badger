@@ -10,7 +10,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/ristretto/v2/z"
 	"github.com/stretchr/testify/require"
@@ -92,4 +94,57 @@ func TestCloseMmapOnErrorCloseFailure(t *testing.T) {
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, contents, got)
+}
+
+func bootstrapFailureLog(t *testing.T) *logFile {
+	t.Helper()
+	dir := t.TempDir()
+	opt := openFailureOptions(dir).WithEncryptionKey(bytes.Repeat([]byte{0x11}, 32))
+	kr, err := OpenKeyRegistry(KeyRegistryOptions{
+		Dir: dir, EncryptionKey: opt.EncryptionKey, EncryptionKeyRotationDuration: time.Hour,
+	})
+	require.NoError(t, err)
+	// A closed registry makes the real bootstrap fail while persisting its first key.
+	require.NoError(t, kr.Close())
+	lf := &logFile{path: filepath.Join(dir, "00001.mem"), fid: 1, opt: opt, registry: kr}
+	t.Cleanup(func() { require.NoError(t, lf.closeOnError()) })
+	return lf
+}
+
+func TestLogFileBootstrapFailureRemovesFile(t *testing.T) {
+	lf := bootstrapFailureLog(t)
+	err := lf.open(lf.path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 4096)
+	require.ErrorContains(t, err, "Error while retrieving datakey")
+	require.Nil(t, lf.MmapFile)
+	require.NoFileExists(t, lf.path, "Windows requires unmapping and closing before removal")
+
+	// The same file ID must be available for a successful retry.
+	kr, err := OpenKeyRegistry(lf.registry.opt)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, kr.Close()) })
+	lf.registry = kr
+	require.ErrorIs(t, lf.open(lf.path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 4096), z.NewFile)
+	require.NoError(t, lf.closeOnError())
+}
+
+func TestLogFileBootstrapFailureReturnsRemoveError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix directory permissions enforced for a non-root user")
+	}
+	lf := bootstrapFailureLog(t)
+	// Ristretto also reports NewFile for an existing zero-length file. It can be
+	// opened for writing without permission to remove entries from its directory.
+	require.NoError(t, os.WriteFile(lf.path, nil, 0600))
+	dir := filepath.Dir(lf.path)
+	require.NoError(t, os.Chmod(dir, 0500))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0700)) })
+	err := lf.open(lf.path, os.O_RDWR, 4096)
+	require.ErrorContains(t, err, "Error while retrieving datakey")
+	require.ErrorIs(t, err, os.ErrPermission)
+	var pathErr *os.PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Equal(t, "remove", pathErr.Op)
+	require.Equal(t, lf.path, pathErr.Path)
+	require.Nil(t, lf.MmapFile)
+	require.FileExists(t, lf.path)
 }

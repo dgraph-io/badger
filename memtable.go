@@ -586,8 +586,11 @@ func (lf *logFile) open(path string, flags int, fsize int64) (err error) {
 
 	if ferr == z.NewFile {
 		if err := lf.bootstrap(); err != nil {
-			os.Remove(path)
-			return err
+			// Windows cannot remove a file while its mapping or handle is open.
+			if cleanupErr := lf.closeOnError(); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			return errors.Join(err, os.Remove(path))
 		}
 		lf.size.Store(vlogHeaderSize)
 
