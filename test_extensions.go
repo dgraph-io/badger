@@ -29,6 +29,9 @@ type testOnlyOptions struct {
 	// that can occur in a DB instance. Currently, this is only used in
 	// testing activities.
 	syncChan chan string
+
+	// tableOpenHook controls table-loader scheduling in failure tests. Nil in production.
+	tableOpenHook func(*TableManifest)
 }
 
 // testOnlyDBExtensions specifies an extension to the type DB that we want to

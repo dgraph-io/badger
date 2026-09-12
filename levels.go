@@ -111,8 +111,10 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		default:
 		}
 		if err := throttle.Do(); err != nil {
-			closeAllTables(tables)
-			return nil, err
+			// Already dispatched loaders still own mappings and append to tables.
+			// Join them before closing tables or allowing Open's cleanup to run.
+			_ = throttle.Finish()
+			return nil, errors.Join(err, closeAllTables(tables))
 		}
 		if fileID > maxFileID {
 			maxFileID = fileID
@@ -126,6 +128,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				throttle.Done(rerr)
 				numOpened.Add(1)
 			}()
+			if db.opt.tableOpenHook != nil {
+				db.opt.tableOpenHook(&tf)
+			}
 			// tables is sized by opt.MaxLevels, and nothing upstream constrains
 			// the level recorded in the manifest, so reject an out-of-range level
 			// here rather than letting the append below panic.
@@ -170,8 +175,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		}(fname, tf)
 	}
 	if err := throttle.Finish(); err != nil {
-		closeAllTables(tables)
-		return nil, err
+		return nil, errors.Join(err, closeAllTables(tables))
 	}
 	db.opt.Infof("All %d tables opened in %s\n", numOpened.Load(),
 		time.Since(start).Round(time.Millisecond))
@@ -182,29 +186,38 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 
 	// Make sure key ranges do not overlap etc.
 	if err := s.validate(); err != nil {
-		_ = s.cleanupLevels()
-		return nil, y.Wrap(err, "Level validation")
+		return nil, errors.Join(y.Wrap(err, "Level validation"), s.closeOnError())
 	}
 
 	// Sync directory (because we have at least removed some files, or previously created the
 	// manifest file).
 	if err := syncDir(db.opt.Dir); err != nil {
-		_ = s.close()
-		return nil, err
+		return nil, errors.Join(err, s.closeOnError())
 	}
 
 	return s, nil
 }
 
-// Closes the tables, for cleanup in newLevelsController.  (We Close() instead of using DecrRef()
-// because that would delete the underlying files.)  We ignore errors, which is OK because tables
-// are read-only.
-func closeAllTables(tables [][]*table.Table) {
+// closeAllTables is used after failed initialization, once every loader has
+// stopped. Never DecrRef these tables: it would delete existing SST files.
+func closeAllTables(tables [][]*table.Table) (err error) {
 	for _, tableSlice := range tables {
-		for _, table := range tableSlice {
-			_ = table.Close(-1)
+		for _, t := range tableSlice {
+			if !t.IsInmemory {
+				err = errors.Join(err, closeMmapOnError(t.MmapFile))
+			}
 		}
 	}
+	return err
+}
+
+// closeOnError requires that all workers using this controller have stopped.
+func (s *levelsController) closeOnError() error {
+	tables := make([][]*table.Table, 0, len(s.levels))
+	for _, level := range s.levels {
+		tables = append(tables, level.tables)
+	}
+	return closeAllTables(tables)
 }
 
 func (s *levelsController) cleanupLevels() error {

@@ -221,7 +221,13 @@ func (t *Throttle) Do() error {
 // pass the error status of work done.
 func (t *Throttle) Done(err error) {
 	if err != nil {
-		t.errCh <- err
+		// Do can schedule more work while an earlier error is buffered. Never
+		// block Done on a full error channel: Finish waits for Done before it
+		// drains errors. A full channel already guarantees an error is reported.
+		select {
+		case t.errCh <- err:
+		default:
+		}
 	}
 	select {
 	case <-t.ch:
