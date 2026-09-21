@@ -2841,14 +2841,20 @@ func TestOpenWithEmptyMemFile(t *testing.T) {
 func TestOpenWithEmptyVlogFile(t *testing.T) {
 	dir := t.TempDir()
 	opt := getTestOptions(dir)
+	// The default ValueThreshold is 1MB, which would inline every value in the
+	// LSM tree and leave the value log read path untested. Drop it so the
+	// values below actually land in a .vlog file.
+	opt.ValueThreshold = 32
+	value := func(i int) []byte {
+		return []byte(fmt.Sprintf("value:%05d:%s", i, strings.Repeat("v", 64)))
+	}
 
 	// Step 1: Create a DB with some data.
 	db, err := Open(opt)
 	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte(fmt.Sprintf("key:%05d", i)),
-				[]byte(fmt.Sprintf("value:%05d", i)))
+			return txn.Set([]byte(fmt.Sprintf("key:%05d", i)), value(i))
 		})
 		require.NoError(t, err)
 	}
@@ -2902,8 +2908,7 @@ func TestOpenWithEmptyVlogFile(t *testing.T) {
 				return err
 			}
 			err = item.Value(func(val []byte) error {
-				expected := fmt.Sprintf("value:%05d", i)
-				require.Equal(t, expected, string(val))
+				require.Equal(t, value(i), val)
 				return nil
 			})
 			if err != nil {
@@ -2925,10 +2930,103 @@ func TestOpenWithEmptyVlogFile(t *testing.T) {
 		require.NoError(t, db2.Close())
 	})
 
-	// Step 6: Read-only Open must also succeed with the empty .vlog file present.
+	// Step 6: Read-only Open must also succeed with the empty .vlog file
+	// present, and must serve reads out of the value log. Read-only never
+	// calls createVlogFile, so vlog.maxFid still names the skipped artifact
+	// here; the read path has to cope with that.
 	roOpt := opt
 	roOpt.ReadOnly = true
 	db3, err := Open(roOpt)
 	require.NoError(t, err, "read-only Open should succeed with an empty .vlog file")
+	require.NoError(t, db3.View(func(txn *Txn) error {
+		for i := 0; i < 100; i++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key:%05d", i)))
+			if err != nil {
+				return err
+			}
+			got, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			require.Equal(t, value(i), got)
+		}
+		return nil
+	}))
 	require.NoError(t, db3.Close())
+}
+
+// TestEmptyVlogFileDoesNotSkipTailRecovery verifies that a 0-byte .vlog crash
+// artifact does not rob the newest surviving value log file of its tail
+// recovery. populateFilesMap sets vlog.maxFid from the directory listing before
+// the 0-byte file is skipped, so maxFid names a file that is no longer in
+// filesMap. Indexing filesMap by maxFid there would skip the iterate-and-
+// truncate pass that trims a partially written entry off the last file — and
+// the crash that leaves a 0-byte .vlog behind is exactly the crash that can
+// leave a torn tail on the file before it.
+func TestEmptyVlogFileDoesNotSkipTailRecovery(t *testing.T) {
+	newestVlog := func(dir string) (string, uint32) {
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		var maxFid uint32
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".vlog") {
+				continue
+			}
+			fid, err := strconv.ParseUint(strings.TrimSuffix(name, ".vlog"), 10, 32)
+			require.NoError(t, err)
+			if uint32(fid) > maxFid {
+				maxFid = uint32(fid)
+			}
+		}
+		return filepath.Join(dir, fmt.Sprintf("%06d.vlog", maxFid)), maxFid
+	}
+
+	// plantEmpty controls whether a 0-byte .vlog artifact sits above the torn
+	// file. Recovery must behave identically either way.
+	run := func(t *testing.T, plantEmpty bool) {
+		dir := t.TempDir()
+		opt := getTestOptions(dir)
+		opt.ValueThreshold = 32
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+		val := []byte(strings.Repeat("v", 1024))
+		for i := 0; i < 50; i++ {
+			require.NoError(t, db.Update(func(txn *Txn) error {
+				return txn.Set([]byte(fmt.Sprintf("key:%05d", i)), val)
+			}))
+		}
+		require.NoError(t, db.Close())
+
+		lastPath, lastFid := newestVlog(dir)
+		clean, err := os.Stat(lastPath)
+		require.NoError(t, err)
+
+		// Simulate a write torn off by a crash.
+		f, err := os.OpenFile(lastPath, os.O_WRONLY|os.O_APPEND, 0600)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("torn entry that is not a valid record"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		if plantEmpty {
+			empty := filepath.Join(dir, fmt.Sprintf("%06d.vlog", lastFid+1))
+			ef, err := os.Create(empty)
+			require.NoError(t, err)
+			require.NoError(t, ef.Close())
+		}
+
+		db2, err := Open(opt)
+		require.NoError(t, err)
+		recovered, err := os.Stat(lastPath)
+		require.NoError(t, err)
+		require.NoError(t, db2.Close())
+
+		require.Equal(t, clean.Size(), recovered.Size(),
+			"torn tail should have been truncated off %s", filepath.Base(lastPath))
+	}
+
+	t.Run("no artifact", func(t *testing.T) { run(t, false) })
+	t.Run("with empty vlog artifact", func(t *testing.T) { run(t, true) })
 }
