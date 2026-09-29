@@ -1,5 +1,5 @@
-//go:build !dragonfly && !freebsd && !windows && !plan9 && !js && !wasip1
-// +build !dragonfly,!freebsd,!windows,!plan9,!js,!wasip1
+//go:build !dragonfly && !freebsd && !windows && !plan9 && !js && !wasip1 && !zos
+// +build !dragonfly,!freebsd,!windows,!plan9,!js,!wasip1,!zos
 
 /*
  * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
