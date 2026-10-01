@@ -739,7 +739,26 @@ func (db *DB) Sync() error {
 	*/
 	db.lock.RLock()
 	memtableSyncError := db.mt.SyncWAL()
+	// A memtable rotated out by ensureRoomForWrite is not synced there, and its
+	// WAL is the only durable copy of its entries until handleMemTableFlush
+	// writes it to a level-0 table. Without syncing it here, an entry committed
+	// before this call is lost on power failure if another write rotated its
+	// memtable in between. A reference keeps a concurrent flush from deleting
+	// the WAL, and the sync runs outside the lock so writers are not held up.
+	immutables := make([]*memTable, len(db.imm))
+	copy(immutables, db.imm)
+	for _, imm := range immutables {
+		imm.IncrRef()
+	}
 	db.lock.RUnlock()
+
+	for _, imm := range immutables {
+		if err := imm.SyncWAL(); err != nil {
+			memtableSyncError = errors.Join(memtableSyncError,
+				fmt.Errorf("while syncing immutable memtable WAL %s: %w", imm.wal.Fd.Name(), err))
+		}
+		imm.DecrRef()
+	}
 
 	vLogSyncError := db.vlog.sync()
 	return y.CombineErrors(memtableSyncError, vLogSyncError)
