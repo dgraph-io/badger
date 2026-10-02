@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2735,3 +2737,66 @@ func TestCloseDBWhileReading(t *testing.T) {
 	require.NoError(t, db.Close())
 	wg.Wait()
 }
+
+func TestDropPrefixConcurrentCommits(t *testing.T) {
+	dir := t.TempDir()
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	const writers = 4
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for i := 0; !stop.Load(); i++ {
+				k := []byte(fmt.Sprintf("writer/%d/%d", workerID, i))
+				err := db.Update(func(txn *Txn) error {
+					return txn.Set(k, []byte("value"))
+				})
+				if err != nil && !errors.Is(err, ErrBlockedWrites) && !errors.Is(err, ErrConflict) {
+					t.Errorf("unexpected error in writer: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+
+	const iters = 50
+	for it := 0; it < iters; it++ {
+		p := []byte(fmt.Sprintf("drop-prefix/%d/", it))
+		wb := db.NewWriteBatch()
+		for j := 0; j < 20; j++ {
+			k := append(append([]byte{}, p...), fmt.Sprint(j)...)
+			if err := wb.Set(k, []byte("x")); err != nil {
+				break
+			}
+		}
+		if err := wb.Flush(); err != nil && !errors.Is(err, ErrBlockedWrites) {
+			require.NoError(t, err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- db.DropPrefix(p)
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, ErrBlockedWrites) {
+				require.NoError(t, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("deadlock detected: DropPrefix timed out waiting for concurrent commits to finish")
+		}
+	}
+
+	stop.Store(true)
+	wg.Wait()
+}
+
