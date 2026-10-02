@@ -1,5 +1,5 @@
-//go:build dragonfly || freebsd || windows || plan9
-// +build dragonfly freebsd windows plan9
+//go:build dragonfly || freebsd || windows || plan9 || zos
+// +build dragonfly freebsd windows plan9 zos
 
 /*
  * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
