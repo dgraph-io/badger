@@ -251,6 +251,8 @@ Below is a list of known projects that use Badger:
   Fortuna smart contract on the Cardano blockchain
 - [cDNSd](https://github.com/blinklabs-io/cdnsd) - A Cardano blockchain backed DNS server daemon
 - [Dingo](https://github.com/blinklabs-io/dingo) - A Cardano blockchain data node
+- [Predastore](https://github.com/mulgadc/predastore) - Distributed, S3-compatible object storage.
+  Predastore uses BadgerDB for its Raft metadata state store and its on-disk blob segment index
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
