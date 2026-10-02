@@ -11,6 +11,7 @@ import (
 	"crypto/aes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -74,6 +75,13 @@ func (db *DB) openMemTables(opt Options) error {
 		}
 		mt, err := db.openMemTable(fid, flags)
 		if err != nil {
+			// openMemTable also returns an initialized table with z.NewFile.
+			if mt != nil {
+				if cerr := mt.closeWithoutFlush(); cerr != nil {
+					db.opt.Errorf("While closing memtable after Open error: %v", cerr)
+					err = errors.Join(err, cerr)
+				}
+			}
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
 		// If this memtable is empty we don't need to add it. This is a
@@ -94,7 +102,7 @@ func (db *DB) openMemTables(opt Options) error {
 
 const memFileExt string = ".mem"
 
-func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
+func (db *DB) openMemTable(fid, flags int) (_ *memTable, err error) {
 	filepath := db.mtFilePath(fid)
 	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
@@ -102,6 +110,14 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		opt: db.opt,
 		buf: &bytes.Buffer{},
 	}
+	defer func() {
+		if err != nil && err != z.NewFile {
+			if cerr := mt.closeWithoutFlush(); cerr != nil {
+				db.opt.Errorf("While closing memtable after Open error: %v", cerr)
+				err = errors.Join(err, cerr)
+			}
+		}
+	}()
 	// We don't need to create the wal for the skiplist in in-memory mode so return the mt.
 	if db.opt.InMemory {
 		return mt, z.NewFile
@@ -130,8 +146,25 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	if lerr == z.NewFile {
 		return mt, lerr
 	}
-	err := mt.UpdateSkipList()
-	return mt, y.Wrapf(err, "while updating skiplist")
+	if err := mt.UpdateSkipList(); err != nil {
+		return nil, y.Wrapf(err, "while updating skiplist")
+	}
+	return mt, nil
+}
+
+// closeWithoutFlush releases an uncommitted Open's memtable without deleting its
+// WAL. DecrRef's usual OnClose callback deletes the WAL after a successful flush;
+// on failure the next Open may still need it for recovery.
+func (mt *memTable) closeWithoutFlush() error {
+	if mt.sl != nil {
+		mt.sl.OnClose = nil
+		mt.DecrRef()
+		mt.sl = nil
+	}
+	if mt.wal != nil {
+		return mt.wal.closeOnError()
+	}
+	return nil
 }
 
 func (db *DB) newMemTable() (*memTable, error) {
@@ -145,7 +178,12 @@ func (db *DB) newMemTable() (*memTable, error) {
 		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
 		return nil, y.Wrapf(err, "newMemTable")
 	}
-	return nil, fmt.Errorf("File %s already exists", mt.wal.Fd.Name())
+	err = fmt.Errorf("File %s already exists", mt.wal.path)
+	if cerr := mt.closeWithoutFlush(); cerr != nil {
+		db.opt.Errorf("While closing existing memtable: %v", cerr)
+		err = errors.Join(err, cerr)
+	}
+	return nil, err
 }
 
 func (db *DB) mtFilePath(fid int) string {
@@ -534,14 +572,25 @@ func (lf *logFile) zeroNextEntry() {
 	z.ZeroOut(lf.Data, int(lf.writeAt), int(lf.writeAt+maxHeaderSize))
 }
 
-func (lf *logFile) open(path string, flags int, fsize int64) error {
+func (lf *logFile) open(path string, flags int, fsize int64) (err error) {
 	mf, ferr := z.OpenMmapFile(path, flags, int(fsize))
 	lf.MmapFile = mf
+	defer func() {
+		if err != nil && err != z.NewFile && lf.MmapFile != nil {
+			if cerr := lf.closeOnError(); cerr != nil {
+				lf.opt.Errorf("While closing log file after Open error: %v", cerr)
+				err = errors.Join(err, cerr)
+			}
+		}
+	}()
 
 	if ferr == z.NewFile {
 		if err := lf.bootstrap(); err != nil {
-			os.Remove(path)
-			return err
+			// Windows cannot remove a file while its mapping or handle is open.
+			if cleanupErr := lf.closeOnError(); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			return errors.Join(err, os.Remove(path))
 		}
 		lf.size.Store(vlogHeaderSize)
 

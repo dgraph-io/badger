@@ -192,7 +192,7 @@ func checkAndSetOptions(opt *Options) error {
 }
 
 // Open returns a new DB object.
-func Open(opt Options) (*DB, error) {
+func Open(opt Options) (_ *DB, err error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}
@@ -270,8 +270,9 @@ func Open(opt Options) (*DB, error) {
 	defer func() {
 		if err != nil {
 			opt.Errorf("Received err: %v. Cleaning up...", err)
-			db.cleanup()
-			db = nil
+			if cleanupErr := db.cleanup(); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+			}
 		}
 	}()
 
@@ -335,7 +336,7 @@ func Open(opt Options) (*DB, error) {
 	}
 
 	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
-		return db, err
+		return nil, err
 	}
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
@@ -353,7 +354,7 @@ func Open(opt Options) (*DB, error) {
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
-		return db, err
+		return nil, err
 	}
 
 	// Initialize vlog struct.
@@ -377,7 +378,7 @@ func Open(opt Options) (*DB, error) {
 	db.opt.Infof("Set nextTxnTs to %d", db.orc.nextTxnTs)
 
 	if err = db.vlog.open(db); err != nil {
-		return db, y.Wrapf(err, "During db.vlog.open")
+		return nil, y.Wrapf(err, "During db.vlog.open")
 	}
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -388,11 +389,13 @@ func Open(opt Options) (*DB, error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	go db.threshold.listenForValueThresholdUpdate()
-
 	if err := db.initBannedNamespaces(); err != nil {
-		return db, fmt.Errorf("While setting banned keys: %w", err)
+		return nil, fmt.Errorf("While setting banned keys: %w", err)
 	}
+
+	// Start this only after the last fallible initialization step. Its closer
+	// expects a running listener, so it cannot be waited on by early cleanup.
+	go db.threshold.listenForValueThresholdUpdate()
 
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
@@ -489,16 +492,20 @@ func (db *DB) monitorCache(c *z.Closer) {
 	}
 }
 
-// cleanup stops all the goroutines started by badger. This is used in open to
-// cleanup goroutines in case of an error.
-func (db *DB) cleanup() {
+// cleanup releases resources acquired by an unsuccessful Open. The manifest and
+// directory locks are released by Open's outer defers, after all workers stop.
+// This must not run the normal Close path, which flushes/truncates database files.
+func (db *DB) cleanup() (cleanupErr error) {
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
+	if db.closers.cacheHealth != nil {
+		db.closers.cacheHealth.SignalAndWait()
+	}
 	db.blockCache.Close()
 	db.indexCache.Close()
 	if db.closers.updateSize != nil {
-		db.closers.updateSize.Signal()
+		db.closers.updateSize.SignalAndWait()
 	}
 	if db.closers.valueGC != nil {
 		db.closers.valueGC.Signal()
@@ -512,8 +519,35 @@ func (db *DB) cleanup() {
 
 	db.orc.Stop()
 
-	// Do not use vlog.Close() here. vlog.Close truncates the files. We don't
-	// want to truncate files unless the user has specified the truncate flag.
+	logErr := func(err error) {
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			db.opt.Errorf("While cleaning up failed Open: %v", err)
+		}
+	}
+	if db.mt != nil {
+		logErr(db.mt.closeWithoutFlush())
+	}
+	for _, mt := range db.imm {
+		logErr(mt.closeWithoutFlush())
+	}
+	if db.lc != nil {
+		logErr(db.lc.closeOnError())
+	}
+	// The latest vlog offset may not have been initialized on failure. Close
+	// only files actually opened, and never truncate them (see #1465).
+	for _, lf := range db.vlog.filesMap {
+		logErr(lf.closeOnError())
+	}
+	if db.vlog.discardStats != nil {
+		logErr(closeMmapOnError(db.vlog.discardStats.MmapFile))
+	}
+	if db.registry != nil {
+		logErr(db.registry.Close())
+	}
+	// No flusher or compactor can return an allocator after this point.
+	db.allocPool.Release()
+	return cleanupErr
 }
 
 // BlockCacheMetrics returns the metrics for the underlying block cache.
