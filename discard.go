@@ -19,7 +19,7 @@ import (
 // discardStats keeps track of the amount of data that could be discarded for
 // a given logfile.
 type discardStats struct {
-	sync.Mutex
+	sync.RWMutex
 
 	*z.MmapFile
 	opt           Options
@@ -135,6 +135,8 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 }
 
 func (lf *discardStats) Iterate(f func(fid, stats uint64)) {
+	lf.RLock()
+	defer lf.RUnlock()
 	for slot := 0; slot < lf.nextEmptySlot; slot++ {
 		idx := 16 * slot
 		f(lf.get(idx), lf.get(idx+8))
@@ -143,8 +145,6 @@ func (lf *discardStats) Iterate(f func(fid, stats uint64)) {
 
 // MaxDiscard returns the file id with maximum discard bytes.
 func (lf *discardStats) MaxDiscard() (uint32, int64) {
-	lf.Lock()
-	defer lf.Unlock()
 
 	var maxFid, maxVal uint64
 	lf.Iterate(func(fid, val uint64) {
