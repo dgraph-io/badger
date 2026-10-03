@@ -318,6 +318,28 @@ type IteratorOptions struct {
 	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
 	Prefix      []byte // Only iterate over this given prefix.
 	SinceTs     uint64 // Only read data that has version > SinceTs.
+
+	// UntilTs is the upper bound matching SinceTs. When non-zero, versions above it are
+	// invisible, so the window on offer is SinceTs < version <= UntilTs. Zero leaves the
+	// upper end open.
+	//
+	// Versions above the window are treated as if they had never been written. A key
+	// deleted above UntilTs therefore still reads as live if it holds a value inside the
+	// window, and the value seen for a key is the newest one the window contains,
+	// whichever direction the iterator runs in.
+	//
+	// UntilTs has to be greater than SinceTs when both are set. Anything else describes
+	// an empty window, which NewIterator rejects with a panic.
+	UntilTs uint64
+}
+
+// validateTsWindow reports ErrInvalidTsWindow when UntilTs is set and is not
+// strictly greater than SinceTs. A zero UntilTs means the upper bound is disabled.
+func (opt IteratorOptions) validateTsWindow() error {
+	if opt.UntilTs > 0 && opt.UntilTs <= opt.SinceTs {
+		return ErrInvalidTsWindow
+	}
+	return nil
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -462,6 +484,9 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	}
 	if txn.db.IsClosed() {
 		panic(ErrDBClosed)
+	}
+	if err := opt.validateTsWindow(); err != nil {
+		panic(err)
 	}
 
 	y.NumIteratorsCreatedAdd(txn.db.opt.MetricsEnabled, 1)
@@ -625,8 +650,11 @@ func (it *Iterator) parseItem() bool {
 
 	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
-	// Ignore everything that is above the readTs and below or at the sinceTs.
-	if version > it.readTs || (it.opt.SinceTs > 0 && version <= it.opt.SinceTs) {
+	// Ignore everything that is above the readTs, below or at the sinceTs, or
+	// strictly above the untilTs (when set).
+	if version > it.readTs ||
+		(it.opt.SinceTs > 0 && version <= it.opt.SinceTs) ||
+		(it.opt.UntilTs > 0 && version > it.opt.UntilTs) {
 		mi.Next()
 		return false
 	}
@@ -684,7 +712,10 @@ FILL:
 	// Reverse direction.
 	nextTs := y.ParseTs(mi.Key())
 	mik := y.ParseKey(mi.Key())
-	if nextTs <= it.readTs && bytes.Equal(mik, item.key) {
+	// The candidate has to stay inside the version window too, otherwise walking
+	// towards newer versions would step over UntilTs.
+	if nextTs <= it.readTs && (it.opt.UntilTs == 0 || nextTs <= it.opt.UntilTs) &&
+		bytes.Equal(mik, item.key) {
 		// This is a valid potential candidate.
 		goto FILL
 	}

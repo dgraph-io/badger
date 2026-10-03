@@ -114,4 +114,8 @@ var (
 
 	// ErrDBClosed is returned when a get operation is performed after closing the DB.
 	ErrDBClosed = stderrors.New("DB Closed")
+
+	// ErrInvalidTsWindow is returned when UntilTs is set and is not strictly greater than SinceTs.
+	// A valid closed window requires SinceTs < version <= UntilTs when both bounds are set.
+	ErrInvalidTsWindow = stderrors.New("UntilTs must be greater than SinceTs when both are set")
 )
