@@ -717,10 +717,23 @@ func (it *Iterator) fill(item *Item) {
 func hasPrefix(it *Iterator) bool {
 	// We shouldn't check prefix in case the iterator is going in reverse. Since in reverse we expect
 	// people to append items to the end of prefix.
-	if !it.opt.Reverse && len(it.opt.Prefix) > 0 {
-		return bytes.HasPrefix(y.ParseKey(it.iitr.Key()), it.opt.Prefix)
+	if it.opt.Reverse || len(it.opt.Prefix) == 0 {
+		return true
 	}
-	return true
+	// iitr.Key() is the internal key = userKey + 8-byte ts. When len(Prefix) fits
+	// entirely within the userKey portion (len(key) >= len(Prefix)+8), then
+	// bytes.HasPrefix(internalKey, Prefix) is equivalent to
+	// bytes.HasPrefix(y.ParseKey(internalKey), Prefix) — the prefix can only
+	// match bytes that lie before the ts suffix. This elides one y.ParseKey
+	// (nil-check + sub + slice) per iterator Next on the hot dgraph rollup loop.
+	key := it.iitr.Key()
+	p := it.opt.Prefix
+	if len(key) >= len(p)+8 {
+		return bytes.HasPrefix(key, p)
+	}
+	// Prefix is longer than userKey — must reparse so we don't spuriously match
+	// against ts bytes.
+	return bytes.HasPrefix(y.ParseKey(key), p)
 }
 
 func (it *Iterator) prefetch() {
