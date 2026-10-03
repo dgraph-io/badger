@@ -1028,42 +1028,56 @@ func (vlog *valueLog) pickLog(discardRatio float64) *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 
-LOOP:
-	// Pick a candidate that contains the largest amount of discardable data
-	fid, discard := vlog.discardStats.MaxDiscard()
-
-	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
-	// vlog files start from 1.
-	if fid == 0 {
+	// Collect candidates from discard stats, sorted by discard descending.
+	type candidate struct {
+		fid     uint32
+		discard int64
+	}
+	var candidates []candidate
+	{
+		vlog.discardStats.Lock()
+		vlog.discardStats.Iterate(func(fid, stats uint64) {
+			if fid > 0 {
+				candidates = append(candidates, candidate{uint32(fid), int64(stats)})
+			}
+		})
+		vlog.discardStats.Unlock()
+	}
+	if len(candidates) == 0 {
 		vlog.opt.Debugf("No file with discard stats")
 		return nil
 	}
-	lf, ok := vlog.filesMap[fid]
-	// This file was deleted but it's discard stats increased because of compactions. The file
-	// doesn't exist so we don't need to do anything. Skip it and retry.
-	if !ok {
-		vlog.discardStats.Update(fid, -1)
-		goto LOOP
-	}
-	// We have a valid file.
-	fi, err := lf.Fd.Stat()
-	if err != nil {
-		vlog.opt.Errorf("Unable to get stats for value log fid: %d err: %+v", fi, err)
-		return nil
-	}
-	if thr := discardRatio * float64(fi.Size()); float64(discard) < thr {
-		vlog.opt.Debugf("Discard: %d less than threshold: %.0f for file: %s",
-			discard, thr, fi.Name())
-		return nil
-	}
-	if fid < vlog.maxFid {
-		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
-		lf, ok := vlog.filesMap[fid]
-		y.AssertTrue(ok)
-		return lf
-	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].discard > candidates[j].discard
+	})
 
-	// Don't randomly pick any value log file.
+	// Walk candidates in descending discard order, skipping ineligible files
+	// (deleted, active, or below ratio) instead of aborting on the first.
+	for _, c := range candidates {
+		fid, discard := c.fid, c.discard
+		lf, ok := vlog.filesMap[fid]
+		if !ok {
+			// This file was deleted but its discard stats increased because of compactions.
+			vlog.discardStats.Update(fid, -1)
+			continue
+		}
+		fi, err := lf.Fd.Stat()
+		if err != nil {
+			vlog.opt.Errorf("Unable to get stats for value log fid: %d err: %+v", fid, err)
+			return nil
+		}
+		if thr := discardRatio * float64(fi.Size()); float64(discard) < thr {
+			vlog.opt.Debugf("Discard: %d less than threshold: %.0f for file: %s",
+				discard, thr, fi.Name())
+			continue
+		}
+		if fid < vlog.maxFid {
+			vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
+			return lf
+		}
+		// Active file — skip to the next candidate.
+		vlog.opt.Debugf("Skipping active value log file fid: %d discard: %d", fid, discard)
+	}
 	return nil
 }
 
