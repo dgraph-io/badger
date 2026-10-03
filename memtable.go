@@ -84,6 +84,8 @@ func (db *DB) openMemTables(opt Options) error {
 		}
 		// These should no longer be written to. So, make them part of the imm.
 		db.imm = append(db.imm, mt)
+		// WAL data has been replayed into the skiplist — release the mmap.
+		mt.releaseWAL()
 	}
 	if len(fids) != 0 {
 		db.nextMemFid = fids[len(fids)-1]
@@ -220,6 +222,28 @@ func (mt *memTable) IncrRef() {
 // DecrRef decrements the refcount, deallocating the Skiplist when done using it
 func (mt *memTable) DecrRef() {
 	mt.sl.DecrRef()
+}
+
+// releaseWAL unmaps the WAL mmap for an immutable memtable. After the WAL has been replayed
+// into the skiplist (via UpdateSkipList), the mmap'd region is no longer needed — all reads
+// go through the skiplist. On 32-bit systems this frees ~128 MB of virtual address space per
+// memtable, which is critical given the ~3 GB user-space limit.
+func (mt *memTable) releaseWAL() {
+	if mt.wal == nil || mt.wal.Fd == nil {
+		return
+	}
+	path := mt.wal.Fd.Name()
+	if mt.wal.Data != nil {
+		_ = z.Munmap(mt.wal.Data)
+		mt.wal.Data = nil
+	}
+	_ = mt.wal.Fd.Close()
+	mt.wal.Fd = nil
+	// Replace the OnClose callback: we've already unmapped the data and
+	// closed the fd, so just remove the file when the skiplist is freed.
+	mt.sl.OnClose = func() {
+		_ = os.Remove(path)
+	}
 }
 
 func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {

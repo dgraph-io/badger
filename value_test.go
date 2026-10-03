@@ -915,7 +915,6 @@ func TestValueGCRewriteSkipsLSMGetOnlyForExpiredEntriesInMixedVlogFile(t *testin
 	rng := rand.New(rand.NewSource(2))
 	const mixedEntryCount = 16
 	const mixedLiveEntryCount = mixedEntryCount / 2
-	const extraLiveEntryCount = 1
 	// Leave enough room for entry metadata so all mixed entries stay in one vlog file.
 	valueSize := int(opt.ValueLogFileSize/int64(mixedEntryCount)) - 512
 	values := make([][]byte, mixedEntryCount)
@@ -962,7 +961,7 @@ func TestValueGCRewriteSkipsLSMGetOnlyForExpiredEntriesInMixedVlogFile(t *testin
 
 	totalGets := expvar.Get("badger_get_num_user")
 	require.NotNil(t, totalGets)
-	require.Equal(t, int64(mixedLiveEntryCount+extraLiveEntryCount), totalGets.(*expvar.Int).Value())
+	require.Equal(t, int64(mixedLiveEntryCount), totalGets.(*expvar.Int).Value())
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		for i, want := range values {

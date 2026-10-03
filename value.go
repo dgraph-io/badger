@@ -533,7 +533,7 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 		writeAt:  vlogHeaderSize,
 		opt:      vlog.opt,
 	}
-	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 2*vlog.opt.ValueLogFileSize)
+	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, vlog.opt.ValueLogFileSize)
 	if err != z.NewFile && err != nil {
 		return nil, err
 	}
@@ -609,7 +609,7 @@ func (vlog *valueLog) open(db *DB) error {
 			flags = os.O_RDONLY
 		}
 		if err := lf.open(vlog.fpath(fid), flags,
-			2*vlog.opt.ValueLogFileSize); err != nil {
+			vlog.opt.ValueLogFileSize); err != nil {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 		// We shouldn't delete the maxFid file.
@@ -859,18 +859,23 @@ func (vlog *valueLog) write(reqs []*request) error {
 		return nil
 	}
 
+	// rotateVlog seals the current vlog file and opens a fresh one.
+	rotateVlog := func() error {
+		if err := curlf.doneWriting(vlog.woffset()); err != nil {
+			return err
+		}
+		newlf, err := vlog.createVlogFile()
+		if err != nil {
+			return err
+		}
+		curlf = newlf
+		return nil
+	}
+
 	toDisk := func() error {
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-			if err := curlf.doneWriting(vlog.woffset()); err != nil {
-				return err
-			}
-
-			newlf, err := vlog.createVlogFile()
-			if err != nil {
-				return err
-			}
-			curlf = newlf
+			return rotateVlog()
 		}
 		return nil
 	}
@@ -890,6 +895,21 @@ func (vlog *valueLog) write(reqs []*request) error {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
+
+			// Pre-emptively rotate if this entry would overflow the
+			// current vlog file. This avoids dynamic mmap growth via
+			// Truncate/mremap (which can fail on 32-bit systems).
+			// Giant entries that exceed the file size fall through to
+			// the existing Truncate path.
+			estSize := uint32(maxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+			if estSize <= uint32(vlog.opt.ValueLogFileSize) &&
+				(vlog.woffset()+estSize > uint32(vlog.opt.ValueLogFileSize) ||
+					vlog.numEntriesWritten+uint32(written) >= vlog.opt.ValueLogMaxEntries) {
+				if err := rotateVlog(); err != nil {
+					return err
+				}
+			}
+
 			var p valuePointer
 
 			p.Fid = curlf.fid
@@ -923,8 +943,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		vlog.numEntriesWritten += uint32(written)
 		vlog.db.threshold.update(valueSizes)
-		// We write to disk here so that all entries that are part of the same transaction are
-		// written to the same vlog file.
 		if err := toDisk(); err != nil {
 			return err
 		}
