@@ -1197,6 +1197,32 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
+// calculateDirSize walks dir and returns the total size of the .sst files
+// (lsmSize) and .vlog files (vlogSize) it contains. Files may be created and
+// deleted concurrently by compactions, so a file that disappears mid-walk is
+// ignored rather than treated as an error.
+func calculateDirSize(dir string) (lsmSize, vlogSize int64, err error) {
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			// A file deleted or renamed by a concurrent compaction makes Walk
+			// report "no such file or directory"; that's expected, so skip it
+			// and keep walking instead of aborting the whole walk.
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		switch filepath.Ext(path) {
+		case ".sst":
+			lsmSize += info.Size()
+		case ".vlog":
+			vlogSize += info.Size()
+		}
+		return nil
+	})
+	return lsmSize, vlogSize, err
+}
+
 // This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
@@ -1209,32 +1235,17 @@ func (db *DB) calculateSize() {
 		return v
 	}
 
-	totalSize := func(dir string) (int64, int64) {
-		var lsmSize, vlogSize int64
-		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			ext := filepath.Ext(path)
-			switch ext {
-			case ".sst":
-				lsmSize += info.Size()
-			case ".vlog":
-				vlogSize += info.Size()
-			}
-			return nil
-		})
-		if err != nil {
-			db.opt.Debugf("Got error while calculating total size of directory: %s", dir)
-		}
-		return lsmSize, vlogSize
+	lsmSize, vlogSize, err := calculateDirSize(db.opt.Dir)
+	if err != nil {
+		db.opt.Debugf("Got error while calculating total size of directory %s: %v", db.opt.Dir, err)
 	}
-
-	lsmSize, vlogSize := totalSize(db.opt.Dir)
 	y.LSMSizeSet(db.opt.MetricsEnabled, db.opt.Dir, newInt(lsmSize))
 	// If valueDir is different from dir, we'd have to do another walk.
 	if db.opt.ValueDir != db.opt.Dir {
-		_, vlogSize = totalSize(db.opt.ValueDir)
+		_, vlogSize, err = calculateDirSize(db.opt.ValueDir)
+		if err != nil {
+			db.opt.Debugf("Got error while calculating total size of directory %s: %v", db.opt.ValueDir, err)
+		}
 	}
 	y.VlogSizeSet(db.opt.MetricsEnabled, db.opt.ValueDir, newInt(vlogSize))
 }
