@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -41,8 +40,10 @@ func init() {
 }
 
 func validateRootCmdArgs(cmd *cobra.Command, args []string) error {
-	if strings.HasPrefix(cmd.Use, "help ") { // No need to validate if it is help
-		return nil
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "help" || c.Name() == "completion" {
+			return nil
+		}
 	}
 	if sstDir == "" {
 		return errors.New("--dir not specified")
