@@ -46,6 +46,10 @@ type testOnlyDBExtensions struct {
 	// inject a delete + compaction into the race window to reproduce the
 	// GC write-back race deterministically.
 	vlogGCPauseHook func()
+
+	// compactionGCPauseHook pauses a compaction after it acquires the GC gate.
+	// Tests use it to verify that GC drains compactions already in progress.
+	compactionGCPauseHook func()
 }
 
 // logToSyncChan sends a message to the DB's syncChan. Note that we expect

@@ -700,19 +700,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
-	// While a vlog GC rewrite is in flight, do not discard any version newer than
-	// the rewrite's start (gcDiscardTs is the DB's max committed version captured
-	// then). The rewrite may write a scanned value back, and a tombstone deleting
-	// that key — necessarily committed after the rewrite started, so with a version
-	// greater than gcDiscardTs — must survive to shadow the write-back; otherwise
-	// the deleted key reappears (#2286). The clamp is released when the rewrite
-	// finishes. Lowering discardTs only ever keeps more versions, so it is always
-	// safe; it costs deferred reclamation during a rewrite, nothing more.
-	if s.kv.gcActive.Load() {
-		if gcMax := s.kv.gcDiscardTs.Load(); gcMax > 0 && gcMax < discardTs {
-			discardTs = gcMax
-		}
-	}
+	// GC may write back a historical version, including one shadowed by a
+	// tombstone committed before GC started. Retain all versions during the
+	// rewrite, rather than pinning only versions newer than its starting point.
+	// runCompactDef holds gcCompactionMu until its output tables are installed,
+	// so a rewrite cannot start between this decision and table installation.
+	gcActive := s.kv.gcActive.Load()
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -818,7 +811,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			// Do not discard entries inserted by merge operator. These entries will be
 			// discarded once they're merged
-			if version <= discardTs && vs.Meta&bitMergeEntry == 0 {
+			if !gcActive && version <= discardTs && vs.Meta&bitMergeEntry == 0 {
 				// Keep track of the number of versions encountered for this key. Only consider the
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
@@ -1482,6 +1475,12 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 }
 
 func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+	s.kv.gcCompactionMu.RLock()
+	defer s.kv.gcCompactionMu.RUnlock()
+	if s.kv.compactionGCPauseHook != nil {
+		s.kv.compactionGCPauseHook()
+	}
+
 	if len(cd.t.fileSz) == 0 {
 		return errors.New("Filesizes cannot be zero. Targets are not set")
 	}
