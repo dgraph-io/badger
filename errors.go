@@ -114,4 +114,23 @@ var (
 
 	// ErrDBClosed is returned when a get operation is performed after closing the DB.
 	ErrDBClosed = stderrors.New("DB Closed")
+
+	// ErrUnknownTenant is returned when a write targets a namespace that is not a
+	// registered tenant while multi-tenancy is enabled.
+	ErrUnknownTenant = stderrors.New("Key belongs to an unknown tenant")
+
+	// ErrTenantNotFound is returned when a tenant id does not exist in the registry.
+	ErrTenantNotFound = stderrors.New("Tenant not found")
+
+	// ErrTenantExists is returned when creating a tenant whose name is already in use.
+	ErrTenantExists = stderrors.New("Tenant already exists")
+
+	// ErrMultiTenancyNotEnabled is returned when a multi-tenancy API is used while
+	// Options.MultiTenancy is false.
+	ErrMultiTenancyNotEnabled = stderrors.New("Multi-tenancy is not enabled on this DB")
+
+	// ErrTenantScopeManaged is returned by DB.TenantScope when the DB is in managed mode,
+	// where scope operations cannot assign timestamps. Use DB.Tenants() with your own
+	// NewTransactionAt instead.
+	ErrTenantScopeManaged = stderrors.New("TenantScope is not available in managed mode")
 )

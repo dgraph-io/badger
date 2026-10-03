@@ -101,6 +101,15 @@ type Options struct {
 	// NamespaceOffset specifies the offset from where the next 8 bytes contains the namespace.
 	NamespaceOffset int
 
+	// MultiTenancy enables tenant-aware mode. When true the DB exposes a TenantManager
+	// (via DB.Tenants()) and tenant-scoped operations via DB.TenantScope(id). Writes to
+	// namespaces that are not registered tenants return ErrUnknownTenant. Enabling it
+	// forces NamespaceOffset to 0 because the tenant-scope iterator relies on the tenant
+	// id being a simple byte prefix.
+	//
+	// The default value of MultiTenancy is false.
+	MultiTenancy bool
+
 	// Magic version used by the application using badger to ensure that it doesn't open the DB
 	// with incompatible data format.
 	ExternalMagicVersion uint16
@@ -174,6 +183,7 @@ func DefaultOptions(path string) Options {
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
 		NamespaceOffset:               -1,
+		MultiTenancy:                  false,
 	}
 }
 
@@ -769,6 +779,19 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 // The default value for NamespaceOffset is -1.
 func (opt Options) WithNamespaceOffset(offset int) Options {
 	opt.NamespaceOffset = offset
+	return opt
+}
+
+// WithMultiTenancy returns a new Options value with MultiTenancy set to the given value.
+// Enabling it forces NamespaceOffset to 0 because the tenant-scope iterator relies on
+// the tenant id being a simple byte prefix.
+//
+// The default value of MultiTenancy is false.
+func (opt Options) WithMultiTenancy(enabled bool) Options {
+	opt.MultiTenancy = enabled
+	if enabled {
+		opt.NamespaceOffset = 0
+	}
 	return opt
 }
 
