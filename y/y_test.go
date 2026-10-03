@@ -329,6 +329,92 @@ func TestAllocatorReuse(t *testing.T) {
 	t.Logf("Allocator: %s\n", a)
 }
 
+// referenceCompareKeys is the pre-fast-path implementation used as the oracle
+// for TestCompareKeys: split each key into user-key + 8-byte timestamp,
+// compare user-keys first, then timestamps.
+func referenceCompareKeys(key1, key2 []byte) int {
+	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
+		return cmp
+	}
+	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
+}
+
+func TestCompareKeys(t *testing.T) {
+	sign := func(n int) int {
+		switch {
+		case n > 0:
+			return 1
+		case n < 0:
+			return -1
+		default:
+			return 0
+		}
+	}
+
+	cases := []struct {
+		name string
+		a, b []byte
+	}{
+		{"identical (same length, same ts)", KeyWithTs([]byte("aaa"), 5), KeyWithTs([]byte("aaa"), 5)},
+		{"same length, different user key", KeyWithTs([]byte("aaa"), 5), KeyWithTs([]byte("aab"), 5)},
+		{"same length, same user key, different ts (newer first)", KeyWithTs([]byte("aaa"), 9), KeyWithTs([]byte("aaa"), 1)},
+		{"a<ts> > aa<ts> when both have ts (different lengths)", KeyWithTs([]byte("a"), 5), KeyWithTs([]byte("aa"), 5)},
+		{"shorter user-key with smaller chars", KeyWithTs([]byte("a"), 5), KeyWithTs([]byte("bb"), 5)},
+		{"different user-key length, lex order matches user key", KeyWithTs([]byte("abc"), 5), KeyWithTs([]byte("abcd"), 5)},
+		{"different user-key length, ts ignored when user-key differs", KeyWithTs([]byte("zzz"), 1), KeyWithTs([]byte("aaaa"), 99)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := sign(CompareKeys(c.a, c.b))
+			want := sign(referenceCompareKeys(c.a, c.b))
+			require.Equal(t, want, got, "fast path disagrees with reference")
+			// Antisymmetry: CompareKeys(b, a) == -CompareKeys(a, b).
+			require.Equal(t, -got, sign(CompareKeys(c.b, c.a)))
+		})
+	}
+}
+
+// TestCompareKeysFuzz cross-checks the same-length fast path against the
+// reference implementation over randomized inputs.
+func TestCompareKeysFuzz(t *testing.T) {
+	sign := func(n int) int {
+		switch {
+		case n > 0:
+			return 1
+		case n < 0:
+			return -1
+		default:
+			return 0
+		}
+	}
+
+	rng := rand.New(rand.NewSource(7))
+	for i := 0; i < 5000; i++ {
+		k1len := rng.Intn(20)
+		k2len := rng.Intn(20)
+		// With ~30% probability force equal user-key lengths to exercise the fast path.
+		if rng.Intn(10) < 3 {
+			k2len = k1len
+		}
+		uk1 := make([]byte, k1len)
+		uk2 := make([]byte, k2len)
+		_, _ = rng.Read(uk1)
+		_, _ = rng.Read(uk2)
+		ts1 := rng.Uint64()
+		ts2 := rng.Uint64()
+		// With ~20% probability force matching timestamps to make the suffix tie-break visible.
+		if rng.Intn(10) < 2 {
+			ts2 = ts1
+		}
+		a := KeyWithTs(uk1, ts1)
+		b := KeyWithTs(uk2, ts2)
+		got := sign(CompareKeys(a, b))
+		want := sign(referenceCompareKeys(a, b))
+		require.Equal(t, want, got, "mismatch on a=%q ts1=%d b=%q ts2=%d", uk1, ts1, uk2, ts2)
+	}
+}
+
 func TestSafeCopy_Issue2067(t *testing.T) {
 	type args struct {
 		a   []byte
