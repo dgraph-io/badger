@@ -2749,6 +2749,11 @@ func TestDropPrefixConcurrentCommits(t *testing.T) {
 
 	var stop atomic.Bool
 	var wg sync.WaitGroup
+	defer func() {
+		stop.Store(true)
+		wg.Wait()
+	}()
+
 	const writers = 4
 	for w := 0; w < writers; w++ {
 		wg.Add(1)
@@ -2795,8 +2800,4 @@ func TestDropPrefixConcurrentCommits(t *testing.T) {
 			t.Fatal("deadlock detected: DropPrefix timed out waiting for concurrent commits to finish")
 		}
 	}
-
-	stop.Store(true)
-	wg.Wait()
 }
-
