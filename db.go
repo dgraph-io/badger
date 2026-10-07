@@ -1009,7 +1009,9 @@ func (db *DB) doWrites(lc *z.Closer) {
 //
 //	Check(kv.BatchSet(entries))
 func (db *DB) batchSet(entries []*Entry) error {
+	db.orc.writeChLock.Lock()
 	req, err := db.sendToWriteCh(entries)
+	db.orc.writeChLock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -1025,7 +1027,9 @@ func (db *DB) batchSet(entries []*Entry) error {
 //	   Check(err)
 //	}
 func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+	db.orc.writeChLock.Lock()
 	req, err := db.sendToWriteCh(entries)
+	db.orc.writeChLock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -1737,6 +1741,10 @@ func (db *DB) blockWrite() error {
 		return ErrBlockedWrites
 	}
 
+	// Ensure any in-flight writer that passed the blockWrites check finishes sending to writeCh.
+	db.orc.writeChLock.Lock()
+	db.orc.writeChLock.Unlock()
+
 	// Make all pending writes finish. The following will also close writeCh.
 	db.closers.writes.SignalAndWait()
 	db.opt.Infof("Writes flushed. Stopping compactions now...")
@@ -1962,7 +1970,9 @@ func (db *DB) BanNamespace(ns uint64) error {
 		Key:   key,
 		Value: nil,
 	}}
+	db.orc.writeChLock.Lock()
 	req, err := db.sendToWriteCh(entry)
+	db.orc.writeChLock.Unlock()
 	if err != nil {
 		return err
 	}
