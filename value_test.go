@@ -1470,9 +1470,8 @@ func TestVlogGCRaceDeletedKeyReappearsReal(t *testing.T) {
 
 // TestVlogGCRaceDeletedKeyReappearsMultiCycle runs several GC rewrites
 // back-to-back on the same DB, deleting a different key during each one. It
-// guards the cross-cycle correctness of the discardTs clamp: that gcActive is
-// re-set and released every cycle, that a fresh gcDiscardTs is pinned each time,
-// and that no key deleted in any cycle ever reappears in a later one.
+// guards that gcActive is set and released every cycle and that no key deleted
+// in any cycle ever reappears in a later one.
 func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-vlog-gc-multicycle")
 	require.NoError(t, err)
@@ -1549,10 +1548,8 @@ func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 		require.NotNil(t, lf, "cycle %d: a data vlog file with an undeleted key must exist", c)
 
 		delTs := uint64(1000 + c*100)
-		var pinned uint64
 		db.vlogGCPauseHook = func() {
 			require.True(t, db.gcActive.Load(), "cycle %d: gcActive must be true during rewrite", c)
-			pinned = db.gcDiscardTs.Load()
 
 			// Real delete through the write path.
 			dtxn := db.NewTransactionAt(delTs, true)
@@ -1561,7 +1558,7 @@ func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 			db.SetDiscardTs(delTs + 50)
 
 			// Real purge: flush the tombstone to L0, then compact L0→L6 (Lmax).
-			// The clamp keeps the tombstone (version delTs >= gcDiscardTs); without
+			// GC protection keeps the tombstone and older versions; without
 			// the fix it would be dropped here together with the value.
 			db.lock.Lock()
 			oldMt := db.mt
@@ -1587,9 +1584,6 @@ func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 		require.NoError(t, db.vlog.rewrite(lf))
 
 		require.False(t, db.gcActive.Load(), "cycle %d: gcActive must reset to false after rewrite", c)
-		require.NotZero(t, pinned, "cycle %d: gcDiscardTs must be pinned during the rewrite", c)
-		require.GreaterOrEqual(t, delTs, pinned,
-			"cycle %d: delete ts must be >= the pinned discard ts for the clamp to protect it", c)
 
 		deleted[string(fileKey)] = true
 

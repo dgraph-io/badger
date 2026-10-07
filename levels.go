@@ -681,6 +681,49 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
+// A GC rewrite can put an older version above a persisted tombstone.
+// Before dropping that tombstone, check versions outside this compaction.
+func (s *levelsController) hasEarlierVersionAbove(key []byte, cd compactDef) bool {
+	tables, decr := s.kv.getMemTables()
+	defer decr()
+	for _, mt := range tables {
+		vs := mt.sl.Get(key)
+		if vs.Meta != 0 || vs.Value != nil {
+			return true
+		}
+	}
+	for level := 0; level < cd.thisLevel.level; level++ {
+		vs, err := s.levels[level].get(key)
+		if err != nil || vs.Meta != 0 || vs.Value != nil {
+			return true
+		}
+	}
+	// L0 tables overlap. A rewrite may already have flushed into an L0
+	// table that was not selected by this compaction.
+	if cd.thisLevel.level == 0 {
+		selected := make(map[uint64]bool, len(cd.top))
+		for _, table := range cd.top {
+			selected[table.ID()] = true
+		}
+		level := s.levels[0]
+		level.RLock()
+		defer level.RUnlock()
+		for _, table := range level.tables {
+			if selected[table.ID()] {
+				continue
+			}
+			it := table.NewIterator(0)
+			it.Seek(key)
+			found := it.Valid() && y.SameKey(it.Key(), key)
+			_ = it.Close()
+			if found {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // subcompact runs a single sub-compaction, iterating over the specified key-range only.
 //
 // We use splits to do a single compaction concurrently. If we have >= 3 tables
@@ -700,19 +743,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
-	// While a vlog GC rewrite is in flight, do not discard any version newer than
-	// the rewrite's start (gcDiscardTs is the DB's max committed version captured
-	// then). The rewrite may write a scanned value back, and a tombstone deleting
-	// that key — necessarily committed after the rewrite started, so with a version
-	// greater than gcDiscardTs — must survive to shadow the write-back; otherwise
-	// the deleted key reappears (#2286). The clamp is released when the rewrite
-	// finishes. Lowering discardTs only ever keeps more versions, so it is always
-	// safe; it costs deferred reclamation during a rewrite, nothing more.
-	if s.kv.gcActive.Load() {
-		if gcMax := s.kv.gcDiscardTs.Load(); gcMax > 0 && gcMax < discardTs {
-			discardTs = gcMax
-		}
-	}
+	// GC may write back a historical version, including one shadowed by a
+	// tombstone committed before GC started. Retain all versions during the
+	// rewrite, rather than pinning only versions newer than its starting point.
+	// runCompactDef holds gcCompactionMu until its output tables are installed,
+	// so a rewrite cannot start between this decision and table installation.
+	gcActive := s.kv.gcActive.Load()
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -818,7 +854,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			// Do not discard entries inserted by merge operator. These entries will be
 			// discarded once they're merged
-			if version <= discardTs && vs.Meta&bitMergeEntry == 0 {
+			if !gcActive && version <= discardTs && vs.Meta&bitMergeEntry == 0 {
 				// Keep track of the number of versions encountered for this key. Only consider the
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
@@ -841,9 +877,9 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 					case !isExpired && lastValidVersion:
 						// Add this key. We have set skipKey, so the following key versions
 						// would be skipped.
-					case hasOverlap:
-						// If this key range has overlap with lower levels, then keep the deletion
-						// marker with the latest version, discarding the rest. We have set skipKey,
+					case hasOverlap || s.hasEarlierVersionAbove(y.KeyWithTs(y.ParseKey(it.Key()), version), cd):
+						// Keep the tombstone if lower levels overlap or an older version remains
+						// above this compaction (including a GC rewrite in a memtable). We have set skipKey,
 						// so the following key versions would be skipped.
 					default:
 						// If no overlap, we can skip all the versions, by continuing here.
@@ -1482,6 +1518,12 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 }
 
 func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+	s.kv.gcCompactionMu.RLock()
+	defer s.kv.gcCompactionMu.RUnlock()
+	if s.kv.compactionGCPauseHook != nil {
+		s.kv.compactionGCPauseHook()
+	}
+
 	if len(cd.t.fileSz) == 0 {
 		return errors.New("Filesizes cannot be zero. Targets are not set")
 	}

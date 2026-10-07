@@ -173,21 +173,17 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	vlog.opt.Infof("Rewriting fid: %d", f.fid)
 
-	// Announce that a GC rewrite is in flight and pin the discard threshold to the
-	// DB's current max committed version. While active, last-level compaction will
-	// not purge any version newer than this point (see levelsController.subcompact),
-	// so a tombstone for a key we are about to write back survives to shadow it,
-	// preventing the deleted key from being resurrected (#2286). GC is serialized by
-	// garbageCh (one rewrite at a time), so this per-DB state is not subject to
-	// concurrent rewrites; the clamp is released on every exit path.
-	//
-	// MaxVersion() (not orc.nextTs()) is used deliberately: in managed mode
-	// nextTxnTs is frozen at open time and does not track committed versions, so it
-	// would be the wrong basis. Any delete committed after the rewrite starts has a
-	// version greater than this (timestamps are monotonic), so its tombstone is
-	// protected.
-	vlog.db.gcDiscardTs.Store(vlog.db.MaxVersion())
+	// A rewrite can select an old version even when a newer tombstone already
+	// exists. Keep every version until write-back finishes, so compaction cannot
+	// remove the tombstone (or a newer value) and expose the rewritten version.
+	// Drain compactions that started before this protection was published; their
+	// output tables could otherwise remove those versions during the rewrite.
+	// Release the mutex before scanning/writing so L0 compaction can make progress
+	// when the rewrite's write batches need memtable flushes.
+	// GC is serialized by garbageCh. Protection is released on every exit path.
+	vlog.db.gcCompactionMu.Lock()
 	vlog.db.gcActive.Store(true)
+	vlog.db.gcCompactionMu.Unlock()
 	defer vlog.db.gcActive.Store(false)
 
 	wb := make([]*Entry, 0, 1000)
