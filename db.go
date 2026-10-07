@@ -591,8 +591,13 @@ func (db *DB) close() (err error) {
 	// offset problem: as we push into memtable, we update value offsets there.
 	if db.mt != nil {
 		if db.mt.sl.Empty() {
-			// Remove the memtable if empty.
-			db.mt.DecrRef()
+			// Detach before releasing our reference. Compactions can still
+			// acquire memtable references through getMemTables during close.
+			db.lock.Lock()
+			mt := db.mt
+			db.mt = nil
+			db.lock.Unlock()
+			mt.DecrRef()
 		} else {
 			db.opt.Debugf("Flushing memtable")
 			for {
@@ -749,8 +754,9 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 
 	var tables []*memTable
 
-	// Mutable memtable does not exist in read-only mode.
-	if !db.opt.ReadOnly {
+	// The mutable memtable is absent in read-only mode and can be detached
+	// during close before compactions have finished.
+	if !db.opt.ReadOnly && db.mt != nil {
 		// Get mutable memtable.
 		tables = append(tables, db.mt)
 		db.mt.IncrRef()
