@@ -1361,15 +1361,24 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 	now := time.Now()
 	nowUnix := uint64(now.Unix())
 
-	sortedTables := make([]*table.Table, len(tables))
-	copy(sortedTables, tables)
+	type tableCompact struct {
+		table      *table.Table
+		hasExpired bool
+	}
+	sortedTables := make([]tableCompact, len(tables))
+	for i, t := range tables {
+		sortedTables[i] = tableCompact{
+			table:      t,
+			hasExpired: t.HasExpired(nowUnix),
+		}
+	}
 	sort.Slice(sortedTables, func(i, j int) bool {
-		expI := sortedTables[i].HasExpired(nowUnix)
-		expJ := sortedTables[j].HasExpired(nowUnix)
+		expI := sortedTables[i].hasExpired
+		expJ := sortedTables[j].hasExpired
 		if expI != expJ {
 			return expI
 		}
-		return sortedTables[i].StaleDataSize() > sortedTables[j].StaleDataSize()
+		return sortedTables[i].table.StaleDataSize() > sortedTables[j].table.StaleDataSize()
 	})
 
 	cd.bot = []*table.Table{}
@@ -1394,13 +1403,14 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 			j++
 		}
 	}
-	for _, t := range sortedTables {
+	for _, item := range sortedTables {
+		t := item.table
 		// If the maxVersion is above the discardTs, we won't clean anything in
 		// the compaction. So skip this table.
 		if t.MaxVersion() > s.kv.orc.discardAtOrBelow() {
 			continue
 		}
-		hasExpired := t.HasExpired(nowUnix)
+		hasExpired := item.hasExpired
 		hasStale := t.StaleDataSize() >= 10<<20 && now.Sub(t.CreatedAt) >= time.Hour
 		if !hasStale && !hasExpired {
 			continue

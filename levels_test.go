@@ -1879,9 +1879,7 @@ func TestLmaxCompactionPartialTTLExpiration(t *testing.T) {
 }
 
 func TestLmaxCompactionReopenLazyScan(t *testing.T) {
-	dir, err := os.MkdirTemp("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
+	dir := t.TempDir()
 
 	opt := getTestOptions(dir).WithNumCompactors(0).WithNumVersionsToKeep(1)
 	opt.managedTxns = true
@@ -1893,6 +1891,7 @@ func TestLmaxCompactionReopenLazyScan(t *testing.T) {
 
 	db, err := Open(opt)
 	require.NoError(t, err)
+	defer db.Close()
 	data := []keyValTTL{
 		{key: "reopen_expired", val: "val", version: 1, meta: 0, expiresAt: pastTTL},
 	}

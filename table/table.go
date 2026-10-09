@@ -883,14 +883,16 @@ func (t *Table) SetMinExpiresAt(min uint64) {
 // HasExpired returns true if the table contains any key whose TTL has expired as of now.
 func (t *Table) HasExpired(now uint64) bool {
 	t.Lock()
-	defer t.Unlock()
-	if !t.hasExpiresAt {
-		if t.KeyCount() == 0 {
-			t.hasExpiresAt = true
-			return false
-		}
+	if t.hasExpiresAt {
+		hasExpired := t.minExpiresAt > 0 && now >= t.minExpiresAt
+		t.Unlock()
+		return hasExpired
+	}
+	t.Unlock()
+
+	var min uint64
+	if t.KeyCount() > 0 {
 		it := t.NewIterator(NOCACHE)
-		var min uint64
 		for it.Rewind(); it.Valid(); it.Next() {
 			vs := it.Value()
 			if vs.ExpiresAt > 0 {
@@ -900,8 +902,12 @@ func (t *Table) HasExpired(now uint64) bool {
 			}
 		}
 		_ = it.Close()
-		t.minExpiresAt = min
-		t.hasExpiresAt = true
 	}
-	return t.minExpiresAt > 0 && now >= t.minExpiresAt
+
+	t.Lock()
+	t.minExpiresAt = min
+	t.hasExpiresAt = true
+	hasExpired := t.minExpiresAt > 0 && now >= t.minExpiresAt
+	t.Unlock()
+	return hasExpired
 }
