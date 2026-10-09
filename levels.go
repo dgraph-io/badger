@@ -618,7 +618,11 @@ func (s *levelsController) pickCompactLevels(priosBuffer []compactionPriority) (
 
 		l := s.levels[i]
 		sz := l.getTotalSize() - delSize
-		addPriority(i, float64(sz)/float64(t.targetSz[i]))
+		targetSz := t.targetSz[i]
+		if i == len(s.levels)-1 && s.kv.opt.LmaxCompaction && l.getTotalSize() > 0 {
+			targetSz = l.getTotalSize()
+		}
+		addPriority(i, float64(sz)/float64(targetSz))
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
@@ -649,8 +653,12 @@ func (s *levelsController) pickCompactLevels(priosBuffer []compactionPriority) (
 	// We'll still sort them by their adjusted score below. Having both these scores allows us to
 	// make better decisions about compacting L0. If we see a score >= 1.0, we can do L0->L0
 	// compactions. If the adjusted score >= 1.0, then we can do L0->Lbase compactions.
+	priosSlice := prios
+	if !s.kv.opt.LmaxCompaction {
+		priosSlice = prios[:len(prios)-1]
+	}
 	out := prios[:0]
-	for _, p := range prios[:len(prios)-1] {
+	for _, p := range priosSlice {
 		if p.score >= 1.0 {
 			out = append(out, p)
 		}
@@ -915,6 +923,9 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			var tbl *table.Table
 			if s.kv.opt.InMemory {
 				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				if err == nil {
+					tbl.SetMinExpiresAt(builder.MinExpiresAt())
+				}
 			} else {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
 				tbl, err = table.CreateTable(fname, builder)
@@ -1347,14 +1358,20 @@ func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef
 
 // This function should be called with lock on levels.
 func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compactDef) bool {
+	now := time.Now()
+	nowUnix := uint64(now.Unix())
+
 	sortedTables := make([]*table.Table, len(tables))
 	copy(sortedTables, tables)
-	s.sortByStaleDataSize(sortedTables, cd)
+	sort.Slice(sortedTables, func(i, j int) bool {
+		expI := sortedTables[i].HasExpired(nowUnix)
+		expJ := sortedTables[j].HasExpired(nowUnix)
+		if expI != expJ {
+			return expI
+		}
+		return sortedTables[i].StaleDataSize() > sortedTables[j].StaleDataSize()
+	})
 
-	if len(sortedTables) > 0 && sortedTables[0].StaleDataSize() == 0 {
-		// This is a maxLevel to maxLevel compaction and we don't have any stale data.
-		return false
-	}
 	cd.bot = []*table.Table{}
 	collectBotTables := func(t *table.Table, needSz int64) {
 		totalSize := t.Size()
@@ -1377,20 +1394,15 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 			j++
 		}
 	}
-	now := time.Now()
 	for _, t := range sortedTables {
 		// If the maxVersion is above the discardTs, we won't clean anything in
 		// the compaction. So skip this table.
 		if t.MaxVersion() > s.kv.orc.discardAtOrBelow() {
 			continue
 		}
-		if now.Sub(t.CreatedAt) < time.Hour {
-			// Just created it an hour ago. Don't pick for compaction.
-			continue
-		}
-		// If the stale data size is less than 10 MB, it might not be worth
-		// rewriting the table. Skip it.
-		if t.StaleDataSize() < 10<<20 {
+		hasExpired := t.HasExpired(nowUnix)
+		hasStale := t.StaleDataSize() >= 10<<20 && now.Sub(t.CreatedAt) >= time.Hour
+		if !hasStale && !hasExpired {
 			continue
 		}
 
@@ -1410,7 +1422,10 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 		needFileSz := cd.t.fileSz[cd.thisLevel.level]
 		// The table size is what we want so no need to collect more tables.
 		if t.Size() >= needFileSz {
-			break
+			if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+				continue
+			}
+			return true
 		}
 		// TableSize is less than what we want. Collect more tables for compaction.
 		// If the level has multiple small tables, we collect all of them
@@ -1423,11 +1438,7 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 		}
 		return true
 	}
-	if len(cd.top) == 0 {
-		return false
-	}
-
-	return s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
+	return false
 }
 
 func (s *levelsController) fillTables(cd *compactDef) bool {
