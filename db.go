@@ -1134,6 +1134,9 @@ func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	if db.opt.InMemory {
 		data := builder.Finish()
 		tbl, err = table.OpenInMemoryTable(data, fileID, &bopts)
+		if err == nil {
+			tbl.SetMinExpiresAt(builder.MinExpiresAt())
+		}
 	} else {
 		tbl, err = table.CreateTable(table.NewFilename(fileID, db.opt.Dir), builder)
 	}

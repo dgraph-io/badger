@@ -1736,3 +1736,221 @@ func TestOpenWithLevelBeyondMaxLevels(t *testing.T) {
 		t.Fatal("Open hung instead of returning an error")
 	}
 }
+
+type keyValTTL struct {
+	key       string
+	val       string
+	version   int
+	meta      byte
+	expiresAt uint64
+}
+
+func createAndOpenWithTTL(db *DB, td []keyValTTL, level int) {
+	opts := table.Options{
+		BlockSize:          db.opt.BlockSize,
+		BloomFalsePositive: db.opt.BloomFalsePositive,
+		ChkMode:            options.NoVerification,
+	}
+	b := table.NewTableBuilder(opts)
+	defer b.Close()
+
+	for _, item := range td {
+		key := y.KeyWithTs([]byte(item.key), uint64(item.version))
+		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta, ExpiresAt: item.expiresAt}
+		b.Add(key, val, 0)
+	}
+	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+	tab, err := table.CreateTable(fname, b)
+	if err != nil {
+		panic(err)
+	}
+	if err := db.manifest.addChanges([]*pb.ManifestChange{
+		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+	}, db.opt); err != nil {
+		panic(err)
+	}
+	db.lc.levels[level].Lock()
+	db.lc.levels[level].tables = append(db.lc.levels[level].tables, tab)
+	db.lc.levels[level].addSize(tab)
+	db.lc.levels[level].Unlock()
+}
+
+func TestLmaxCompactionReclaimsTTLExpiredKeys(t *testing.T) {
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		lastLvl := opt.MaxLevels - 1
+		now := uint64(time.Now().Unix())
+		pastTTL := now - 100
+
+		data := []keyValTTL{
+			{key: "expired1", val: "val1", version: 1, meta: 0, expiresAt: pastTTL},
+			{key: "expired2", val: "val2", version: 1, meta: 0, expiresAt: pastTTL},
+		}
+		createAndOpenWithTTL(db, data, lastLvl)
+		db.SetDiscardTs(10)
+
+		lastLevelHandler := db.lc.levels[lastLvl]
+		require.Equal(t, 1, len(lastLevelHandler.tables))
+		tbl := lastLevelHandler.tables[0]
+		require.True(t, tbl.HasExpired(now))
+
+		cdef := &compactDef{
+			thisLevel: lastLevelHandler,
+			nextLevel: lastLevelHandler,
+			t:         db.lc.levelTargets(),
+		}
+		picked := db.lc.fillMaxLevelTables(lastLevelHandler.tables, cdef)
+		require.True(t, picked)
+		require.Equal(t, 1, len(cdef.top))
+		require.Equal(t, tbl.ID(), cdef.top[0].ID())
+
+		db.lc.cstatus.delete(*cdef)
+
+		pri := compactionPriority{
+			level: lastLvl,
+			t:     db.lc.levelTargets(),
+		}
+		require.NoError(t, db.lc.doCompact(0, pri))
+		require.Equal(t, 0, len(lastLevelHandler.tables))
+
+		require.NoError(t, db.View(func(txn *Txn) error {
+			it := txn.NewIterator(DefaultIteratorOptions)
+			defer it.Close()
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+			}
+			require.Equal(t, 0, count)
+			return nil
+		}))
+	})
+}
+
+func TestLmaxCompactionPartialTTLExpiration(t *testing.T) {
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		lastLvl := opt.MaxLevels - 1
+		now := uint64(time.Now().Unix())
+		pastTTL := now - 100
+		futureTTL := now + 1000
+
+		data := []keyValTTL{
+			{key: "expired_key", val: "old_val", version: 1, meta: 0, expiresAt: pastTTL},
+			{key: "live_key_no_ttl", val: "live_val1", version: 1, meta: 0, expiresAt: 0},
+			{key: "live_key_with_ttl", val: "live_val2", version: 1, meta: 0, expiresAt: futureTTL},
+		}
+		createAndOpenWithTTL(db, data, lastLvl)
+		db.SetDiscardTs(10)
+
+		lastLevelHandler := db.lc.levels[lastLvl]
+		require.Equal(t, 1, len(lastLevelHandler.tables))
+
+		pri := compactionPriority{
+			level: lastLvl,
+			t:     db.lc.levelTargets(),
+		}
+		require.NoError(t, db.lc.doCompact(0, pri))
+		require.Equal(t, 1, len(lastLevelHandler.tables))
+
+		require.NoError(t, db.View(func(txn *Txn) error {
+			_, err := txn.Get([]byte("expired_key"))
+			require.Equal(t, ErrKeyNotFound, err)
+
+			item, err := txn.Get([]byte("live_key_no_ttl"))
+			require.NoError(t, err)
+			val, err := item.ValueCopy(nil)
+			require.NoError(t, err)
+			require.Equal(t, "live_val1", string(val))
+
+			item2, err := txn.Get([]byte("live_key_with_ttl"))
+			require.NoError(t, err)
+			val2, err := item2.ValueCopy(nil)
+			require.NoError(t, err)
+			require.Equal(t, "live_val2", string(val2))
+			return nil
+		}))
+	})
+}
+
+func TestLmaxCompactionReopenLazyScan(t *testing.T) {
+	dir := t.TempDir()
+
+	opt := getTestOptions(dir).WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+
+	lastLvl := opt.MaxLevels - 1
+	now := uint64(time.Now().Unix())
+	pastTTL := now - 100
+
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+	data := []keyValTTL{
+		{key: "reopen_expired", val: "val", version: 1, meta: 0, expiresAt: pastTTL},
+	}
+	createAndOpenWithTTL(db, data, lastLvl)
+	db.SetDiscardTs(10)
+	require.NoError(t, db.Close())
+
+	db2, err := Open(opt)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db2.Close()) }()
+	db2.SetDiscardTs(10)
+
+	lastLevelHandler := db2.lc.levels[lastLvl]
+	require.Equal(t, 1, len(lastLevelHandler.tables))
+	tbl := lastLevelHandler.tables[0]
+
+	require.True(t, tbl.HasExpired(now))
+
+	pri := compactionPriority{
+		level: lastLvl,
+		t:     db2.lc.levelTargets(),
+	}
+	require.NoError(t, db2.lc.doCompact(0, pri))
+	require.Equal(t, 0, len(lastLevelHandler.tables))
+}
+
+func TestPickCompactLevelsLmax(t *testing.T) {
+	t.Run("LmaxCompaction false excludes last level", func(t *testing.T) {
+		opt := DefaultOptions("").WithNumCompactors(0)
+		opt.LmaxCompaction = false
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			lastLvl := opt.MaxLevels - 1
+			data := []keyValTTL{{key: "k1", val: "v1", version: 1}}
+			createAndOpenWithTTL(db, data, lastLvl)
+
+			prios := db.lc.pickCompactLevels(nil)
+			for _, p := range prios {
+				require.NotEqual(t, lastLvl, p.level)
+			}
+		})
+	})
+
+	t.Run("LmaxCompaction true includes last level", func(t *testing.T) {
+		opt := DefaultOptions("").WithNumCompactors(0)
+		opt.LmaxCompaction = true
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			lastLvl := opt.MaxLevels - 1
+			data := []keyValTTL{{key: "k1", val: "v1", version: 1}}
+			createAndOpenWithTTL(db, data, lastLvl)
+
+			prios := db.lc.pickCompactLevels(nil)
+			var foundLastLevel bool
+			for _, p := range prios {
+				if p.level == lastLvl {
+					foundLastLevel = true
+					require.GreaterOrEqual(t, p.score, 1.0)
+				}
+			}
+			require.True(t, foundLastLevel)
+		})
+	})
+}

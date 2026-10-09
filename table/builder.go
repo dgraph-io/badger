@@ -78,6 +78,7 @@ type Builder struct {
 	maxVersion    uint64
 	onDiskSize    uint32
 	staleDataSize int
+	minExpiresAt  uint64
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -211,6 +212,12 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
+	}
+
+	if v.ExpiresAt > 0 {
+		if b.minExpiresAt == 0 || v.ExpiresAt < b.minExpiresAt {
+			b.minExpiresAt = v.ExpiresAt
+		}
 	}
 
 	// diffKey stores the difference of key with baseKey.
@@ -585,4 +592,9 @@ func (b *Builder) writeBlockOffset(
 	fb.BlockOffsetAddOffset(builder, startOffset)
 	fb.BlockOffsetAddLen(builder, uint32(bl.end))
 	return fb.BlockOffsetEnd(builder)
+}
+
+// MinExpiresAt returns the minimum expiration timestamp among keys in the builder.
+func (b *Builder) MinExpiresAt() uint64 {
+	return b.minExpiresAt
 }

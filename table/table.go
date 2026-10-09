@@ -104,8 +104,10 @@ type Table struct {
 	indexLen       int
 	hasBloomFilter bool
 
-	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
-	opt        *Options
+	IsInmemory   bool // Set to true if the table is on level 0 and opened in memory.
+	opt          *Options
+	minExpiresAt uint64
+	hasExpiresAt bool
 }
 
 type cheapIndex struct {
@@ -258,7 +260,13 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 	if err := z.Msync(mf.Data); err != nil {
 		return nil, y.Wrapf(err, "while calling msync on %s", fname)
 	}
-	return OpenTable(mf, *builder.opts)
+	tbl, err := OpenTable(mf, *builder.opts)
+	if err != nil {
+		return nil, err
+	}
+	tbl.minExpiresAt = builder.minExpiresAt
+	tbl.hasExpiresAt = true
+	return tbl, nil
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
@@ -862,4 +870,44 @@ func (t *Table) decompress(b *Block) error {
 		b.freeMe = true
 	}
 	return nil
+}
+
+// SetMinExpiresAt sets the minimum expiration timestamp for keys in this table.
+func (t *Table) SetMinExpiresAt(min uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.minExpiresAt = min
+	t.hasExpiresAt = true
+}
+
+// HasExpired returns true if the table contains any key whose TTL has expired as of now.
+func (t *Table) HasExpired(now uint64) bool {
+	t.Lock()
+	if t.hasExpiresAt {
+		hasExpired := t.minExpiresAt > 0 && now >= t.minExpiresAt
+		t.Unlock()
+		return hasExpired
+	}
+	t.Unlock()
+
+	var min uint64
+	if t.KeyCount() > 0 {
+		it := t.NewIterator(NOCACHE)
+		for it.Rewind(); it.Valid(); it.Next() {
+			vs := it.Value()
+			if vs.ExpiresAt > 0 {
+				if min == 0 || vs.ExpiresAt < min {
+					min = vs.ExpiresAt
+				}
+			}
+		}
+		_ = it.Close()
+	}
+
+	t.Lock()
+	t.minExpiresAt = min
+	t.hasExpiresAt = true
+	hasExpired := t.minExpiresAt > 0 && now >= t.minExpiresAt
+	t.Unlock()
+	return hasExpired
 }
