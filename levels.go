@@ -6,7 +6,6 @@
 package badger
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -260,14 +259,14 @@ func (s *levelsController) dropTree() (int, error) {
 	return len(all), nil
 }
 
-// dropPrefix runs a L0->L1 compaction, and then runs same level compaction on the rest of the
+// dropRanges runs a L0->L1 compaction, and then runs same level compaction on the rest of the
 // levels. For L0->L1 compaction, it runs compactions normally, but skips over
-// all the keys with the provided prefix.
-// For Li->Li compactions, it picks up the tables which would have the prefix. The
-// tables who only have keys with this prefix are quickly dropped. The ones which have other keys
+// all the keys with the provided range.
+// For Li->Li compactions, it picks up the tables which would have the range. The
+// tables who only have keys with this range are quickly dropped. The ones which have other keys
 // are run through MergeIterator and compacted to create new tables. All the mechanisms of
 // compactions apply, i.e. level sizes and MANIFEST are updated as in the normal flow.
-func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
+func (s *levelsController) dropRanges(ranges []Range) error {
 	opt := s.kv.opt
 	// Iterate levels in the reverse order because if we were to iterate from
 	// lower level (say level 0) to a higher level (say level 3) we could have
@@ -289,7 +288,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 					score: 1.74,
 					// A unique number greater than 1.0 does two things. Helps identify this
 					// function in logs, and forces a compaction.
-					dropPrefixes: prefixes,
+					dropRanges: ranges,
 				}
 				if err := s.doCompact(174, cp); err != nil {
 					opt.Warningf("While compacting level 0: %v", err)
@@ -314,7 +313,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		}
 
 		for _, table := range l.tables {
-			if containsAnyPrefixes(table, prefixes) {
+			if containsAnyRanges(table, ranges) {
 				tableGroup = append(tableGroup, table)
 			} else {
 				finishGroup()
@@ -330,16 +329,16 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
 		for _, operation := range tableGroups {
 			cd := compactDef{
-				thisLevel:    l,
-				nextLevel:    l,
-				top:          nil,
-				bot:          operation,
-				dropPrefixes: prefixes,
-				t:            s.levelTargets(),
+				thisLevel:  l,
+				nextLevel:  l,
+				top:        nil,
+				bot:        operation,
+				dropRanges: ranges,
+				t:          s.levelTargets(),
 			}
 			_, span := otel.Tracer("").Start(context.TODO(), "Badger.Compaction")
 			span.SetAttributes(attribute.Int("Compaction level", l.level))
-			span.SetAttributes(attribute.String("Drop Prefixes", fmt.Sprintf("%v", prefixes)))
+			span.SetAttributes(attribute.String("Drop Ranges", fmt.Sprintf("%v", ranges)))
 			cd.t.baseLevel = l.level
 			if err := s.runCompactDef(-1, l.level, cd); err != nil {
 				opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
@@ -575,11 +574,11 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 }
 
 type compactionPriority struct {
-	level        int
-	score        float64
-	adjusted     float64
-	dropPrefixes [][]byte
-	t            targets
+	level      int
+	score      float64
+	adjusted   float64
+	dropRanges []Range
+	t          targets
 }
 
 func (s *levelsController) lastLevel() *levelHandler {
@@ -760,7 +759,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		var tableKr keyRange
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
-			if len(cd.dropPrefixes) > 0 && hasAnyPrefixes(it.Key(), cd.dropPrefixes) {
+			if len(cd.dropRanges) > 0 && hasAnyRanges(it.Key(), cd.dropRanges) {
 				numSkips++
 				updateStats(it.Value())
 				continue
@@ -943,10 +942,10 @@ func (s *levelsController) compactBuildTables(
 	defer y.NumCompactionTablesAdd(s.kv.opt.MetricsEnabled, -numTables)
 
 	keepTable := func(t *table.Table) bool {
-		for _, prefix := range cd.dropPrefixes {
-			if bytes.HasPrefix(t.Smallest(), prefix) &&
-				bytes.HasPrefix(t.Biggest(), prefix) {
-				// All the keys in this table have the dropPrefix. So, this
+		for _, rng := range cd.dropRanges {
+			if rng.CompareKey(y.ParseKey(t.Smallest())) == 0 &&
+				rng.CompareKey(y.ParseKey(t.Biggest())) == 0 {
+				// All the keys in this table are included in dropRange. So, this
 				// table does not need to be in the iterator and can be
 				// dropped immediately.
 				return false
@@ -1044,9 +1043,12 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	return pb.ManifestChangeSet{Changes: changes}
 }
 
-func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
-	for _, prefix := range listOfPrefixes {
-		if bytes.HasPrefix(s, prefix) {
+// hasAnyRanges tests if the provided key (excluding the ts) is contained by any of the ranges
+func hasAnyRanges(s []byte, listOfRanges []Range) bool {
+	s = y.ParseKey(s)
+
+	for _, rng := range listOfRanges {
+		if rng.CompareKey(s) == 0 {
 			return true
 		}
 	}
@@ -1054,37 +1056,31 @@ func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 	return false
 }
 
-func containsPrefix(table *table.Table, prefix []byte) bool {
-	smallValue := table.Smallest()
-	largeValue := table.Biggest()
-	if bytes.HasPrefix(smallValue, prefix) {
-		return true
-	}
-	if bytes.HasPrefix(largeValue, prefix) {
-		return true
-	}
-	isPresent := func() bool {
-		ti := table.NewIterator(0)
-		defer ti.Close()
-		// In table iterator's Seek, we assume that key has version in last 8 bytes. We set
-		// version=0 (ts=math.MaxUint64), so that we don't skip the key prefixed with prefix.
-		ti.Seek(y.KeyWithTs(prefix, math.MaxUint64))
-		return bytes.HasPrefix(ti.Key(), prefix)
+// containsRange tests if table smallest/biggest keys are intersecting the provided range
+func containsRange(table *table.Table, rng Range) bool {
+	if rng.Compare(
+		Range{Left: y.ParseKey(table.Smallest()), Right: y.ParseKey(table.Biggest()), Strictness: RangeStrictnessExact},
+	) != 0 {
+		return false
 	}
 
-	if bytes.Compare(prefix, smallValue) > 0 &&
-		bytes.Compare(prefix, largeValue) < 0 {
-		// There may be a case when table contains [0x0000,...., 0xffff]. If we are searching for
-		// k=0x0011, we should not directly infer that k is present. It may not be present.
-		return isPresent()
-	}
+	// There may be a case when table contains [0x0000,...., 0xffff]. If we are searching for
+	// k=0x0011, we should not directly infer that k is present. It may not be present.
 
-	return false
+	ti := table.NewIterator(0)
+	defer func() {
+		_ = ti.Close()
+	}()
+	// In table iterator's Seek, we assume that key has version in last 8 bytes. We set
+	// version=0 (ts=math.MaxUint64), so that we don't skip the key prefixed with prefix.
+	ti.Seek(y.KeyWithTs(rng.Left, math.MaxUint64))
+	return rng.CompareKey(y.ParseKey(ti.Key())) == 0
 }
 
-func containsAnyPrefixes(table *table.Table, listOfPrefixes [][]byte) bool {
-	for _, prefix := range listOfPrefixes {
-		if containsPrefix(table, prefix) {
+// containsAnyRanges tests if table intersects any of the provided ranges
+func containsAnyRanges(table *table.Table, listOfRanges []Range) bool {
+	for _, rng := range listOfRanges {
+		if containsRange(table, rng) {
 			return true
 		}
 	}
@@ -1108,7 +1104,7 @@ type compactDef struct {
 
 	thisSize int64
 
-	dropPrefixes [][]byte
+	dropRanges []Range
 }
 
 // addSplits can allow us to run multiple sub-compactions in parallel across the split key ranges.
@@ -1270,8 +1266,8 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 	}
 
 	var out []*table.Table
-	if len(cd.dropPrefixes) > 0 {
-		// Use all tables if drop prefix is set. We don't want to compact only a
+	if len(cd.dropRanges) > 0 {
+		// Use all tables if drop range is set. We don't want to compact only a
 		// sub-range. We want to compact all the tables.
 		out = top
 
@@ -1612,11 +1608,11 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	defer span.End()
 
 	cd := compactDef{
-		compactorId:  id,
-		p:            p,
-		t:            p.t,
-		thisLevel:    s.levels[l],
-		dropPrefixes: p.dropPrefixes,
+		compactorId: id,
+		p:           p,
+		t:           p.t,
+		thisLevel:   s.levels[l],
+		dropRanges:  p.dropRanges,
 	}
 
 	// While picking tables to be compacted, both levels' tables are expected to
@@ -1886,12 +1882,12 @@ func (s *levelsController) verifyChecksum() error {
 
 // Returns the sorted list of splits for all the levels and tables based
 // on the block offsets.
-func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
+func (s *levelsController) keySplits(numPerTable int, strictness uint8, left, right []byte) []string {
 	splits := make([]string, 0)
 	for _, l := range s.levels {
 		l.RLock()
 		for _, t := range l.tables {
-			tableSplits := t.KeySplits(numPerTable, prefix)
+			tableSplits := t.KeySplitsRange(numPerTable, strictness, left, right, false)
 			splits = append(splits, tableSplits...)
 		}
 		l.RUnlock()

@@ -500,6 +500,11 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 
 // KeySplits splits the table into at least n ranges based on the block offsets.
 func (t *Table) KeySplits(n int, prefix []byte) []string {
+	return t.KeySplitsRange(n, 0, prefix, prefix, true)
+}
+
+// KeySplitsRange splits the table into at least n ranges based on the block offsets and key range.
+func (t *Table) KeySplitsRange(n int, strictness uint8, left, right []byte, ts bool) []string {
 	if n == 0 {
 		return nil
 	}
@@ -517,8 +522,12 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 			i = oLen - 1
 		}
 		y.AssertTrue(t.offsets(&bo, i))
-		if bytes.HasPrefix(bo.KeyBytes(), prefix) {
-			res = append(res, string(bo.KeyBytes()))
+		if y.KeyCompareRange(strictness, left, right, y.ParseKey(bo.KeyBytes())) == 0 {
+			if ts {
+				res = append(res, string(bo.KeyBytes()))
+			} else {
+				res = append(res, string(y.ParseKey(bo.KeyBytes())))
+			}
 		}
 	}
 	return res

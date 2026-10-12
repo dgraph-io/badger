@@ -973,7 +973,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 2, len(db.Ranges(nil, 10000)))
+				require.Equal(t, 2, len(db.Ranges(Range{}, 10000)))
 			})
 		})
 		t.Run("medium table", func(t *testing.T) {
@@ -983,7 +983,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 8, len(db.Ranges(nil, 10000)))
+				require.Equal(t, 8, len(db.Ranges(Range{}, 10000)))
 			})
 		})
 		t.Run("large table", func(t *testing.T) {
@@ -993,7 +993,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 62, len(db.Ranges(nil, 10000)))
+				require.Equal(t, 62, len(db.Ranges(Range{}, 10000)))
 			})
 		})
 		t.Run("prefix", func(t *testing.T) {
@@ -1003,7 +1003,17 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 1, len(db.Ranges([]byte("a"), 10000)))
+				require.Equal(t, 1, len(db.Ranges(Range{}.Prefix([]byte("a")), 10000)))
+			})
+		})
+		t.Run("range", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 1000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 5, len(db.Ranges(Range{Left: []byte("000"), Right: []byte("005")}, 10000)))
 			})
 		})
 	})
@@ -1016,7 +1026,7 @@ func TestKeyVersions(t *testing.T) {
 					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
-				require.Equal(t, 2, len(db.Ranges(nil, 10000)))
+				require.Equal(t, 2, len(db.Ranges(Range{}, 10000)))
 			})
 		})
 		t.Run("large table", func(t *testing.T) {
@@ -1026,7 +1036,7 @@ func TestKeyVersions(t *testing.T) {
 					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
-				require.Equal(t, 11, len(db.Ranges(nil, 10000)))
+				require.Equal(t, 11, len(db.Ranges(Range{}, 10000)))
 			})
 		})
 		t.Run("prefix", func(t *testing.T) {
@@ -1036,7 +1046,17 @@ func TestKeyVersions(t *testing.T) {
 					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
 				}
 				require.NoError(t, writer.Flush())
-				require.Equal(t, 1, len(db.Ranges([]byte("a"), 10000)))
+				require.Equal(t, 1, len(db.Ranges(Range{}.Prefix([]byte("a")), 10000)))
+			})
+		})
+		t.Run("range", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 10000; i++ {
+					require.NoError(t, writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo")))
+				}
+				require.NoError(t, writer.Flush())
+				require.Equal(t, 2, len(db.Ranges(Range{Left: []byte("00"), Right: []byte("01")}, 10000)))
 			})
 		})
 	})
@@ -1115,6 +1135,7 @@ func TestSameLevel(t *testing.T) {
 	})
 }
 
+// TestTableContainsPrefix tests selecting table containing a particular prefix
 func TestTableContainsPrefix(t *testing.T) {
 	opts := table.Options{
 		BlockSize:          4 * 1024,
@@ -1142,16 +1163,16 @@ func TestTableContainsPrefix(t *testing.T) {
 	tbl := buildTable([]string{"key1", "key3", "key31", "key32", "key4"})
 	defer func() { require.NoError(t, tbl.DecrRef()) }()
 
-	require.True(t, containsPrefix(tbl, []byte("key")))
-	require.True(t, containsPrefix(tbl, []byte("key1")))
-	require.True(t, containsPrefix(tbl, []byte("key3")))
-	require.True(t, containsPrefix(tbl, []byte("key32")))
-	require.True(t, containsPrefix(tbl, []byte("key4")))
+	require.True(t, containsRange(tbl, Range{}.Prefix([]byte("key"))))
+	require.True(t, containsRange(tbl, Range{}.Prefix([]byte("key1"))))
+	require.True(t, containsRange(tbl, Range{}.Prefix([]byte("key3"))))
+	require.True(t, containsRange(tbl, Range{}.Prefix([]byte("key32"))))
+	require.True(t, containsRange(tbl, Range{}.Prefix([]byte("key4"))))
 
-	require.False(t, containsPrefix(tbl, []byte("key0")))
-	require.False(t, containsPrefix(tbl, []byte("key2")))
-	require.False(t, containsPrefix(tbl, []byte("key323")))
-	require.False(t, containsPrefix(tbl, []byte("key5")))
+	require.False(t, containsRange(tbl, Range{}.Prefix([]byte("key0"))))
+	require.False(t, containsRange(tbl, Range{}.Prefix([]byte("key2"))))
+	require.False(t, containsRange(tbl, Range{}.Prefix([]byte("key323"))))
+	require.False(t, containsRange(tbl, Range{}.Prefix([]byte("key5"))))
 }
 
 // Test that if a compaction fails during fill tables process, its tables are  cleaned up and we are able

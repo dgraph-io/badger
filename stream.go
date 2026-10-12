@@ -38,6 +38,10 @@ type Stream struct {
 	// iterate over the entire DB.
 	Prefix []byte
 
+	// Range to only iterate over certain range of keys with shared prefix. If set to nil (default),
+	// Stream would iterate over the entire Prefix.
+	Range Range
+
 	// Number of goroutines to use for iterating over key ranges. Defaults to 8.
 	NumGo int
 
@@ -92,7 +96,7 @@ type Stream struct {
 	SinceTs      uint64
 	readTs       uint64
 	db           *DB
-	rangeCh      chan keyRange
+	rangeCh      chan RangeSize
 	kvChan       chan *z.Buffer
 	nextStreamId atomic.Uint32
 	doneMarkers  bool
@@ -151,20 +155,23 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // keyRange is [start, end), including start, excluding end. Do ensure that the start,
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
-	ranges := st.db.Ranges(st.Prefix, st.NumGo)
+	ranges := st.db.Ranges(st.Range.Prefix(st.Prefix), st.NumGo)
 	y.AssertTrue(len(ranges) > 0)
-	y.AssertTrue(ranges[0].left == nil)
-	y.AssertTrue(ranges[len(ranges)-1].right == nil)
+	if len(ranges) > 1 {
+		y.AssertTrue(ranges[0].Strictness == RangeStrictnessExclusive)
+	}
+	y.AssertTrue(bytes.HasPrefix(ranges[0].Left, st.Prefix))
+	y.AssertTrue(ranges[len(ranges)-1].Strictness == st.Range.Strictness)
+	y.AssertTrue(bytes.HasPrefix(ranges[len(ranges)-1].Right, st.Prefix))
 	st.db.opt.Infof("Number of ranges found: %d\n", len(ranges))
 
 	// Sort in descending order of size.
 	sort.Slice(ranges, func(i, j int) bool {
-		return ranges[i].size > ranges[j].size
+		return ranges[i].Size > ranges[j].Size
 	})
 	for i, r := range ranges {
-		st.rangeCh <- *r
-		st.db.opt.Infof("Sent range %d for iteration: [%x, %x) of size: %s\n",
-			i, r.left, r.right, humanize.IBytes(uint64(r.size)))
+		st.rangeCh <- r
+		st.db.opt.Infof("Sent range %d for iteration: %v of size: %s\n", i, r, humanize.IBytes(uint64(r.Size)))
 	}
 	close(st.rangeCh)
 }
@@ -190,10 +197,10 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		_ = outList.Release()
 	}()
 
-	iterate := func(kr keyRange) error {
+	iterate := func(kr RangeSize) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
-		iterOpts.Prefix = st.Prefix
+		iterOpts.Range = kr.Range
 		iterOpts.PrefetchValues = true
 		iterOpts.SinceTs = st.SinceTs
 		itr := txn.NewIterator(iterOpts)
@@ -220,7 +227,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		}
 
 		var prevKey []byte
-		for itr.Seek(kr.left); itr.Valid(); {
+		for itr.Rewind(); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
 			item := itr.Item()
 			if bytes.Equal(item.Key(), prevKey) {
@@ -228,11 +235,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				continue
 			}
 			prevKey = append(prevKey[:0], item.Key()...)
-
-			// Check if we reached the end of the key range.
-			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
-				break
-			}
 
 			// Check if we should pick this key.
 			if st.ChooseKey != nil && !st.ChooseKey(item) {
@@ -415,7 +417,7 @@ outer:
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
+	st.rangeCh = make(chan RangeSize, 3) // Contains keys for posting lists.
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. Page size is set to 4MB, which is used to lazily cap the size of each

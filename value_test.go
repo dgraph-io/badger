@@ -1425,7 +1425,7 @@ func TestVlogGCRaceDeletedKeyReappearsReal(t *testing.T) {
 		require.NoError(t, err)
 		db.mt = nmt
 		db.lock.Unlock()
-		require.NoError(t, db.handleMemTableFlush(oldMt, nil))
+		require.NoError(t, db.handleMemTableFlush(oldMt))
 		oldMt.DecrRef()
 
 		// (3) REAL last-level compaction L0 → L6. nextLevel is Lmax, so there is
@@ -1569,7 +1569,7 @@ func TestVlogGCRaceDeletedKeyReappearsMultiCycle(t *testing.T) {
 			require.NoError(t, err)
 			db.mt = nmt
 			db.lock.Unlock()
-			require.NoError(t, db.handleMemTableFlush(oldMt, nil))
+			require.NoError(t, db.handleMemTableFlush(oldMt))
 			oldMt.DecrRef()
 
 			targets := db.lc.levelTargets()

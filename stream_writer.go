@@ -81,7 +81,7 @@ func (sw *StreamWriter) PrepareIncremental() error {
 	// prepareToDrop will stop all the incoming writes and process any pending flush tasks.
 	// Before we start writing, we'll stop the compactions because no one else should be writing to
 	// the same level as the stream writer is writing to.
-	f, err := sw.db.prepareToDrop()
+	f, err := sw.db.prepareToDrop([]Range{{}})
 	if err != nil {
 		sw.done = func() { once.Do(f) }
 		return err

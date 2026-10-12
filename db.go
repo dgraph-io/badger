@@ -6,7 +6,6 @@
 package badger
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -112,7 +111,7 @@ type DB struct {
 	flushChan chan *memTable // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
-	blockWrites atomic.Int32
+	blockWrites atomic.Pointer[[]Range]
 	isClosed    atomic.Uint32
 
 	// gcActive is set while a vlog GC rewrite (scan + write-back) is in flight,
@@ -566,7 +565,7 @@ func (db *DB) close() (err error) {
 	// or it is already in Wait (which released db.lock) and the Broadcast reaches it.
 	// Either way the write goroutine can finish so SignalAndWait completes.
 	db.lock.Lock()
-	db.blockWrites.Store(1)
+	db.blockWrites.Store(&[]Range{{}})
 	db.isClosed.Store(1)
 	if db.flushCond != nil {
 		db.flushCond.Broadcast()
@@ -913,9 +912,21 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 
+// sendToWriteCh enqueues entries to the write channel after size validation and returns the generated request, if any
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
-	if db.blockWrites.Load() == 1 {
-		return nil, ErrBlockedWrites
+	blocked := db.blockWrites.Load()
+	if blocked != nil {
+		for _, rng := range *blocked {
+			if rng.Infinite() {
+				return nil, ErrBlockedWrites
+			}
+
+			for _, e := range entries {
+				if rng.CompareKey(y.ParseKey(e.Key)) == 0 {
+					return nil, ErrBlockedWrites
+				}
+			}
+		}
 	}
 	var count, size int64
 	for _, e := range entries {
@@ -1094,12 +1105,12 @@ func arenaSize(opt Options) int64 {
 }
 
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *table.Builder {
+func buildL0Table(iter y.Iterator, dropRanges []Range, bopts table.Options) *table.Builder {
 	defer iter.Close()
 
 	b := table.NewTableBuilder(bopts)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		if len(dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), dropPrefixes) {
+		if len(dropRanges) > 0 && hasAnyRanges(iter.Key(), dropRanges) {
 			continue
 		}
 		vs := iter.Value()
@@ -1114,7 +1125,7 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *
 }
 
 // handleMemTableFlush must be run serially.
-func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
+func (db *DB) handleMemTableFlush(mt *memTable) error {
 	bopts := buildTableOptions(db)
 	itr := mt.sl.NewUniIterator(false)
 	builder := buildL0Table(itr, nil, bopts)
@@ -1157,7 +1168,7 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 		}
 
 		for {
-			if err := db.handleMemTableFlush(mt, nil); err != nil {
+			if err := db.handleMemTableFlush(mt); err != nil {
 				// Encountered error. Retry indefinitely.
 				db.opt.Errorf("error flushing memtable to disk: %v, retrying", err)
 				time.Sleep(time.Second)
@@ -1462,10 +1473,15 @@ func (db *DB) Levels() []LevelInfo {
 
 // EstimateSize can be used to get rough estimate of data size for a given prefix.
 func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
+	return db.EstimateSizeRange(Range{}.Prefix(prefix))
+}
+
+// EstimateSizeRange can be used to get rough estimate of data size for a given prefix and range.
+func (db *DB) EstimateSizeRange(rng Range) (uint64, uint64) {
 	var onDiskSize, uncompressedSize uint64
 	tables := db.Tables()
 	for _, ti := range tables {
-		if bytes.HasPrefix(ti.Left, prefix) && bytes.HasPrefix(ti.Right, prefix) {
+		if rng.CompareKey(y.ParseKey(ti.Left)) == 0 && rng.CompareKey(y.ParseKey(ti.Right)) == 0 {
 			onDiskSize += uint64(ti.OnDiskSize)
 			uncompressedSize += uint64(ti.UncompressedSize)
 		}
@@ -1473,10 +1489,9 @@ func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
 	return onDiskSize, uncompressedSize
 }
 
-// Ranges can be used to get rough key ranges to divide up iteration over the DB. The ranges here
-// would consider the prefix, but would not necessarily start or end with the prefix. In fact, the
-// first range would have nil as left key, and the last range would have nil as the right key.
-func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
+// Ranges can be used to get rough key ranges to divide up iteration over the DB. The returned ranges
+// are exclusive, [start, end) except for the last one and all within the prefix.
+func (db *DB) Ranges(rng Range, numRanges int) []RangeSize {
 	var splits []string
 	tables := db.Tables()
 
@@ -1487,9 +1502,11 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 		if ti.Level != db.opt.MaxLevels-1 {
 			continue
 		}
-		if bytes.HasPrefix(ti.Right, prefix) {
-			splits = append(splits, string(ti.Right))
+		if rng.CompareKey(y.ParseKey(ti.Right)) != 0 {
+			continue
 		}
+
+		splits = append(splits, string(y.ParseKey(ti.Right)))
 	}
 
 	// If the number of splits is low, look at the offsets inside the
@@ -1503,7 +1520,7 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 		if numPerTable == 0 {
 			numPerTable = 1
 		}
-		splits = db.lc.keySplits(numPerTable, prefix)
+		splits = db.lc.keySplits(numPerTable, uint8(rng.Strictness), rng.Left, rng.Right)
 	}
 
 	// If the number of splits is still < 32, then look at the memtables.
@@ -1516,13 +1533,17 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 			count := 0
 			iter := mt.sl.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-				if count%maxPerSplit == 0 {
-					// Add a split every maxPerSplit keys.
-					if bytes.HasPrefix(iter.Key(), prefix) {
-						splits = append(splits, string(iter.Key()))
-					}
-				}
+				trigger := count % maxPerSplit
 				count += 1
+				if trigger != 0 {
+					continue
+				}
+
+				if rng.CompareKey(y.ParseKey(iter.Key())) != 0 {
+					continue
+				}
+
+				splits = append(splits, string(y.ParseKey(iter.Key())))
 			}
 			_ = iter.Close()
 		}
@@ -1539,30 +1560,45 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 
 	// We have our splits now. Let's convert them to ranges.
 	sort.Strings(splits)
-	var ranges []*keyRange
-	var start []byte
+	var ranges []RangeSize
+	start := y.SafeCopy(nil, rng.Left)
 	for _, key := range splits {
-		ranges = append(ranges, &keyRange{left: start, right: y.SafeCopy(nil, []byte(key))})
+		ranges = append(
+			ranges,
+			RangeSize{
+				Range: Range{
+					Left:       start,
+					Right:      y.SafeCopy(nil, []byte(key)),
+					Strictness: RangeStrictnessExclusive,
+				},
+			},
+		)
 		start = y.SafeCopy(nil, []byte(key))
 	}
-	ranges = append(ranges, &keyRange{left: start})
+	ranges = append(
+		ranges,
+		RangeSize{
+			Range: Range{
+				Left:       start,
+				Right:      y.SafeCopy(nil, rng.Right),
+				Strictness: rng.Strictness,
+			},
+		},
+	)
 
 	// Figure out the approximate table size this range has to deal with.
 	for _, t := range tables {
-		tr := keyRange{left: t.Left, right: t.Right}
-		for _, r := range ranges {
-			if len(r.left) == 0 || len(r.right) == 0 {
-				continue
-			}
-			if r.overlapsWith(tr) {
-				r.size += int64(t.UncompressedSize)
+		tr := Range{Left: y.ParseKey(t.Left), Right: y.ParseKey(t.Right), Strictness: RangeStrictnessExact}
+		for i, r := range ranges {
+			if r.Compare(tr) == 0 {
+				ranges[i].Size += int64(t.UncompressedSize)
 			}
 		}
 	}
 
 	var total int64
 	for _, r := range ranges {
-		total += r.size
+		total += r.Size
 	}
 	if total == 0 {
 		return ranges
@@ -1570,19 +1606,20 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	// Figure out the average size, so we know how to bin the ranges together.
 	avg := total / int64(numRanges)
 
-	var out []*keyRange
+	var out []RangeSize
 	var i int
 	for i < len(ranges) {
 		r := ranges[i]
-		cur := &keyRange{left: r.left, size: r.size, right: r.right}
+		cur := RangeSize{Range: Range{Left: r.Left, Right: r.Right, Strictness: r.Strictness}, Size: r.Size}
 		i++
 		for ; i < len(ranges); i++ {
 			next := ranges[i]
-			if cur.size+next.size > avg {
+			if cur.Size+next.Size > avg {
 				break
 			}
-			cur.right = next.right
-			cur.size += next.size
+			cur.Strictness = next.Strictness
+			cur.Right = next.Right
+			cur.Size += next.Size
 		}
 		out = append(out, cur)
 	}
@@ -1731,9 +1768,10 @@ func (db *DB) Flatten(workers int) error {
 	}
 }
 
-func (db *DB) blockWrite() error {
+// blockWrite marks provided ranges as restricted for writing
+func (db *DB) blockWrite(rngs []Range) error {
 	// Stop accepting new writes.
-	if !db.blockWrites.CompareAndSwap(0, 1) {
+	if !db.blockWrites.CompareAndSwap(nil, &rngs) {
 		return ErrBlockedWrites
 	}
 
@@ -1743,22 +1781,25 @@ func (db *DB) blockWrite() error {
 	return nil
 }
 
+// unblockWrite releases any ranges restricted for writing
 func (db *DB) unblockWrite() {
 	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
 	// Resume writes.
-	db.blockWrites.Store(0)
+	db.blockWrites.Store(nil)
 }
 
-func (db *DB) prepareToDrop() (func(), error) {
+// prepareToDrop block writes in the provided ranges, drains and processes the writeCh and returns lambda to resume
+// normal operation.
+func (db *DB) prepareToDrop(rngs []Range) (func(), error) {
 	if db.opt.ReadOnly {
 		panic("Attempting to drop data in read-only mode.")
 	}
 	// In order prepare for drop, we need to block the incoming writes and
 	// write it to db. Then, flush all the pending memtable. So that, we
 	// don't miss any entries.
-	if err := db.blockWrite(); err != nil {
+	if err := db.blockWrite(rngs); err != nil {
 		return func() {}, err
 	}
 	reqs := make([]*request, 0, 10)
@@ -1799,9 +1840,10 @@ func (db *DB) DropAll() error {
 	return err
 }
 
+// dropAll internal API, see DropAll for details
 func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("DropAll called. Blocking writes...")
-	f, err := db.prepareToDrop()
+	f, err := db.prepareToDrop([]Range{{}})
 	if err != nil {
 		return f, err
 	}
@@ -1846,35 +1888,49 @@ func (db *DB) dropAll() (func(), error) {
 	return resume, nil
 }
 
-// DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
+// DropPrefix would drop all the keys with the provided prefix. See DropRange for details
+func (db *DB) DropPrefix(prefixes ...[]byte) error {
+	var ranges []Range
+
+	for _, p := range prefixes {
+		ranges = append(ranges, Range{}.Prefix(p))
+	}
+
+	return db.DropRange(ranges...)
+}
+
+// DropRange would drop all the keys with the provided range. It does this in the following way:
 //   - Stop accepting new writes.
 //   - Stop memtable flushes before acquiring lock. Because we're acquiring lock here
 //     and memtable flush stalls for lock, which leads to deadlock
-//   - Flush out all memtables, skipping over keys with the given prefix, Kp.
+//   - Flush out all memtables, skipping over keys with the given range, Kp.
 //   - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
 //     back after a restart.
 //   - Stop compaction.
 //   - Compact L0->L1, skipping over Kp.
 //   - Compact rest of the levels, Li->Li, picking tables which have Kp.
 //   - Resume memtable flushes, compactions and writes.
-func (db *DB) DropPrefix(prefixes ...[]byte) error {
-	if len(prefixes) == 0 {
+func (db *DB) DropRange(ranges ...Range) error {
+	if len(ranges) == 0 {
 		return nil
 	}
-	db.opt.Infof("DropPrefix called for %s", prefixes)
-	f, err := db.prepareToDrop()
+
+	ranges = RangesCompact(ranges...)
+
+	db.opt.Infof("DropRange called for %s", ranges)
+	f, err := db.prepareToDrop(ranges)
 	if err != nil {
 		return err
 	}
 	defer f()
 
-	var filtered [][]byte
-	if filtered, err = db.filterPrefixesToDrop(prefixes); err != nil {
+	var filtered []Range
+	if filtered, err = db.filterRangesToDrop(ranges); err != nil {
 		return err
 	}
-	// If there is no prefix for which the data already exist, do not do anything.
+	// If there is no range for which the data already exist, do not do anything.
 	if len(filtered) == 0 {
-		db.opt.Infof("No prefixes to drop")
+		db.opt.Infof("No ranges to drop")
 		return nil
 	}
 	// Block all foreign interactions with memory tables.
@@ -1888,7 +1944,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 			continue
 		}
 		db.opt.Debugf("Flushing memtable")
-		if err := db.handleMemTableFlush(memtable, filtered); err != nil {
+		if err := db.handleMemTableFlush(memtable); err != nil {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
 		}
@@ -1902,26 +1958,27 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 		return y.Wrapf(err, "cannot create new mem table")
 	}
 
-	// Drop prefixes from the levels.
-	if err := db.lc.dropPrefixes(filtered); err != nil {
+	// Drop ranges from the levels.
+	if err := db.lc.dropRanges(filtered); err != nil {
 		return err
 	}
-	db.opt.Infof("DropPrefix done")
+	db.opt.Infof("DropRange done")
 	return nil
 }
 
-func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
-	var filtered [][]byte
-	for _, prefix := range prefixes {
+// filterRangesToDrop returns reduced set of ranges that are intersecting any existing tables
+func (db *DB) filterRangesToDrop(ranges []Range) ([]Range, error) {
+	var filtered []Range
+	for _, rng := range ranges {
 		err := db.View(func(txn *Txn) error {
 			iopts := DefaultIteratorOptions
-			iopts.Prefix = prefix
+			iopts.Range = rng
 			iopts.PrefetchValues = false
 			itr := txn.NewIterator(iopts)
 			defer itr.Close()
 			itr.Rewind()
-			if itr.ValidForPrefix(prefix) {
-				filtered = append(filtered, prefix)
+			if itr.ValidForRange(rng) {
+				filtered = append(filtered, rng)
 			}
 			return nil
 		})

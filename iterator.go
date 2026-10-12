@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -314,10 +315,14 @@ type IteratorOptions struct {
 
 	// The following option is used to narrow down the SSTables that iterator
 	// picks up. If Prefix is specified, only tables which could have this
-	// prefix are picked based on their range of keys.
-	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
-	Prefix      []byte // Only iterate over this given prefix.
-	SinceTs     uint64 // Only read data that has version > SinceTs.
+	// prefix are picked based on their range of keys. If Range is specified,
+	// only tables that intersect that range are picked for their range of keys.
+	prefixIsKey   bool   // If set, use the prefix for bloom filter lookup.
+	Prefix        []byte // Only iterate over this given prefix.
+	Range         Range  // Only iterate in this given range.
+	inRange       Range  // Internal Range, used for navigation, matches Range+Prefix unless iteration is reversed
+	skipRightmost bool   // If set, skip the first rightmost key encountered, used by reverse exclusive iterations
+	SinceTs       uint64 // Only read data that has version > SinceTs.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -329,23 +334,28 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 	return bytes.Compare(key, opt.Prefix)
 }
 
+// pickTable tests whether table should be included into iteration
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	// Ignore this table if its max version is less than the sinceTs.
 	if t.MaxVersion() < opt.SinceTs {
 		return false
 	}
-	if len(opt.Prefix) == 0 {
+	if opt.inRange.Compare(
+		Range{
+			Left:       y.ParseKey(t.Smallest()),
+			Right:      y.ParseKey(t.Biggest()),
+			Strictness: RangeStrictnessExact,
+		},
+	) != 0 {
+		return false
+	}
+	// range always includes prefix
+	if len(opt.Prefix) == 0 || !opt.prefixIsKey {
 		return true
-	}
-	if opt.compareToPrefix(t.Smallest()) > 0 {
-		return false
-	}
-	if opt.compareToPrefix(t.Biggest()) < 0 {
-		return false
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
-	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
+	if t.DoesNotHave(y.Hash(opt.Prefix)) {
 		return false
 	}
 	return true
@@ -368,28 +378,28 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return tables
 	}
 
-	if len(opt.Prefix) == 0 {
-		out := make([]*table.Table, len(all))
-		copy(out, all)
-		return filterTables(out)
-	}
-	sIdx := sort.Search(len(all), func(i int) bool {
-		// table.Biggest >= opt.prefix
-		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
-		return opt.compareToPrefix(all[i].Biggest()) >= 0
-	})
-	if sIdx == len(all) {
-		// Not found.
-		return []*table.Table{}
+	filtered := all
+
+	if !opt.inRange.Infinite() {
+		sIdx := sort.Search(len(all), func(i int) bool {
+			// table.Biggest >= opt.Range.Left
+			// if table.Biggest < opt.Range.Left, then surely it is not in any of the preceding tables.
+			return opt.inRange.CompareKey(y.ParseKey(all[i].Biggest())) >= 0
+		})
+
+		eIdx := sort.Search(len(all), func(i int) bool {
+			// table.Smallest > opt.Range.Right
+			// if table.Smallest > opt.Range.Right, then it is surely not in any of the following tables.
+			return opt.inRange.CompareKey(y.ParseKey(all[i].Smallest())) > 0
+		})
+
+		filtered = filtered[sIdx:eIdx]
 	}
 
-	filtered := all[sIdx:]
-	if !opt.prefixIsKey {
-		eIdx := sort.Search(len(filtered), func(i int) bool {
-			return opt.compareToPrefix(filtered[i].Smallest()) > 0
-		})
-		out := make([]*table.Table, len(filtered[:eIdx]))
-		copy(out, filtered[:eIdx])
+	// range always includes prefix
+	if len(opt.Prefix) == 0 || !opt.prefixIsKey {
+		out := make([]*table.Table, len(filtered))
+		copy(out, filtered)
 		return filterTables(out)
 	}
 
@@ -464,6 +474,50 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		panic(ErrDBClosed)
 	}
 
+	infrange := opt.Range.Infinite()         // whether user-supplied range is non-bounding
+	opt.Range = opt.Range.Prefix(opt.Prefix) // user-supplied range constrained by user-supplied prefix
+	opt.inRange = opt.Range                  // internal range, differs only for reverse iteration
+
+	if opt.Reverse && len(opt.inRange.Right) > 0 {
+		if infrange { // user effectively only provided the prefix
+			// In case of reverse iteration by prefix alone, it is generally expected for users to provide right
+			// inclusive and exact boundary by appending extra byte(s) to the prefix or incrementing it as a big-endian
+			// integer
+			opt.inRange.Left = nil
+		} else {
+			// adjust right value so it is bigger or equal than largest key that should be included in the range
+
+			switch opt.inRange.Strictness {
+			case RangeStrictnessInexact:
+				// for inexact, we need to increment the inRange key to be larger than largest key included by Range
+				// and skip it on iteration
+
+				var i int
+
+				for i = len(opt.inRange.Right) - 1; i >= 0; i-- {
+					if opt.inRange.Right[i] == 0xff {
+						continue
+					}
+
+					next := slices.Clone(opt.inRange.Right[:i+1])
+					next[i]++
+					opt.inRange.Right = next
+					break
+				}
+
+				if i >= 0 {
+					opt.inRange.Strictness = RangeStrictnessExact
+					opt.skipRightmost = true
+				} else {
+					opt.inRange.Right = nil
+				}
+			case RangeStrictnessExclusive:
+				opt.inRange.Strictness = RangeStrictnessExact
+				opt.skipRightmost = true
+			}
+		}
+	}
+
 	y.NumIteratorsCreatedAdd(txn.db.opt.MetricsEnabled, 1)
 
 	// Keep track of the number of active iterators.
@@ -481,6 +535,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
+
 	res := &Iterator{
 		txn:    txn,
 		iitr:   table.NewMergeIterator(iters, opt.Reverse),
@@ -497,7 +552,12 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	if len(opt.Prefix) > 0 {
 		panic("opt.Prefix should be nil for NewKeyIterator.")
 	}
+	if !opt.Range.Infinite() {
+		panic("opt.Range should be infinite for NewKeyIterator.")
+	}
 	opt.Prefix = key // This key must be without the timestamp.
+	opt.Range = opt.Range.Prefix(key)
+	opt.inRange = opt.Range
 	opt.prefixIsKey = true
 	opt.AllVersions = true
 	return txn.NewIterator(opt)
@@ -527,13 +587,19 @@ func (it *Iterator) Valid() bool {
 	if it.opt.prefixIsKey {
 		return bytes.Equal(it.item.key, it.opt.Prefix)
 	}
-	return bytes.HasPrefix(it.item.key, it.opt.Prefix)
+	return it.opt.Range.CompareKey(it.item.key) == 0 // uses user-supplied Range as is
 }
 
 // ValidForPrefix returns false when iteration is done
 // or when the current key is not prefixed by the specified prefix.
 func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 	return it.Valid() && bytes.HasPrefix(it.item.key, prefix)
+}
+
+// ValidForRange returns false when iteration is done
+// or when the current key is outside the range.
+func (it *Iterator) ValidForRange(rng Range) bool {
+	return it.Valid() && rng.CompareKey(it.item.key) == 0
 }
 
 // Close would close the iterator. It is important to call this when you're done with iteration.
@@ -578,7 +644,7 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	for it.iitr.Valid() && hasPrefix(it) {
+	for it.iitr.Valid() && inRange(it) {
 		if it.parseItem() {
 			// parseItem calls one extra next.
 			// This is used to deal with the complexity of reverse iteration.
@@ -714,15 +780,12 @@ func (it *Iterator) fill(item *Item) {
 	}
 }
 
-func hasPrefix(it *Iterator) bool {
-	// We shouldn't check prefix in case the iterator is going in reverse. Since in reverse we expect
-	// people to append items to the end of prefix.
-	if !it.opt.Reverse && len(it.opt.Prefix) > 0 {
-		return bytes.HasPrefix(y.ParseKey(it.iitr.Key()), it.opt.Prefix)
-	}
-	return true
+// inRange tests whether current item's key matches the iterator filtering options
+func inRange(it *Iterator) bool {
+	return it.opt.inRange.CompareKey(y.ParseKey(it.iitr.Key())) == 0
 }
 
+// prefetch next batch of values
 func (it *Iterator) prefetch() {
 	prefetchSize := 2
 	if it.opt.PrefetchValues && it.opt.PrefetchSize > 1 {
@@ -732,7 +795,8 @@ func (it *Iterator) prefetch() {
 	i := it.iitr
 	var count int
 	it.item = nil
-	for i.Valid() && hasPrefix(it) {
+
+	for i.Valid() && inRange(it) {
 		if !it.parseItem() {
 			continue
 		}
@@ -760,7 +824,11 @@ func (it *Iterator) Seek(key []byte) {
 
 	it.lastKey = it.lastKey[:0]
 	if len(key) == 0 {
-		key = it.opt.Prefix
+		if it.opt.Reverse {
+			key = it.opt.inRange.Right
+		} else {
+			key = it.opt.inRange.Left
+		}
 	}
 	if len(key) == 0 {
 		it.iitr.Rewind()
@@ -775,6 +843,11 @@ func (it *Iterator) Seek(key []byte) {
 	}
 	it.iitr.Seek(key)
 	it.prefetch()
+
+	// necessary for the case when exclusive Right end of the range is shorter than rightmost key to be included
+	if it.opt.skipRightmost && it.item != nil && bytes.Equal(it.item.key, it.opt.inRange.Right) {
+		it.Next()
+	}
 }
 
 // Rewind would rewind the iterator cursor all the way to zero-th position, which would be the

@@ -31,37 +31,54 @@ func (tm *tableMock) Biggest() []byte              { return tm.right }
 func (tm *tableMock) DoesNotHave(hash uint32) bool { return false }
 func (tm *tableMock) MaxVersion() uint64           { return math.MaxUint64 }
 
+// TestPickTables tests selecting tables matching iterator filtering options
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
 
-	within := func(prefix, left, right []byte) {
-		opt.Prefix = prefix
+	within := func(rng Range, prefix, left, right []byte) {
+		opt.Range = rng.Prefix(prefix)
+		opt.inRange = opt.Range
 		// PickTable expects smallest and biggest to contain timestamps.
 		tm := &tableMock{left: y.KeyWithTs(left, 1), right: y.KeyWithTs(right, 1)}
-		require.True(t, opt.pickTable(tm), "within failed for %b %b %b\n", prefix, left, right)
+		require.Truef(t, opt.pickTable(tm), "within failed for %v %v %v\n", prefix, left, right)
 	}
-	outside := func(prefix, left, right string) {
-		opt.Prefix = []byte(prefix)
+	outside := func(rng Range, prefix, left, right string) {
+		opt.Range = rng.Prefix([]byte(prefix))
+		opt.inRange = opt.Range
 		// PickTable expects smallest and biggest to contain timestamps.
 		tm := &tableMock{left: y.KeyWithTs([]byte(left), 1), right: y.KeyWithTs([]byte(right), 1)}
-		require.False(t, opt.pickTable(tm), "outside failed for %b %b %b", prefix, left, right)
+		require.Falsef(t, opt.pickTable(tm), "outside failed for %v %v %v", prefix, left, right)
 	}
-	within([]byte("abc"), []byte("ab"), []byte("ad"))
-	within([]byte("abc"), []byte("abc"), []byte("ad"))
-	within([]byte("abc"), []byte("abb123"), []byte("ad"))
-	within([]byte("abc"), []byte("abc123"), []byte("abd234"))
-	within([]byte("abc"), []byte("abc123"), []byte("abc456"))
+	within(Range{}, []byte("abc"), []byte("ab"), []byte("ad"))
+	within(Range{}, []byte("abc"), []byte("abc"), []byte("ad"))
+	within(Range{}, []byte("abc"), []byte("abb123"), []byte("ad"))
+	within(Range{}, []byte("abc"), []byte("abc123"), []byte("abd234"))
+	within(Range{}, []byte("abc"), []byte("abc123"), []byte("abc456"))
 	// Regression test for https://github.com/dgraph-io/badger/issues/992
-	within([]byte{0, 0, 1}, []byte{0}, []byte{0, 0, 1})
+	within(Range{}, []byte{0, 0, 1}, []byte{0}, []byte{0, 0, 1})
+	within(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc300")}, []byte("abc"), []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc123")}, []byte("abc"), []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc234"), Right: ([]byte)("abc300")}, []byte("abc"), []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc300")}, nil, []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc123")}, nil, []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc234"), Right: ([]byte)("abc300")}, nil, []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc130"), Right: ([]byte)("abc140")}, nil, []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)("abc130"), Right: ([]byte)("")}, nil, []byte("abc123"), []byte("abc234"))
+	within(Range{Left: ([]byte)(""), Right: ([]byte)("abc130")}, nil, []byte("abc123"), []byte("abc234"))
 
-	outside("abd", "abe", "ad")
-	outside("abd", "ac", "ad")
-	outside("abd", "b", "e")
-	outside("abd", "a", "ab")
-	outside("abd", "ab", "abc")
-	outside("abd", "ab", "abc123")
+	outside(Range{}, "abd", "abe", "ad")
+	outside(Range{}, "abd", "ac", "ad")
+	outside(Range{}, "abd", "b", "e")
+	outside(Range{}, "abd", "a", "ab")
+	outside(Range{}, "abd", "ab", "abc")
+	outside(Range{}, "abd", "ab", "abc123")
+	outside(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc122")}, "abc", "abc123", "abc234")
+	outside(Range{Left: ([]byte)("abc235"), Right: ([]byte)("abc300")}, "abc", "abc123", "abc234")
+	outside(Range{Left: ([]byte)("abc000"), Right: ([]byte)("abc122")}, "", "abc123", "abc234")
+	outside(Range{Left: ([]byte)("abc235"), Right: ([]byte)("abc300")}, "", "abc123", "abc234")
 }
 
+// TestPickSortTables tests selecting tables matching iterator filtering options, including the selection order
 func TestPickSortTables(t *testing.T) {
 	type MockKeys struct {
 		small string
@@ -84,7 +101,8 @@ func TestPickSortTables(t *testing.T) {
 		MockKeys{small: "glr", large: "gyup"})
 	opt := DefaultIteratorOptions
 	opt.prefixIsKey = false
-	opt.Prefix = []byte("c")
+	opt.Range = Range{}.Prefix([]byte("c"))
+	opt.inRange = opt.Range
 	filtered := opt.pickTables(tables)
 	require.Equal(t, 2, len(filtered))
 	// build table adds time stamp so removing tailing bytes.
@@ -108,7 +126,22 @@ func TestPickSortTables(t *testing.T) {
 	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
 	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
 
-	opt.Prefix = []byte("aa")
+	opt.Range = Range{Left: []byte("c"), Right: []byte("d")}
+	opt.inRange = opt.Range
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 3, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
+	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
+
+	opt.Range = Range{Left: []byte("ckr1"), Right: []byte("ckr3")}
+	opt.inRange = opt.Range
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 1, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("ckr"))
+
+	opt.Range = Range{}.Prefix([]byte("aa"))
+	opt.inRange = opt.Range
 	filtered = opt.pickTables(tables)
 	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
 	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
@@ -168,6 +201,7 @@ func TestIterateSinceTsWithPendingWrites(t *testing.T) {
 	})
 }
 
+// TestIteratePrefix tests iterating keys having a particular prefix
 func TestIteratePrefix(t *testing.T) {
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")
@@ -189,11 +223,14 @@ func TestIteratePrefix(t *testing.T) {
 		}
 		require.NoError(t, batch.Flush())
 
-		countKeys := func(prefix string) int {
-			t.Logf("Testing with prefix: %s", prefix)
+		countKeys := func(prefix, start, end string, strictness RangeStrictness) int {
 			var count int
 			opt := DefaultIteratorOptions
 			opt.Prefix = []byte(prefix)
+			opt.Range = Range{Left: []byte(start), Right: []byte(end), Strictness: strictness}
+
+			t.Logf("Testing with prefix: %s and range %v", prefix, opt.Range)
+
 			err := db.View(func(txn *Txn) error {
 				itr := txn.NewIterator(opt)
 				defer itr.Close()
@@ -235,12 +272,37 @@ func TestIteratePrefix(t *testing.T) {
 		}
 
 		for i := 0; i <= 9; i++ {
-			require.Equal(t, 1, countKeys(fmt.Sprintf("%d%d%d%d", i, i, i, i)))
-			require.Equal(t, 10, countKeys(fmt.Sprintf("%d%d%d", i, i, i)))
-			require.Equal(t, 100, countKeys(fmt.Sprintf("%d%d", i, i)))
-			require.Equal(t, 1000, countKeys(fmt.Sprintf("%d", i)))
+			num := fmt.Sprintf("%d", i)
+
+			s := strings.Repeat(num, 1)
+			require.Equal(t, 1000, countKeys(s, "", "", RangeStrictnessInexact))
+			require.Equal(t, 100, countKeys(s, s+"0", s+"0", RangeStrictnessInexact))
+			require.Equal(t, 500, countKeys(s, s+"0", s+"4", RangeStrictnessInexact))
+			require.Equal(t, 500, countKeys(s, s+"0", s+"5", RangeStrictnessExact))
+			require.Equal(t, 500, countKeys(s, s+"0", s+"500", RangeStrictnessExclusive))
+
+			s = strings.Repeat(num, 2)
+			require.Equal(t, 100, countKeys(s, "", "", RangeStrictnessInexact))
+			require.Equal(t, 10, countKeys(s, s+"0", s+"0", RangeStrictnessInexact))
+			require.Equal(t, 50, countKeys(s, s+"0", s+"4", RangeStrictnessInexact))
+			require.Equal(t, 50, countKeys(s, s+"0", s+"5", RangeStrictnessExact))
+			require.Equal(t, 50, countKeys(s, s+"0", s+"50", RangeStrictnessExclusive))
+
+			s = strings.Repeat(num, 3)
+			require.Equal(t, 10, countKeys(s, "", "", RangeStrictnessInexact))
+			require.Equal(t, 1, countKeys(s, s+"0", s+"0", RangeStrictnessInexact))
+			require.Equal(t, 5, countKeys(s, s+"0", s+"4", RangeStrictnessInexact))
+			require.Equal(t, 5, countKeys(s, s+"0", s+"4", RangeStrictnessExact))
+			require.Equal(t, 5, countKeys(s, s+"0", s+"5", RangeStrictnessExclusive))
+
+			s = strings.Repeat(num, 4)
+			require.Equal(t, 1, countKeys(s, "", "", RangeStrictnessInexact))
+			require.Equal(t, 0, countKeys(s, s+"0", s+"0", RangeStrictnessInexact))
+			require.Equal(t, 0, countKeys(s, s+"0", s+"4", RangeStrictnessInexact))
+			require.Equal(t, 0, countKeys(s, s+"0", s+"4", RangeStrictnessExact))
+			require.Equal(t, 0, countKeys(s, s+"0", s+"4", RangeStrictnessExclusive))
 		}
-		require.Equal(t, 10000, countKeys(""))
+		require.Equal(t, 10000, countKeys("", "", "", RangeStrictnessInexact))
 
 		t.Logf("Testing each key with key iterator")
 		for i := 0; i < n; i++ {
@@ -379,8 +441,8 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	})
 	y.Check(err)
 	b.Logf("LSM files: %d", lsmFiles)
-	b.Logf("Key splits: %v", db.Ranges(nil, 10000))
-	b.Logf("Key splits with prefix: %v", db.Ranges([]byte("09"), 10000))
+	b.Logf("Key splits: %v", db.Ranges(Range{}, 10000))
+	b.Logf("Key splits with prefix: %v", db.Ranges(Range{}.Prefix([]byte("09")), 10000))
 
 	b.Logf("Outer b.N: %d", b.N)
 	b.Run("Key lookups", func(b *testing.B) {

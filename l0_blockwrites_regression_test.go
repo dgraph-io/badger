@@ -152,8 +152,8 @@ func TestDropPrepareDrainDoesNotDropWrites(t *testing.T) {
 		// (4) Enter the state prepareToDrop establishes before draining: writes
 		// blocked. (We set the flag directly rather than calling DropPrefix so the
 		// test keeps full control of timing and doesn't tear the flusher down.)
-		db.blockWrites.Store(1)
-		defer db.blockWrites.Store(0)
+		db.blockWrites.Store(&[]Range{{}})
+		defer db.blockWrites.Store(nil)
 
 		// (5) Build one already-accepted write, exactly as prepareToDrop's drain
 		// hands it to writeRequests.
