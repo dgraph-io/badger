@@ -58,6 +58,7 @@ func (c *collector) Send(buf *z.Buffer) error {
 
 var ctxb = context.Background()
 
+// TestStream test Stream framework behaviour
 func TestStream(t *testing.T) {
 	dir, err := os.MkdirTemp("", "badger-test")
 	require.NoError(t, err)
@@ -157,7 +158,18 @@ func TestStream(t *testing.T) {
 	for pred, count := range m {
 		require.Equal(t, 50, count, "Count mismatch for pred: %s", pred)
 	}
+
+	// Test case 5. Retrieve only 2 predicates.
+	stream.Prefix = []byte("p1-5")
+	stream.ChooseKey = nil
+	stream.Range = Range{Left: []byte("p1-50"), Right: []byte("p1-54")}
+	c.kv = c.kv[:0]
+	err = stream.Orchestrate(ctxb)
+	require.NoError(t, err)
+	require.Equal(t, 5, len(c.kv), "Expected 5. Got: %d", len(c.kv))
+
 	require.NoError(t, db.Close())
+
 }
 
 func TestStreamMaxSize(t *testing.T) {

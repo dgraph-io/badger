@@ -154,41 +154,371 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 	test(t, db)
 }
 
+// TestReverseIterator test reverse iteration behaviour
 func TestReverseIterator(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		key := make([]byte, 6)
+	prepare := func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
-			binary.BigEndian.PutUint16(key, 5)
-			binary.BigEndian.PutUint32(key[2:], 1)
-			err1 := txn.Set(key, []byte("value1"))
+			err1 := txn.Set([]byte{0, 5, 0, 0, 0, 1}, []byte("value1"))
 			require.NoError(t, err1)
 
-			binary.BigEndian.PutUint32(key[2:], 2)
-			err1 = txn.Set(key, []byte("value2"))
+			err1 = txn.Set([]byte{0, 5, 0, 0, 0, 5}, []byte("value2"))
+			require.NoError(t, err1)
+
+			err1 = txn.Set([]byte{0, 0xff, 0}, []byte("value3"))
+			require.NoError(t, err1)
+
+			err1 = txn.Set([]byte{0xff, 0xff, 0xff}, []byte("value4"))
 			require.NoError(t, err1)
 			return nil
 		})
 
 		require.NoError(t, err)
+	}
 
-		err = db.View(func(txn *Txn) error {
-			searchBuffer := make([]byte, 3)
-			binary.BigEndian.PutUint16(searchBuffer, 5)
-			searchBuffer[2] = 0xFF
+	// prefix reverse iteration happens only starting from keys that are less or equal to the Prefix, and iterator
+	// is Valid() only for keys that happen to have such Prefix.
+	t.Run("prefix", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
 
-			iteratorOptions := DefaultIteratorOptions
-			iteratorOptions.Reverse = true
-			iteratorOptions.PrefetchValues = false
-			iteratorOptions.Prefix = searchBuffer
-			it := txn.NewIterator(iteratorOptions)
-			defer it.Close()
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Prefix = []byte{0, 5, 0xff}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
 
-			it.Rewind()
-			require.Equal(t, it.Item().Key(), key)
-			return nil
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
 		})
 
-		require.NoError(t, err)
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Prefix = []byte{0, 6}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Prefix = []byte{0, 5}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Prefix = []byte{0xff, 0xff}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+	})
+
+	// range reverse iteration should behave according to Strictness definition
+	t.Run("range inexact", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5}}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0xff}}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Left: []byte{0, 1}, Right: []byte{0xff}}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.True(t, it.Valid())
+				require.Equal(t, []byte{0xff, 0xff, 0xff}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Prefix = []byte{0xff}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				require.Equal(t, []byte{0x00, 0xff, 0x00}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0x00, 0xff}}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0x00, 0xff, 0x00}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 2}}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+	})
+
+	t.Run("range exact", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 10}, Strictness: RangeStrictnessExact}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 5}, Strictness: RangeStrictnessExact}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 4}, Strictness: RangeStrictnessExact}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 1}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 0}, Strictness: RangeStrictnessExact}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
+	})
+
+	t.Run("range exclusive", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			prepare(t, db)
+
+			err := db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 1}, Strictness: RangeStrictnessExclusive}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 10}, Strictness: RangeStrictnessExclusive}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 5}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 5}, Strictness: RangeStrictnessExclusive}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 1}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 4}, Strictness: RangeStrictnessExclusive}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.Equal(t, []byte{0, 5, 0, 0, 0, 1}, it.Item().Key())
+				return nil
+			})
+
+			require.NoError(t, err)
+
+			err = db.View(func(txn *Txn) error {
+				iteratorOptions := DefaultIteratorOptions
+				iteratorOptions.Reverse = true
+				iteratorOptions.PrefetchValues = false
+				iteratorOptions.Range = Range{Right: []byte{0, 5, 0, 0, 0, 1}, Strictness: RangeStrictnessExclusive}
+				it := txn.NewIterator(iteratorOptions)
+				defer it.Close()
+
+				it.Rewind()
+				require.False(t, it.Valid())
+				return nil
+			})
+
+			require.NoError(t, err)
+		})
 	})
 }
 
