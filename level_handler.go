@@ -25,6 +25,15 @@ type levelHandler struct {
 	totalSize      int64
 	totalStaleSize int64
 
+	// l0stall is a condition variable used to signal the (single) flush goroutine
+	// waiting in addLevel0Table that the L0 table count has dropped below the stall
+	// threshold (or that the DB is closing). It is only used for level 0 and its
+	// Locker is this handler's write lock (see RWMutex above), so the stall
+	// predicate (len(tables) >= NumLevelZeroTablesStall) is always evaluated and
+	// the wait is entered atomically under the same lock that compaction uses to
+	// remove L0 tables. This eliminates lost wakeups without a second mutex.
+	l0stall *sync.Cond
+
 	// The following are initialized once and const.
 	level    int
 	strLevel string
@@ -172,11 +181,44 @@ func decrRefs(tables []*table.Table) error {
 }
 
 func newLevelHandler(db *DB, level int) *levelHandler {
-	return &levelHandler{
+	s := &levelHandler{
 		level:    level,
 		strLevel: fmt.Sprintf("l%d", level),
 		db:       db,
 	}
+	if level == 0 {
+		// The cond's Locker is the handler's write lock (RWMutex.Lock/Unlock).
+		s.l0stall = sync.NewCond(&s.RWMutex)
+	}
+	return s
+}
+
+// signalL0Drained wakes any flush goroutine waiting in addLevel0Table. It must be
+// called whenever the number of L0 tables may have decreased (e.g. after an
+// L0->Lbase or L0->L0 compaction removes tables) or when the DB is closing. The
+// waiter re-checks the stall predicate under the lock in a loop, so it is safe to
+// Broadcast without holding the lock and without the count having actually changed
+// (spurious broadcasts are harmless).
+func (s *levelHandler) signalL0Drained() {
+	if s.l0stall != nil {
+		s.l0stall.Broadcast()
+	}
+}
+
+// numTablesLocked returns the number of tables. Caller must hold s.Lock() (write
+// lock), which is the same lock used as the l0stall cond's Locker.
+func (s *levelHandler) numTablesLocked() int {
+	return len(s.tables)
+}
+
+// addLevel0TableLocked appends t to L0 unconditionally. Caller must hold s.Lock()
+// and must have asserted s.level == 0. This is the lock-held variant of the body
+// of tryAddLevel0Table, used by addLevel0Table which already holds the lock to
+// wait on the stall cond.
+func (s *levelHandler) addLevel0TableLocked(t *table.Table) {
+	s.tables = append(s.tables, t)
+	t.IncrRef()
+	s.addSize(t)
 }
 
 // tryAddLevel0Table returns true if ok and no stalling.

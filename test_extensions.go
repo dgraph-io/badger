@@ -40,6 +40,12 @@ type testOnlyDBExtensions struct {
 	// process of performing the Close operation. Currently, we only consider
 	// using this during testing.
 	onCloseDiscardCapture map[uint64]uint64
+
+	// vlogGCPauseHook is called inside vlog.rewrite() after Phase 1 (scan)
+	// and before Phase 2 (write-back). Nil in production. Tests set it to
+	// inject a delete + compaction into the race window to reproduce the
+	// GC write-back race deterministically.
+	vlogGCPauseHook func()
 }
 
 // logToSyncChan sends a message to the DB's syncChan. Note that we expect

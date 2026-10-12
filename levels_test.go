@@ -6,6 +6,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
@@ -1355,5 +1356,383 @@ func TestBaseLevelZeroBySize(t *testing.T) {
 					"L0 compaction must not panic (Lmax=%s); got %v", tc.name, val)
 			})
 		})
+	}
+}
+
+func TestLevelTargets(t *testing.T) {
+	// Disable compactions and keep single version of each key.
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+
+	t.Run("level 0 to level 6 when level 5 is not empty", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 4
+
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[opt.MaxLevels-1],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[opt.MaxLevels-1].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = opt.MaxLevels - 1
+			err := db.lc.runCompactDef(-1, 0, cdef)
+			require.Error(t, err)
+			expectedErr := fmt.Sprintf(
+				"there is a non-empty level %d above base level %d",
+				opt.MaxLevels-2, opt.MaxLevels-1)
+			require.Contains(t, err.Error(), expectedErr)
+		})
+	})
+
+	t.Run("level 0 to level 5 while size of level 6 is less than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 4
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
+		})
+	})
+
+	t.Run("level 0 to level 4 while size of level 5 and 6 is less than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-3)
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize / 2
+			db.lc.levels[opt.MaxLevels-3].totalSize = opt.BaseLevelSize / 4
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+		})
+	})
+
+	t.Run("all level have data", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			for i := 1; i < opt.MaxLevels; i++ {
+				createAndOpen(db, data, i)
+				db.lc.levels[i].totalSize = opt.BaseLevelSize / 2
+			}
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("level 1 is larger than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			for i := 1; i < opt.MaxLevels; i++ {
+				createAndOpen(db, data, i)
+				db.lc.levels[i].totalSize = opt.BaseLevelSize * 2
+			}
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("level 5 is larger than BaseLevelSize", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize * 2
+			// Set level 6 large enough so that targetSz[5] > level 5 size (satisfying old
+			// bump condition), but level 5 itself exceeds BaseLevelSize so the new guard
+			// prevents the bump.
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * int64(opt.LevelSizeMultiplier*2+1)
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-3, target.baseLevel)
+		})
+	})
+
+	t.Run("only level 0 has data", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			// All levels below are empty; base level should be the last level.
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-1, target.baseLevel)
+		})
+	})
+
+	t.Run("level size exactly at BaseLevelSize boundary", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+
+			createAndOpen(db, data, opt.MaxLevels-2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			// Level 5 size exactly equals BaseLevelSize. The size-ratio target
+			// for L5 is BaseLevelSize (L6 / LevelSizeMultiplier, clamped up), so
+			// L5 is the desired base level, and since every level above L5 is
+			// empty it is safe to compact L0 directly into it. Choosing the
+			// empty L4 above it instead would make L4 non-empty and ratchet the
+			// base level toward L1 (#2327).
+			db.lc.levels[opt.MaxLevels-2].totalSize = opt.BaseLevelSize
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 2
+
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
+		})
+	})
+}
+
+// TestLevelTargetsStrayLevels covers base-level selection when data is
+// stranded in a level above the size-ratio base level (issue #2327). The base
+// level must be clamped up to the stray level (never compact L0 below existing
+// data, #2278), but it must never be placed on an empty level above a
+// non-empty one — that ratchets the base level to L1 on every compaction and
+// forces data to cascade through every intermediate level.
+func TestLevelTargetsStrayLevels(t *testing.T) {
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
+	opt.managedTxns = true
+
+	t.Run("stray level above the size-ratio base clamps base to the stray", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			createAndOpen(db, data, 2)
+			createAndOpen(db, data, opt.MaxLevels-1)
+
+			// A small stray at L2, everything else at a large L6. The size
+			// ratio puts the base level deep, but L0 must compact into the
+			// stray level itself, not below it and not into empty L1.
+			db.lc.levels[2].totalSize = opt.BaseLevelSize / 4
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			target := db.lc.levelTargets()
+			require.Equal(t, 2, target.baseLevel)
+		})
+	})
+
+	t.Run("collapsed tree keeps base at the shallowest non-empty level", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			// A collapsed tree, as left behind by the base level falling to L1:
+			// small remnants at L1-L3, bulk of the data at L6.
+			for _, lvl := range []int{1, 2, 3, opt.MaxLevels - 1} {
+				createAndOpen(db, data, lvl)
+				db.lc.levels[lvl].totalSize = opt.BaseLevelSize / 4
+			}
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			// L1 holds data, so it is the only safe target for L0 compactions.
+			target := db.lc.levelTargets()
+			require.Equal(t, 1, target.baseLevel)
+		})
+	})
+
+	t.Run("base level recovers once shallow levels are empty", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			data := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			createAndOpen(db, data, 0)
+			createAndOpen(db, data, opt.MaxLevels-1)
+			db.lc.levels[opt.MaxLevels-1].totalSize = opt.BaseLevelSize * 100
+
+			// Same tree as above once the strays have been compacted away: the
+			// base level must return to its natural depth, not stay at L1.
+			target := db.lc.levelTargets()
+			require.Equal(t, opt.MaxLevels-2, target.baseLevel)
+		})
+	})
+}
+
+// TestDeletedKeyReappears is an end-to-end regression test for the compaction
+// routing fix in PR #2278. Data is written through real transactions; the
+// compaction steps call runCompactDef directly because doCompact's
+// fillMaxLevelTables skips small/recent tables in a short test. levelTargets()'s
+// baseLevel selection is unit-tested in TestLevelTargets; this test checks the
+// user-visible outcome — a deleted key stays deleted.
+func TestDeletedKeyReappears(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	const (
+		baseLevelSz = 16 << 10 // 16 KB
+		baseTableSz = 8 << 10  // 8 KB
+	)
+
+	openDB := func(compactOnClose bool) *DB {
+		opt := getTestOptions(dir).
+			WithNumCompactors(0).
+			WithBaseLevelSize(baseLevelSz).
+			WithBaseTableSize(baseTableSz).
+			WithCompression(options.None). // disable compression so SST sizes are predictable
+			WithValueThreshold(1 << 20)    // keep all values inline — no vlog
+		opt.managedTxns = true
+		opt = opt.WithCompactL0OnClose(compactOnClose)
+		db, err := Open(opt)
+		require.NoError(t, err)
+		return db
+	}
+
+	padVal := bytes.Repeat([]byte("p"), 20<<10) // 20 KB → SST ≈ 25 KB > baseLevelSz
+	fooVal := bytes.Repeat([]byte("f"), 2<<10)  // 2 KB  → SST ≈  7 KB < baseLevelSz
+
+	// Write an expired pad entry; its SST exceeds baseLevelSz, so after close L6
+	// is large enough that levelTargets() returns baseLevel=5 on reopen.
+	db := openDB(true)
+	padEntry := NewEntry([]byte("pad"), padVal)
+	padEntry.ExpiresAt = 1 // already expired
+	txn := db.NewTransactionAt(0, true)
+	require.NoError(t, txn.SetEntry(padEntry))
+	require.NoError(t, txn.CommitAt(10, nil))
+	require.NoError(t, db.Close()) // memtable → L0 → L6
+
+	// Write foo@v20; it lands in L5 because baseLevel is now 5.
+	db = openDB(true)
+	require.Equal(t, 5, db.lc.levelTargets().baseLevel)
+	txn2 := db.NewTransactionAt(0, true)
+	require.NoError(t, txn2.SetEntry(NewEntry([]byte("foo"), fooVal)))
+	require.NoError(t, txn2.CommitAt(20, nil))
+	require.NoError(t, db.Close()) // memtable → L0 → L5
+
+	// Drop the expired pad from L6 (Lmax-to-Lmax compaction, discardTs=15),
+	// leaving L6 empty and foo@v20 untouched in L5.
+	db = openDB(false)
+	db.SetDiscardTs(15)
+	targets := db.lc.levelTargets()
+	cdef6a := compactDef{
+		thisLevel: db.lc.levels[6],
+		nextLevel: db.lc.levels[6],
+		top:       db.lc.levels[6].tables,
+		bot:       nil,
+		t:         targets,
+	}
+	require.NoError(t, db.lc.runCompactDef(-1, 6, cdef6a))
+	require.Zero(t, db.lc.levels[6].getTotalSize())
+	require.NoError(t, db.Close())
+
+	// Delete foo@v21; CompactL0OnClose routes the tombstone to the computed
+	// baseLevel (L5, alongside foo@v20).
+	db = openDB(true)
+	txn3 := db.NewTransactionAt(0, true)
+	require.NoError(t, txn3.Delete([]byte("foo")))
+	require.NoError(t, txn3.CommitAt(21, nil))
+	require.NoError(t, db.Close())
+
+	db = openDB(false)
+	db.SetDiscardTs(25)
+	targets2 := db.lc.levelTargets()
+
+	// Drop the tombstone from L6 if it landed there; skipped when L6 is empty.
+	if len(db.lc.levels[6].tables) > 0 {
+		cdef6b := compactDef{
+			thisLevel: db.lc.levels[6],
+			nextLevel: db.lc.levels[6],
+			top:       db.lc.levels[6].tables,
+			bot:       nil,
+			t:         targets2,
+		}
+		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef6b))
+	}
+
+	// Compact L5 → L6.
+	cdef5 := compactDef{
+		thisLevel: db.lc.levels[5],
+		nextLevel: db.lc.levels[6],
+		top:       db.lc.levels[5].tables,
+		bot:       db.lc.levels[6].tables,
+		t:         targets2,
+	}
+	require.NoError(t, db.lc.runCompactDef(-1, 5, cdef5))
+
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("foo"))
+		return err
+	})
+	require.Equal(t, ErrKeyNotFound, err, "deleted foo must not reappear after compaction")
+	require.NoError(t, db.Close())
+}
+
+// TestOpenWithLevelBeyondMaxLevels covers a manifest that records a table at a
+// level at or beyond opt.MaxLevels. The tables slice in newLevelsController is
+// sized by MaxLevels, so the append used to panic with an index-out-of-range.
+// That panic is now recovered by the table-opening goroutine, and if the mutex
+// guarding tables were released without a defer the recover would leave it held
+// and every remaining goroutine would park on it, hanging Open forever with no
+// error. Assert instead that Open returns promptly with a usable message.
+func TestOpenWithLevelBeyondMaxLevels(t *testing.T) {
+	dir, err := os.MkdirTemp("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	// Build enough on-disk tables to exceed the size-3 throttle, so a leaked
+	// mutex would strand the goroutines behind it rather than surfacing early.
+	opts := getTestOptions(dir).WithNumCompactors(0)
+	opts.MemTableSize = 1 << 20
+	opts.BaseTableSize = 1 << 18
+	opts.ValueThreshold = 32
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	for i := 0; i < 40000; i++ {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key:%08d", i)), []byte(fmt.Sprintf("val:%08d", i)))
+		}))
+	}
+	require.NoError(t, db.Close())
+
+	// Rewrite the manifest so every table claims level 6.
+	mfFile, mf, err := helpOpenOrCreateManifestFile(dir, false, 0, 0, opts)
+	require.NoError(t, err)
+	var changes []*pb.ManifestChange
+	for id, tm := range mf.Tables {
+		changes = append(changes, newDeleteChange(id))
+		changes = append(changes, newCreateChange(id, 6, tm.KeyID, tm.Compression))
+	}
+	require.Greater(t, len(changes), 0)
+	require.NoError(t, mfFile.addChanges(changes, opts))
+	require.NoError(t, mfFile.close())
+
+	reopen := getTestOptions(dir).WithNumCompactors(0).WithMaxLevels(3)
+	reopen.MemTableSize = 1 << 20
+	reopen.BaseTableSize = 1 << 18
+	reopen.ValueThreshold = 32
+
+	errCh := make(chan error, 1)
+	go func() { _, e := Open(reopen); errCh <- e }()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "MaxLevels")
+	case <-time.After(30 * time.Second):
+		t.Fatal("Open hung instead of returning an error")
 	}
 }

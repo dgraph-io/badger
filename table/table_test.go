@@ -24,6 +24,7 @@ import (
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 func key(prefix string, i int) string {
@@ -895,4 +896,40 @@ func TestMaxVersion(t *testing.T) {
 	table, err := CreateTable(filename, b)
 	require.NoError(t, err)
 	require.Equal(t, N, int(table.MaxVersion()))
+}
+
+func TestInMemoryTableBlockErrorNoPanic(t *testing.T) {
+	opts := getTestTableOptions()
+	src := buildTestTable(t, "key", 500, opts)
+
+	data := make([]byte, len(src.Data))
+	copy(data, src.Data)
+	srcID := src.ID()
+	require.NoError(t, src.DecrRef())
+
+	tbl, err := OpenInMemoryTable(data, srcID, &opts)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
+
+	corruptEnd := tbl.indexStart
+	if corruptEnd > 256 {
+		corruptEnd = 256
+	}
+	for i := 0; i < corruptEnd; i++ {
+		data[i] = 0xFF
+	}
+
+	require.NotPanics(t, func() {
+		_, err = tbl.block(0, false)
+	})
+	require.Error(t, err)
+}
+
+func TestInMemoryTableFilename(t *testing.T) {
+	tbl := &Table{
+		MmapFile: &z.MmapFile{Data: []byte{}, Fd: nil},
+		id:       777,
+		opt:      &Options{},
+	}
+	require.Equal(t, IDToFilename(777), tbl.Filename())
 }

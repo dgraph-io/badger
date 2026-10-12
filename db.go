@@ -93,6 +93,14 @@ type DB struct {
 	mt  *memTable   // Our latest (actively written) in-memory table
 	imm []*memTable // Add here only AFTER pushing to flushChan.
 
+	// flushCond signals the (serial) write path that the flush goroutine has made
+	// progress, i.e. it has removed a memtable from imm and there may now be room
+	// in flushChan. Its Locker is db.lock (write lock), the same lock that guards
+	// imm and that ensureRoomForWrite holds, so the room check and the wait are
+	// entered atomically. This replaces the 10ms busy-sleep that previously
+	// polled flushChan from writeRequests.
+	flushCond *sync.Cond
+
 	// Initialized via openMemTables.
 	nextMemFid int
 
@@ -106,6 +114,16 @@ type DB struct {
 
 	blockWrites atomic.Int32
 	isClosed    atomic.Uint32
+
+	// gcActive is set while a vlog GC rewrite (scan + write-back) is in flight,
+	// and gcDiscardTs records the DB's max version captured at its start. While
+	// active, last-level compaction clamps its discard threshold to gcDiscardTs
+	// (see levelsController.subcompact) so it will not purge any version newer than
+	// the rewrite's start — in particular a tombstone for a key the rewrite is
+	// about to write back. That tombstone survives to shadow the write-back, so a
+	// key deleted mid-GC is not resurrected (#2286). Released when GC finishes.
+	gcActive    atomic.Bool
+	gcDiscardTs atomic.Uint64
 
 	orc              *oracle
 	bannedNamespaces *lockedKeys
@@ -245,6 +263,7 @@ func Open(opt Options) (*DB, error) {
 		threshold:        initVlogThreshold(&opt),
 	}
 
+	db.flushCond = sync.NewCond(&db.lock)
 	db.syncChan = opt.syncChan
 
 	// Cleanup all the goroutines started by badger in case of an error.
@@ -535,8 +554,24 @@ func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs.Load()))
 
+	// Set blockWrites/isClosed and wake any writer parked in ensureRoomForWrite's
+	// flushCond.Wait ATOMICALLY under db.lock. ensureRoomForWrite checks IsClosed()
+	// and calls flushCond.Wait while holding db.lock, so we must hold the same lock
+	// here; otherwise the wakeup can be lost in this interleaving: the writer reads
+	// isClosed==0, then we Store(1)+Broadcast (writer not yet enqueued in Wait, so
+	// the Broadcast is lost), then the writer Waits forever and
+	// closers.writes.SignalAndWait below hangs (stopMemoryFlush, which would unstall
+	// the flush goroutine, is only reached later). Holding db.lock serializes the
+	// two: either the writer sees isClosed==1 and returns errNoRoom without waiting,
+	// or it is already in Wait (which released db.lock) and the Broadcast reaches it.
+	// Either way the write goroutine can finish so SignalAndWait completes.
+	db.lock.Lock()
 	db.blockWrites.Store(1)
 	db.isClosed.Store(1)
+	if db.flushCond != nil {
+		db.flushCond.Broadcast()
+	}
+	db.lock.Unlock()
 
 	if db.closers.valueGC != nil {
 		// Stop value GC first.
@@ -858,19 +893,12 @@ func (db *DB) writeRequests(reqs []*request) error {
 			continue
 		}
 		count += len(b.Entries)
-		var i uint64
-		var err error
-		for err = db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
-			i++
-			if i%100 == 0 {
-				db.opt.Debugf("Making room for writes")
-			}
-			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-			// you will get a deadlock.
-			time.Sleep(10 * time.Millisecond)
-		}
-		if err != nil {
+		// ensureRoomForWrite now blocks internally on db.flushCond until flushChan
+		// has room (or the DB is closing), so we no longer busy-poll with a sleep
+		// here. It returns errNoRoom only when the DB is shutting down, in which
+		// case we surface the error instead of writing to a memtable being torn
+		// down.
+		if err := db.ensureRoomForWrite(); err != nil {
 			done(err)
 			return y.Wrap(err, "writeRequests")
 		}
@@ -1014,7 +1042,8 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 
 var errNoRoom = errors.New("No room for write")
 
-// ensureRoomForWrite is always called serially.
+// ensureRoomForWrite is always called serially. It blocks (without busy-polling)
+// until the current memtable can be flushed, i.e. until flushChan has room.
 func (db *DB) ensureRoomForWrite() error {
 	var err error
 	db.lock.Lock()
@@ -1025,21 +1054,41 @@ func (db *DB) ensureRoomForWrite() error {
 		return nil
 	}
 
-	select {
-	case db.flushChan <- db.mt:
-		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			db.mt.sl.MemSize(), len(db.flushChan))
-		// We manage to push this task. Let's modify imm.
-		db.imm = append(db.imm, db.mt)
-		db.mt, err = db.newMemTable()
-		if err != nil {
-			return y.Wrapf(err, "cannot create new mem table")
+	for {
+		select {
+		case db.flushChan <- db.mt:
+			db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+				db.mt.sl.MemSize(), len(db.flushChan))
+			// We manage to push this task. Let's modify imm.
+			db.imm = append(db.imm, db.mt)
+			db.mt, err = db.newMemTable()
+			if err != nil {
+				return y.Wrapf(err, "cannot create new mem table")
+			}
+			// New memtable is empty. We certainly have room.
+			return nil
+		default:
+			// flushChan is full. Rather than busy-sleep, wait to be signalled when
+			// the flush goroutine drains a memtable from imm (which frees a slot in
+			// flushChan). flushCond.Wait atomically releases db.lock (allowing the
+			// flusher to update imm and push) and re-acquires it on wake; we then
+			// re-attempt the non-blocking push in this loop.
+			//
+			// Bail out with errNoRoom ONLY when the DB is closing, so that Close's
+			// closers.writes.SignalAndWait() (which waits for the write goroutine)
+			// cannot hang here. The gate must be IsClosed() (set solely by close()),
+			// NOT blockWrites: blockWrites is also raised transiently by blockWrite()
+			// during DropPrefix/DropAll, and their prepareToDrop() drain flushes any
+			// already-accepted writes through this path expressly "so that we don't
+			// miss any entries". Bailing on blockWrites there would drop acknowledged
+			// writes under flushChan pressure (compaction is still running during the
+			// drain, so waiting for room is safe and cannot deadlock). This matches
+			// the pre-cond behavior, which looped until the push succeeded.
+			if db.IsClosed() {
+				return errNoRoom
+			}
+			db.flushCond.Wait()
 		}
-		// New memtable is empty. We certainly have room.
-		return nil
-	default:
-		// We need to do this to unlock and allow the flusher to modify imm.
-		return errNoRoom
 	}
 }
 
@@ -1130,6 +1179,11 @@ func (db *DB) flushMemtable(lc *z.Closer) {
 			mt.DecrRef() // Return memory.
 			// unlock
 			db.lock.Unlock()
+			// A memtable has been flushed and removed from imm; a slot in flushChan
+			// is now free. Wake any writer blocked in ensureRoomForWrite so it can
+			// retry its non-blocking push. Broadcasting after unlock is safe because
+			// the waiter re-checks (re-attempts the push) under db.lock in a loop.
+			db.flushCond.Broadcast()
 			break
 		}
 	}
@@ -1209,13 +1263,29 @@ func (db *DB) updateSize(lc *z.Closer) {
 
 // RunValueLogGC triggers a value log garbage collection.
 //
-// It picks value log files to perform GC based on statistics that are collected
-// during compactions.  If no such statistics are available, then log files are
-// picked in random order. The process stops as soon as the first log file is
-// encountered which does not result in garbage collection.
+// It picks a value log file to perform GC based on statistics that are collected
+// during LSM tree compactions. If no such statistics are available, no file is
+// picked and ErrNoRewrite is returned. A file is rewritten only if the discard
+// statistics recorded for it account for at least discardRatio of its size.
 //
-// When a log file is picked, it is first sampled. If the sample shows that we
-// can discard at least discardRatio space of that file, it would be rewritten.
+// Three preconditions are easy to miss, and each surfaces as "GC never reclaims
+// anything":
+//
+//   - Only values stored in the value log can be reclaimed here. Values smaller
+//     than Options.ValueThreshold (1 MB by default) are kept inline in the LSM
+//     tree, so a database of small values has nothing for this method to
+//     collect, however much of it has expired.
+//
+//   - Expiring a key via TTL, or deleting it, does not by itself make space
+//     reclaimable. The discard statistics come only from compactions, so the
+//     space is accounted for only once a compaction rewrites the table holding
+//     the key, and compactions are driven by incoming writes. A database that
+//     has stopped taking writes will not shrink, however often this method is
+//     called.
+//
+//   - The active value log file is never a candidate. A database that has not
+//     yet rolled over to a second file has nothing this method can pick, no
+//     matter how much of that first file is discardable.
 //
 // If a call to RunValueLogGC results in no rewrites, then an ErrNoRewrite is
 // thrown indicating that the call resulted in no file rewrites.
@@ -1532,9 +1602,31 @@ func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }
 
+// flushStopped reports whether the memtable flush goroutine has been signalled to
+// stop. It is used by addLevel0Table to break out of the L0 stall wait during
+// shutdown, including the Open-error cleanup path where db.isClosed may be unset.
+func (db *DB) flushStopped() bool {
+	if db.closers.memtable == nil {
+		return false
+	}
+	select {
+	case <-db.closers.memtable.HasBeenClosed():
+		return true
+	default:
+		return false
+	}
+}
+
 func (db *DB) stopMemoryFlush() {
 	// Stop memtable flushes.
 	if db.closers.memtable != nil {
+		// Signal the flush goroutine's closer first so flushStopped() observes the
+		// stop, then wake any flush goroutine stalled in addLevel0Table's cond.Wait
+		// (which is not watching the closer channel) so it force-adds its table and
+		// returns. Closing flushChan makes the goroutine's `range` loop terminate
+		// once it is no longer blocked in addLevel0Table.
+		db.closers.memtable.Signal()
+		db.lc.levels[0].signalL0Drained()
 		close(db.flushChan)
 		db.closers.memtable.SignalAndWait()
 	}

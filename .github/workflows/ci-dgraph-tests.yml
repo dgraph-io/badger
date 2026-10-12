@@ -1,11 +1,20 @@
 name: ci-dgraph-tests
 
 on:
+  workflow_dispatch: # allows manual trigger from GitHub
   push:
     paths-ignore:
       - "**.md"
       - docs/**
       - images/**
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
     branches:
       - main
 
@@ -15,33 +24,33 @@ permissions:
 jobs:
   dgraph-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout Dgraph repo
         uses: actions/checkout@v5
         with:
           repository: dgraph-io/dgraph
           ref: main
+      - name: Checkout this Badger version
+        uses: actions/checkout@v5
+        with:
+          path: badger
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
-      - name: Fetch latest Badger version
+      - name: Use this Badger version in Dgraph
         run: |
-          go get github.com/dgraph-io/badger/v4@main
+          go mod edit -replace github.com/dgraph-io/badger/v4=./badger
+          go mod tidy
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 16 || 22
       - name: Install protobuf-compiler
         run: sudo apt update && sudo apt install -y protobuf-compiler
-      - name: Check protobuf
-        run: |
-          cd ./protos
-          go mod tidy
-          make regenerate
-          git diff --exit-code -- .
       - name: Make Linux Build and Docker Image
         run: make docker-image
       - name: Build Test Binary
@@ -64,7 +73,7 @@ jobs:
           # move the binary
           cp dgraph/dgraph ~/go/bin/dgraph
           # run the tests
-          cd t; ./t --pkg=edgraph,posting,worker,query
+          cd t; ./t --skip=systest,vector 
           # clean up docker containers after test execution
           ./t -r
           # sleep

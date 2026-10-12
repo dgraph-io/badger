@@ -4,6 +4,63 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [4.9.4] - 2026-07-08
+
+**Fixed**
+
+- fix(db): don't drop acknowledged writes during DropPrefix/DropAll (#2313)
+- fix: fix an issue where the compactor causes previously deleted data to reappear (#2278)
+
+**Docs**
+
+- docs(changelog): backfill 4.9.2, add 4.9.3, fix 4.9.0 compare link (#2311)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.9.3...v4.9.4
+
+## [4.9.3] - 2026-07-06
+
+**Performance**
+
+- perf(db): signal-based L0 write backpressure (replace busy-sleeps) (#2308)
+
+**Fixed**
+
+- fix(vlog): prevent deleted key from reappearing after value-log GC (#2310)
+
+**Docs**
+
+- docs: update CONTRIBUTING (TOC, code style, license header, master→main) (#2300)
+
+**CI**
+
+- chore(ci): add stale Action (#2302)
+- ci: keep required checks green on docs-only PRs (#2301)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.9.2...v4.9.3
+
+## [4.9.2] - 2026-06-09
+
+**Fixed**
+
+- fix: Prevent NPE on sync with inmemory DB (#2264)
+- fix: read only user should be able to open db on ReadOnly mode (#2268)
+- fix(compaction): clamp baseLevel to >=1 to prevent L0->L0 panic on large LSM trees (#2296)
+
+**Performance**
+
+- perf: skip lsm lookup for expired entries during value log rewrite (#2269)
+
+**CI**
+
+- fix(cd): upload build artifacts to GitHub Release (#2273)
+
+**Chores**
+
+- chore(core): remove unused event log (#2257)
+- enh: compile with jemalloc 5.3.1 (#2275)
+
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.9.1...v4.9.2
+
 ## [4.9.1] - 2026-02-04
 
 **Fixed**
@@ -55,7 +112,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - move to GitHub Actions runners
 
-**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.8.1
+**Full Changelog**: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.9.0
 
 ## [4.8.0] - 2025-07-15
 
@@ -1093,6 +1150,9 @@ Bug fix:
 
 - Fix an uint16 overflow when resizing key slice
 
+[4.9.3]: https://github.com/dgraph-io/badger/compare/v4.9.2...v4.9.3
+[4.9.2]: https://github.com/dgraph-io/badger/compare/v4.9.1...v4.9.2
+[4.9.1]: https://github.com/dgraph-io/badger/compare/v4.9.0...v4.9.1
 [4.9.0]: https://github.com/dgraph-io/badger/compare/v4.8.0...v4.9.0
 [4.8.0]: https://github.com/dgraph-io/badger/compare/v4.7.0...v4.8.0
 [4.7.0]: https://github.com/dgraph-io/badger/compare/v4.6.0...v4.7.0
