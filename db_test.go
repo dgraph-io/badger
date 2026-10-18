@@ -3030,3 +3030,28 @@ func TestEmptyVlogFileDoesNotSkipTailRecovery(t *testing.T) {
 	t.Run("no artifact", func(t *testing.T) { run(t, false) })
 	t.Run("with empty vlog artifact", func(t *testing.T) { run(t, true) })
 }
+
+func TestDropAllWithSkippedZeroByteVlog(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate a crash artifact: the first value log file was created but never
+	// written (0 bytes). Open() skips it without deleting it, then starts new
+	// vlog files at fid 2.
+	ef, err := os.Create(filepath.Join(dir, "000001.vlog"))
+	require.NoError(t, err)
+	require.NoError(t, ef.Close())
+
+	opt := getTestOptions(dir)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	// DropAll removes the tracked vlog files and then recreates 000001.vlog.
+	// The skipped 0-byte 000001.vlog must not make that recreation fail with
+	// EEXIST.
+	require.NoError(t, db.DropAll())
+
+	// The DB must remain writable after the drop.
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("key"), []byte("value"))
+	}))
+}

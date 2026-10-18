@@ -440,6 +440,9 @@ func (vlog *valueLog) dropAll() (int, error) {
 			}
 			count++
 		}
+		if err := vlog.removeSkippedVlogFiles(); err != nil {
+			return err
+		}
 		vlog.filesMap = make(map[uint32]*logFile)
 		vlog.maxFid = 0
 		return nil
@@ -453,6 +456,37 @@ func (vlog *valueLog) dropAll() (int, error) {
 		return count, err
 	}
 	return count, nil
+}
+
+// removeSkippedVlogFiles deletes the 0-byte .vlog files still on disk after
+// the tracked files have been removed. These are crash artifacts that Open()
+// deliberately skipped (0-byte files) and so never made it into filesMap.
+// Leaving them behind would make createVlogFile fail with EEXIST when it
+// recreates the same fid. Only 0-byte files are removed: any other stray
+// .vlog file should not be silently deleted.
+func (vlog *valueLog) removeSkippedVlogFiles() error {
+	entries, err := os.ReadDir(vlog.dirPath)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".vlog") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			return err
+		}
+		if fi.Size() != 0 {
+			continue
+		}
+		path := vlog.dirPath + string(os.PathSeparator) + name
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *DB) valueThreshold() int64 {
