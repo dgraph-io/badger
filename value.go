@@ -440,6 +440,9 @@ func (vlog *valueLog) dropAll() (int, error) {
 			}
 			count++
 		}
+		if err := vlog.removeSkippedVlogFiles(); err != nil {
+			return err
+		}
 		vlog.filesMap = make(map[uint32]*logFile)
 		vlog.maxFid = 0
 		return nil
@@ -453,6 +456,37 @@ func (vlog *valueLog) dropAll() (int, error) {
 		return count, err
 	}
 	return count, nil
+}
+
+// removeSkippedVlogFiles deletes the 0-byte .vlog files still on disk after
+// the tracked files have been removed. These are crash artifacts that Open()
+// deliberately skipped (0-byte files) and so never made it into filesMap.
+// Leaving them behind would make createVlogFile fail with EEXIST when it
+// recreates the same fid. Only 0-byte files are removed: any other stray
+// .vlog file should not be silently deleted.
+func (vlog *valueLog) removeSkippedVlogFiles() error {
+	entries, err := os.ReadDir(vlog.dirPath)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".vlog") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			return err
+		}
+		if fi.Size() != 0 {
+			continue
+		}
+		path := vlog.dirPath + string(os.PathSeparator) + name
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *DB) valueThreshold() int64 {
@@ -598,12 +632,44 @@ func (vlog *valueLog) open(db *DB) error {
 		_, err := vlog.createVlogFile()
 		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
+	// A crash between file creation and the first write can leave a 0-byte .vlog behind. Stat
+	// and skip those before opening anything: z.OpenMmapFile would truncate such a file and hand
+	// back the z.NewFile sentinel, which the open below treats as fatal, and which read-only mode
+	// cannot produce at all because the truncate fails on an O_RDONLY fd. Skipping also drops the
+	// fid from filesMap, since nothing opened the file and its nil MmapFile would be dereferenced
+	// by anything that walks the map, vlog.Close() included. The file itself stays on disk, so
+	// read-only opens mutate nothing.
 	fids := vlog.sortedFids()
+	live := make([]uint32, 0, len(fids))
 	for _, fid := range fids {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
 
+		fi, err := os.Stat(lf.path)
+		if err != nil {
+			return errFile(err, lf.path, "Unable to stat value log file.")
+		}
+		if fi.Size() == 0 {
+			vlog.opt.Infof("Skipping empty value log file: %s", lf.path)
+			delete(vlog.filesMap, fid)
+			continue
+		}
+		live = append(live, fid)
+	}
+
+	// vlog.maxFid can name a file that the skip above just dropped from filesMap, so track the
+	// newest file that actually survived and use that wherever the newest file matters. Leave
+	// maxFid itself alone: createVlogFile takes maxFid+1 with O_EXCL, so lowering it would
+	// collide with the skipped artifact still sitting on disk.
+	var newestFid uint32
+	if len(live) > 0 {
+		newestFid = live[len(live)-1]
+	}
+
+	for _, fid := range live {
+		lf := vlog.filesMap[fid]
 		lf.opt = vlog.opt
+
 		flags := os.O_RDWR
 		if vlog.opt.ReadOnly {
 			flags = os.O_RDONLY
@@ -612,8 +678,8 @@ func (vlog *valueLog) open(db *DB) error {
 			2*vlog.opt.ValueLogFileSize); err != nil {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
-		// We shouldn't delete the maxFid file.
-		if lf.size.Load() == vlogHeaderSize && fid != vlog.maxFid && !vlog.opt.ReadOnly {
+		// We shouldn't delete the newest file.
+		if lf.size.Load() == vlogHeaderSize && fid != newestFid && !vlog.opt.ReadOnly {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
 				return y.Wrapf(err, "while trying to delete empty file: %s", lf.path)
@@ -623,22 +689,25 @@ func (vlog *valueLog) open(db *DB) error {
 	}
 
 	if vlog.opt.ReadOnly {
+		// vlog.maxFid may still name a skipped artifact for the life of this handle, since the
+		// createVlogFile below never runs. That is safe: getFileRLocked keys on vp.Fid and skips
+		// its maxFid bound check in read-only mode.
 		return nil
 	}
 	// Now we can read the latest value log file, and see if it needs truncation. We could
 	// technically do this over all the value log files, but that would mean slowing down the value
 	// log open.
-	last, ok := vlog.filesMap[vlog.maxFid]
-	y.AssertTrue(ok)
-	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize,
-		func(_ Entry, vp valuePointer) error {
-			return nil
-		})
-	if err != nil {
-		return y.Wrapf(err, "while iterating over: %s", last.path)
-	}
-	if err := last.Truncate(int64(lastOff)); err != nil {
-		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+	if last, ok := vlog.filesMap[newestFid]; ok {
+		lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize,
+			func(_ Entry, vp valuePointer) error {
+				return nil
+			})
+		if err != nil {
+			return y.Wrapf(err, "while iterating over: %s", last.path)
+		}
+		if err := last.Truncate(int64(lastOff)); err != nil {
+			return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+		}
 	}
 
 	// Don't write to the old log file. Always create a new one.

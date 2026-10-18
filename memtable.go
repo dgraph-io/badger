@@ -68,6 +68,24 @@ func (db *DB) openMemTables(opt Options) error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
+		// A crash between file creation and the first write can leave a 0-byte
+		// .mem behind. Stat and skip those before opening anything:
+		// z.OpenMmapFile would truncate such a file and hand back the
+		// z.NewFile sentinel, which the open below treats as fatal, and which
+		// read-only mode cannot produce at all because the truncate fails on
+		// an O_RDONLY fd. The file itself stays on disk, so read-only opens
+		// mutate nothing. The fid stays in fids as well, so nextMemFid below
+		// still advances past it and no new memtable reuses it.
+		path := db.mtFilePath(fid)
+		fi, err := os.Stat(path)
+		if err != nil {
+			return errFile(err, path, "Unable to stat mem file.")
+		}
+		if fi.Size() == 0 {
+			db.opt.Infof("Skipping empty memtable file: %s", path)
+			continue
+		}
+
 		flags := os.O_RDWR
 		if db.opt.ReadOnly {
 			flags = os.O_RDONLY
