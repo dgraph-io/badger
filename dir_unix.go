@@ -62,6 +62,8 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 		// only read-write badger process using this directory.
 		err = os.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
 		if err != nil {
+			// Unlock before closing, as release does: a copy of the descriptor would otherwise keep the lock.
+			_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
 			f.Close()
 			return nil, y.Wrapf(err,
 				"Cannot write pid file %q", absPidFilePath)
