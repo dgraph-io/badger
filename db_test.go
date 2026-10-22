@@ -2735,3 +2735,34 @@ func TestCloseDBWhileReading(t *testing.T) {
 	require.NoError(t, db.Close())
 	wg.Wait()
 }
+
+// TestRaceSendToWriteChOnClose ensures that concurrent Commit calls do not
+// race with DB.Close. Before the fix, a sender could pass the blockWrites
+// check in sendToWriteCh while close() simultaneously closed writeCh,
+// causing a "send on closed channel" panic or a data race.
+func TestRaceSendToWriteChOnClose(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		dir := t.TempDir()
+		db, err := Open(DefaultOptions(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if err := db.Update(func(txn *Txn) error {
+					return txn.Set([]byte("key"), []byte("val"))
+				}); err != nil {
+					return // ErrBlockedWrites or DB closed
+				}
+			}
+		}()
+
+		time.Sleep(time.Microsecond)
+		db.Close()
+		wg.Wait()
+	}
+}
