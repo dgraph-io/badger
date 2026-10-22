@@ -946,21 +946,12 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.Wg.Add(1)
 	req.IncrRef() // for db write
 
-	// Use select to avoid sending on writeCh after the writes closer has been
-	// signaled. If close() has initiated shutdown, HasBeenClosed() fires and we
-	// bail out cleanly instead of sending on a channel that is about to be closed
-	// (which would panic).
-	select {
-	case db.writeCh <- req:
-		// Successfully sent - doWrites will handle it.
-	case <-db.closers.writes.HasBeenClosed():
-		// Shutdown in progress - do not send. Release the request back to the
-		// pool and return an error so the caller can clean up (e.g. roll back
-		// the transaction).
-		req.DecrRef()
-		db.writeChInFlight.Add(-1)
-		return nil, ErrBlockedWrites
-	}
+	// The writeChInFlight counter is what makes this send safe during close():
+	// close() sets blockWrites=1 before draining, then drainWriteCh() waits for
+	// writeChInFlight to reach zero before close(writeCh). A sender that got
+	// past the blockWrites check above is therefore guaranteed to finish its
+	// send before the channel is closed.
+	db.writeCh <- req
 
 	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
 	db.writeChInFlight.Add(-1)
