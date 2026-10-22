@@ -78,6 +78,11 @@ func (guard *directoryLockGuard) release() error {
 		err = os.Remove(guard.path)
 	}
 
+	// Unlock before closing: the flock belongs to the open file description, so a copy of the descriptor that
+	// outlives Close, as a child process forked before exec holds, would otherwise keep the directory locked.
+	if unlockErr := unix.Flock(int(guard.f.Fd()), unix.LOCK_UN); err == nil {
+		err = unlockErr
+	}
 	if closeErr := guard.f.Close(); err == nil {
 		err = closeErr
 	}
