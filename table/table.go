@@ -248,6 +248,10 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 	if err == z.NewFile {
 		// Expected.
 	} else if err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			// The file was created but not allocated, as on a full disk: remove it.
+			_ = os.Remove(fname)
+		}
 		return nil, y.Wrapf(err, "while creating table: %s", fname)
 	} else {
 		return nil, fmt.Errorf("file already exists: %s", fname)

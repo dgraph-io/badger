@@ -126,7 +126,15 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 	// Move to next slot.
 	lf.nextEmptySlot++
 	for lf.nextEmptySlot >= lf.maxSlot() {
-		y.Check(lf.Truncate(2 * int64(len(lf.Data))))
+		if err := lf.Truncate(2 * int64(len(lf.Data))); err != nil {
+			// The file cannot grow, as on a full disk: drop this entry. Discard stats only
+			// guide value-log garbage collection.
+			lf.nextEmptySlot--
+			lf.set(idx*16, 0)
+			lf.set(idx*16+8, 0)
+			lf.opt.Errorf("discard stats: cannot grow: %v; dropping the update of file %d", err, fid)
+			return 0
+		}
 	}
 	lf.zeroOut()
 

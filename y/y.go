@@ -190,6 +190,11 @@ type Throttle struct {
 	ch        chan struct{}
 	errCh     chan error
 	finishErr error
+
+	// firstErr is the first error passed to Done. Finish returns it also when Do has taken it
+	// from errCh, or when errCh was full.
+	firstErrMu sync.Mutex
+	firstErr   error
 }
 
 // NewThrottle creates a new throttle with a max number of workers.
@@ -221,7 +226,17 @@ func (t *Throttle) Do() error {
 // pass the error status of work done.
 func (t *Throttle) Done(err error) {
 	if err != nil {
-		t.errCh <- err
+		t.firstErrMu.Lock()
+		if t.firstErr == nil {
+			t.firstErr = err
+		}
+		t.firstErrMu.Unlock()
+		// A full errCh already gives Do an error to return. Blocking here would keep this worker's
+		// slot, and Finish would wait forever.
+		select {
+		case t.errCh <- err:
+		default:
+		}
 	}
 	select {
 	case <-t.ch:
@@ -231,7 +246,7 @@ func (t *Throttle) Done(err error) {
 	t.wg.Done()
 }
 
-// Finish waits until all workers have finished working. It would return any error passed by Done.
+// Finish waits until all workers have finished working. It returns the first error passed to Done.
 // If Finish is called multiple time, it will wait for workers to finish only once(first time).
 // From next calls, it will return same error as found on first call.
 func (t *Throttle) Finish() error {
@@ -239,12 +254,9 @@ func (t *Throttle) Finish() error {
 		t.wg.Wait()
 		close(t.ch)
 		close(t.errCh)
-		for err := range t.errCh {
-			if err != nil {
-				t.finishErr = err
-				return
-			}
-		}
+		t.firstErrMu.Lock()
+		t.finishErr = t.firstErr
+		t.firstErrMu.Unlock()
 	})
 
 	return t.finishErr

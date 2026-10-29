@@ -535,6 +535,11 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 	}
 	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 2*vlog.opt.ValueLogFileSize)
 	if err != z.NewFile && err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			// The file was created but not allocated, as on a full disk: remove it, so that
+			// the next rotation can create it again.
+			_ = os.Remove(path)
+		}
 		return nil, err
 	}
 

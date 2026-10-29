@@ -72,6 +72,14 @@ func (db *DB) openMemTables(opt Options) error {
 		if db.opt.ReadOnly {
 			flags = os.O_RDONLY
 		}
+		// An empty file is a memtable whose creation did not finish, as on a full disk: it
+		// holds no entry.
+		if fi, err := os.Stat(db.mtFilePath(fid)); err == nil && fi.Size() == 0 {
+			if !db.opt.ReadOnly {
+				_ = os.Remove(db.mtFilePath(fid))
+			}
+			continue
+		}
 		mt, err := db.openMemTable(fid, flags)
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
@@ -143,6 +151,10 @@ func (db *DB) newMemTable() (*memTable, error) {
 
 	if err != nil {
 		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
+		// A creation that failed, as on a full disk, leaves an empty file: remove it.
+		if fi, serr := os.Stat(db.mtFilePath(db.nextMemFid)); serr == nil && fi.Size() == 0 {
+			_ = os.Remove(db.mtFilePath(db.nextMemFid))
+		}
 		return nil, y.Wrapf(err, "newMemTable")
 	}
 	return nil, fmt.Errorf("File %s already exists", mt.wal.Fd.Name())

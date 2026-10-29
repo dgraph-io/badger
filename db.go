@@ -1042,7 +1042,6 @@ var errNoRoom = errors.New("No room for write")
 // ensureRoomForWrite is always called serially. It blocks (without busy-polling)
 // until the current memtable can be flushed, i.e. until flushChan has room.
 func (db *DB) ensureRoomForWrite() error {
-	var err error
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
@@ -1051,6 +1050,12 @@ func (db *DB) ensureRoomForWrite() error {
 		return nil
 	}
 
+	// Create the next memtable before the full one is queued. If that fails, as on a full disk,
+	// db.mt stays in place and the write gets the error, instead of leaving db.mt nil.
+	next, err := db.newMemTable()
+	if err != nil {
+		return y.Wrapf(err, "cannot create new mem table")
+	}
 	for {
 		select {
 		case db.flushChan <- db.mt:
@@ -1058,10 +1063,7 @@ func (db *DB) ensureRoomForWrite() error {
 				db.mt.sl.MemSize(), len(db.flushChan))
 			// We manage to push this task. Let's modify imm.
 			db.imm = append(db.imm, db.mt)
-			db.mt, err = db.newMemTable()
-			if err != nil {
-				return y.Wrapf(err, "cannot create new mem table")
-			}
+			db.mt = next
 			// New memtable is empty. We certainly have room.
 			return nil
 		default:
@@ -1082,6 +1084,7 @@ func (db *DB) ensureRoomForWrite() error {
 			// drain, so waiting for room is safe and cannot deadlock). This matches
 			// the pre-cond behavior, which looped until the push succeeded.
 			if db.IsClosed() {
+				next.DecrRef()
 				return errNoRoom
 			}
 			db.flushCond.Wait()

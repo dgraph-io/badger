@@ -905,11 +905,15 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		numBuilds++
 		if err := inflightBuilders.Do(); err != nil {
 			// Can't return from here, until I decrRef all the tables that I built so far.
+			builder.Done()
+			builder.Close()
 			break
 		}
 		go func(builder *table.Builder, fileID uint64) {
 			var err error
-			defer inflightBuilders.Done(err)
+			// Pass Done the err of the build, such as a full disk's, so that the compaction
+			// fails instead of committing without this table.
+			defer func() { inflightBuilders.Done(err) }()
 			defer builder.Close()
 
 			var tbl *table.Table
@@ -980,8 +984,9 @@ func (s *levelsController) compactBuildTables(
 	for _, kr := range cd.splits {
 		// Initiate Do here so we can register the goroutines for buildTables too.
 		if err := inflightBuilders.Do(); err != nil {
+			// Finish below waits for the subcompactions already started, and returns err.
 			s.kv.opt.Errorf("cannot start subcompaction: %+v", err)
-			return nil, nil, err
+			break
 		}
 		go func(kr keyRange) {
 			defer inflightBuilders.Done(nil)
