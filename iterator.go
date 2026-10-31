@@ -330,8 +330,9 @@ func (opt *IteratorOptions) compareToPrefix(key []byte) int {
 }
 
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
-	// Ignore this table if its max version is less than the sinceTs.
-	if t.MaxVersion() < opt.SinceTs {
+	// Ignore this table if its max version is not above the sinceTs: it holds no version the
+	// iterator reads.
+	if opt.SinceTs > 0 && t.MaxVersion() <= opt.SinceTs {
 		return false
 	}
 	if len(opt.Prefix) == 0 {
@@ -358,7 +359,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		if opt.SinceTs > 0 {
 			tmp := tables[:0]
 			for _, t := range tables {
-				if t.MaxVersion() < opt.SinceTs {
+				if t.MaxVersion() <= opt.SinceTs {
 					continue
 				}
 				tmp = append(tmp, t)
