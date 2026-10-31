@@ -170,17 +170,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
+func (st *Stream) produceKVs(ctx context.Context, threadId int, txn *Txn) error {
 	st.numProducers.Add(1)
 	defer st.numProducers.Add(-1)
-
-	var txn *Txn
-	if st.readTs > 0 {
-		txn = st.db.NewTransactionAt(st.readTs, false)
-	} else {
-		txn = st.db.NewTransaction(false)
-	}
-	defer txn.Discard()
 
 	// produceKVs is running iterate serially. So, we can define the outList here.
 	outList := z.NewBuffer(2*batchSize, "Stream.ProduceKVs")
@@ -426,6 +418,21 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		st.KeyToList = st.ToList
 	}
 
+	// Create a single read transaction up front so that all workers iterate over
+	// the same point-in-time snapshot of the DB. Without this, each worker would
+	// open its own transaction at a different timestamp, so a write committed
+	// mid-stream could be visible to some workers and not others, producing an
+	// inconsistent (torn) backup.
+	var txn *Txn
+	if st.readTs > 0 {
+		txn = st.db.NewTransactionAt(st.readTs, false)
+	} else {
+		txn = st.db.NewTransaction(false)
+	}
+	// Discard runs after wg.Wait() below, by which point all iterators created
+	// from this txn have been closed.
+	defer txn.Discard()
+
 	// Picks up ranges from Badger, and sends them to rangeCh.
 	go st.produceRanges(ctx)
 
@@ -437,7 +444,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		go func(threadId int) {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx, threadId); err != nil {
+			if err := st.produceKVs(ctx, threadId, txn); err != nil {
 				select {
 				case errCh <- err:
 				default:
