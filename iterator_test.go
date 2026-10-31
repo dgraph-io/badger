@@ -413,3 +413,19 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 		}
 	})
 }
+
+// A table holds no version above its max version: an iterator reading the versions above SinceTs
+// skips the tables whose max version is SinceTs, as it skips the older ones.
+func TestPickTablesAboveSinceTs(t *testing.T) {
+	tbl := buildTable(t, [][]string{{"a1", "1"}, {"a2", "2"}}, table.Options{ChkMode: options.OnTableAndBlockRead})
+	defer func() { require.NoError(t, tbl.DecrRef()) }()
+	require.EqualValues(t, 10, tbl.MaxVersion())
+	for since, picked := range map[uint64]bool{0: true, 9: true, 10: false, 11: false} {
+		opt := DefaultIteratorOptions
+		opt.SinceTs = since
+		require.Equal(t, picked, opt.pickTable(tbl), "pickTable since %d", since)
+		require.Equal(t, picked, len(opt.pickTables([]*table.Table{tbl})) == 1, "pickTables since %d", since)
+		opt.Prefix = []byte("a")
+		require.Equal(t, picked, len(opt.pickTables([]*table.Table{tbl})) == 1, "pickTables of a prefix since %d", since)
+	}
+}
