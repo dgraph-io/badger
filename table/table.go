@@ -115,6 +115,7 @@ type cheapIndex struct {
 	OnDiskSize        uint32
 	BloomFilterLength int
 	OffsetsLength     int
+	StaleDataSize     uint32
 }
 
 func (t *Table) cheapIndex() *cheapIndex {
@@ -487,6 +488,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		OnDiskSize:        index.OnDiskSize(),
 		OffsetsLength:     index.OffsetsLength(),
 		BloomFilterLength: index.BloomFilterLength(),
+		StaleDataSize:     index.StaleDataSize(),
 	}
 
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
@@ -675,7 +677,7 @@ func (t *Table) IndexSize() int {
 func (t *Table) Size() int64 { return int64(t.tableSize) }
 
 // StaleDataSize is the amount of stale data (that can be dropped by a compaction )in this SST.
-func (t *Table) StaleDataSize() uint32 { return t.fetchIndex().StaleDataSize() }
+func (t *Table) StaleDataSize() uint32 { return t.cheapIndex().StaleDataSize }
 
 // Smallest is its smallest key, or nil if there are none
 func (t *Table) Smallest() []byte { return t.smallest }

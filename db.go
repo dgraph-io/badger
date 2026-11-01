@@ -1098,6 +1098,10 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *
 	defer iter.Close()
 
 	b := table.NewTableBuilder(bopts)
+	var lastKey []byte
+	// shadowed is set once a version of lastKey makes its older versions
+	// droppable by a compaction.
+	var shadowed bool
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		if len(dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), dropPrefixes) {
 			continue
@@ -1107,7 +1111,24 @@ func buildL0Table(iter y.Iterator, dropPrefixes [][]byte, bopts table.Options) *
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}
-		b.Add(iter.Key(), iter.Value(), vp.Len)
+		if !y.SameKey(iter.Key(), lastKey) {
+			lastKey = y.SafeCopy(lastKey, iter.Key())
+			shadowed = false
+		}
+		// Record deletion markers, expired entries and the versions they shadow
+		// as stale, the way compactions do for the tables they write, so that
+		// L0 tables holding mostly deletes can be pushed down while idle (see
+		// pickCompactLevels). Merge entries are never dropped by compactions.
+		if vs.Meta&bitMergeEntry == 0 &&
+			(shadowed || isDeletedOrExpired(vs.Meta, vs.ExpiresAt)) {
+			b.AddStaleKey(iter.Key(), vs, vp.Len)
+		} else {
+			b.Add(iter.Key(), vs, vp.Len)
+		}
+		if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
+			vs.Meta&bitDiscardEarlierVersions > 0 {
+			shadowed = true
+		}
 	}
 
 	return b

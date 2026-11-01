@@ -580,6 +580,10 @@ type compactionPriority struct {
 	adjusted     float64
 	dropPrefixes [][]byte
 	t            targets
+	// staleOnly is set when the level was picked only because it holds stale
+	// data (deletion markers, expired entries) that can be applied by pushing
+	// it down, and not because the level is over its target size.
+	staleOnly bool
 }
 
 func (s *levelsController) lastLevel() *levelHandler {
@@ -657,11 +661,106 @@ func (s *levelsController) pickCompactLevels(priosBuffer []compactionPriority) (
 	}
 	prios = out
 
+	// Levels other than the last one are compacted only once they grow past
+	// their target size (or table count for L0). Deletion markers that land in
+	// such a level after a burst of deletes would then stay there for as long
+	// as the DB is idle, and the versions they shadow in the levels below would
+	// never be reclaimed. So when no regular compaction is due, push tables
+	// whose stale data can be dropped down to the next level.
+	if !s.compactionDue(prios) {
+		discardTs := s.compactionDiscardTs()
+		for level := 0; level < len(s.levels)-1; level++ {
+			if level > 0 && level < t.baseLevel {
+				// Levels between L0 and the base level are empty.
+				continue
+			}
+			if s.hasPushableStaleTable(s.levels[level], discardTs) {
+				prios = append(prios, compactionPriority{
+					level:     level,
+					score:     1.0,
+					adjusted:  1.0,
+					t:         t,
+					staleOnly: true,
+				})
+			}
+		}
+	}
+
 	// Sort by the adjusted score.
 	sort.Slice(prios, func(i, j int) bool {
 		return prios[i].adjusted > prios[j].adjusted
 	})
 	return prios
+}
+
+// compactionDue reports whether prios holds a regular compaction for a level
+// other than the last one.
+func (s *levelsController) compactionDue(prios []compactionPriority) bool {
+	for _, p := range prios {
+		// The last level is left out: it can be picked on every run when it is
+		// compacted into itself, and it has no level to push its data into.
+		if p.level < len(s.levels)-1 {
+			return true
+		}
+	}
+	return false
+}
+
+// isPushableStaleTable reports whether t is worth pushing down a level only
+// for the stale data it holds: deletion markers, expired entries and the
+// versions they shadow.
+//
+// All versions in t must be at or below discardTs, otherwise the compaction
+// would have to keep them and could leave t as it is. And at least half of t
+// must be stale, so that we do not rewrite a table, and the tables overlapping
+// it in the next level, for a handful of deleted keys. Pushing such a table
+// down does not loop: the stale entries are dropped once they reach the last
+// level, or when no level below holds the keys, and are carried one level
+// down otherwise.
+func isPushableStaleTable(t *table.Table, discardTs uint64) bool {
+	stale := uint64(t.StaleDataSize())
+	if stale == 0 || t.MaxVersion() > discardTs {
+		return false
+	}
+	return 2*stale >= uint64(t.UncompressedSize())
+}
+
+func (s *levelsController) hasPushableStaleTable(lh *levelHandler, discardTs uint64) bool {
+	lh.RLock()
+	defer lh.RUnlock()
+	if lh.totalStaleSize == 0 {
+		return false
+	}
+	for _, t := range lh.tables {
+		if isPushableStaleTable(t, discardTs) {
+			return true
+		}
+	}
+	return false
+}
+
+// compactionDiscardTs returns the timestamp at or below which a compaction may
+// discard versions.
+func (s *levelsController) compactionDiscardTs() uint64 {
+	// Pick a discard ts, so we can discard versions below this ts. We should
+	// never discard any versions starting from above this timestamp, because
+	// that would affect the snapshot view guarantee provided by transactions.
+	discardTs := s.kv.orc.discardAtOrBelow()
+
+	// While a vlog GC rewrite is in flight, do not discard any version newer than
+	// the rewrite's start (gcDiscardTs is the DB's max committed version captured
+	// then). The rewrite may write a scanned value back, and a tombstone deleting
+	// that key — necessarily committed after the rewrite started, so with a version
+	// greater than gcDiscardTs — must survive to shadow the write-back; otherwise
+	// the deleted key reappears (#2286). The clamp is released when the rewrite
+	// finishes. Lowering discardTs only ever keeps more versions, so it is always
+	// safe; it costs deferred reclamation during a rewrite, nothing more.
+	if s.kv.gcActive.Load() {
+		if gcMax := s.kv.gcDiscardTs.Load(); gcMax > 0 && gcMax < discardTs {
+			discardTs = gcMax
+		}
+	}
+	return discardTs
 }
 
 // checkOverlap checks if the given tables overlap with any level from the given "lev" onwards.
@@ -695,24 +794,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// compacted in this compaction.
 	hasOverlap := s.checkOverlap(cd.allTables(), cd.nextLevel.level+1)
 
-	// Pick a discard ts, so we can discard versions below this ts. We should
-	// never discard any versions starting from above this timestamp, because
-	// that would affect the snapshot view guarantee provided by transactions.
-	discardTs := s.kv.orc.discardAtOrBelow()
-
-	// While a vlog GC rewrite is in flight, do not discard any version newer than
-	// the rewrite's start (gcDiscardTs is the DB's max committed version captured
-	// then). The rewrite may write a scanned value back, and a tombstone deleting
-	// that key — necessarily committed after the rewrite started, so with a version
-	// greater than gcDiscardTs — must survive to shadow the write-back; otherwise
-	// the deleted key reappears (#2286). The clamp is released when the rewrite
-	// finishes. Lowering discardTs only ever keeps more versions, so it is always
-	// safe; it costs deferred reclamation during a rewrite, nothing more.
-	if s.kv.gcActive.Load() {
-		if gcMax := s.kv.gcDiscardTs.Load(); gcMax > 0 && gcMax < discardTs {
-			discardTs = gcMax
-		}
-	}
+	discardTs := s.compactionDiscardTs()
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -777,7 +859,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				}
 			}
 
-			if !y.SameKey(it.Key(), lastKey) {
+			firstVersion := !y.SameKey(it.Key(), lastKey)
+			if firstVersion {
 				firstKeyHasDiscardSet = false
 				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
 					break
@@ -859,10 +942,11 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				vp.Decode(vs.Value)
 			}
 			switch {
-			case firstKeyHasDiscardSet:
+			case firstKeyHasDiscardSet && !firstVersion:
 				// This key is same as the last key which had "DiscardEarlierVersions" set. The
 				// the next compactions will drop this key if its ts >
-				// discardTs (of the next compaction).
+				// discardTs (of the next compaction). The version carrying the bit
+				// is never dropped for it, so it is not stale.
 				builder.AddStaleKey(it.Key(), vs, vp.Len)
 			case isExpired:
 				// If the key is expired, the next compaction will drop it if
@@ -1317,6 +1401,10 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if ok := s.fillTablesL0ToLbase(cd); ok {
 		return true
 	}
+	if cd.p.staleOnly {
+		// Merging L0 tables into each other does not drop their stale data.
+		return false
+	}
 	return s.fillTablesL0ToL0(cd)
 }
 
@@ -1443,9 +1531,23 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	if cd.thisLevel.isLastLevel() {
 		return s.fillMaxLevelTables(tables, cd)
 	}
-	// We pick tables, so we compact older tables first. This is similar to
-	// kOldestLargestSeqFirst in RocksDB.
-	s.sortByHeuristic(tables, cd)
+	if cd.p.staleOnly {
+		// Only push down the tables whose stale entries can be dropped, the ones
+		// holding the most stale data first.
+		discardTs := s.compactionDiscardTs()
+		out := tables[:0]
+		for _, t := range tables {
+			if isPushableStaleTable(t, discardTs) {
+				out = append(out, t)
+			}
+		}
+		tables = out
+		s.sortByStaleDataSize(tables, cd)
+	} else {
+		// We pick tables, so we compact older tables first. This is similar to
+		// kOldestLargestSeqFirst in RocksDB.
+		s.sortByHeuristic(tables, cd)
+	}
 
 	for _, t := range tables {
 		cd.thisSize = t.Size()

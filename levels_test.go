@@ -19,6 +19,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/badger/v4/skl"
 	"github.com/dgraph-io/badger/v4/table"
 	"github.com/dgraph-io/badger/v4/y"
 )
@@ -1735,4 +1736,230 @@ func TestOpenWithLevelBeyondMaxLevels(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("Open hung instead of returning an error")
 	}
+}
+
+// staleOnlyPrio returns the priority pickCompactLevels gives to the given level
+// only for the stale data it holds, or nil if it gives none.
+func staleOnlyPrio(db *DB, level int) *compactionPriority {
+	for _, p := range db.lc.pickCompactLevels(nil) {
+		if p.level == level && p.staleOnly {
+			return &p
+		}
+	}
+	return nil
+}
+
+func addTableToLevel(t *testing.T, db *DB, level int, b *table.Builder) {
+	tab, err := table.CreateTable(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), b)
+	require.NoError(t, err)
+	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
+		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+	}, db.opt))
+	db.lc.levels[level].addTable(tab)
+}
+
+func pushDownTestKey(i int) []byte { return []byte(fmt.Sprintf("key%06d", i)) }
+
+// addValuesTable adds a table holding n keys at version 1 to the given level.
+func addValuesTable(t *testing.T, db *DB, level, n int) {
+	b := table.NewTableBuilder(buildTableOptions(db))
+	defer b.Close()
+	val := make([]byte, 100)
+	for i := 0; i < n; i++ {
+		b.Add(y.KeyWithTs(pushDownTestKey(i), 1), y.ValueStruct{Value: val}, 0)
+	}
+	addTableToLevel(t, db, level, b)
+}
+
+// Deletion markers that sit in a level above the last one must be pushed down
+// even when that level is under its target size, or the versions they shadow
+// in the last level are never reclaimed (#2329).
+func TestPushDownStaleTablesBelowTargetSize(t *testing.T) {
+	const n = 2000
+	open := func(t *testing.T, test func(t *testing.T, db *DB)) {
+		opt := DefaultOptions("")
+		opt.managedTxns = true
+		opt.NumCompactors = 0
+		opt.BaseLevelSize = 64 << 10
+		runBadgerTest(t, &opt, test)
+	}
+	// addMarkersTable adds a table to L5 holding deletion markers at version 2
+	// for the first n keys, followed by live keys.
+	addMarkersTable := func(t *testing.T, db *DB, live int) {
+		b := table.NewTableBuilder(buildTableOptions(db))
+		defer b.Close()
+		for i := 0; i < n; i++ {
+			b.AddStaleKey(y.KeyWithTs(pushDownTestKey(i), 2), y.ValueStruct{Meta: bitDelete}, 0)
+		}
+		val := make([]byte, 100)
+		for i := n; i < n+live; i++ {
+			b.Add(y.KeyWithTs(pushDownTestKey(i), 2), y.ValueStruct{Value: val}, 0)
+		}
+		addTableToLevel(t, db, 5, b)
+	}
+
+	t.Run("pushed down", func(t *testing.T) {
+		open(t, func(t *testing.T, db *DB) {
+			addValuesTable(t, db, 6, n)
+			addMarkersTable(t, db, 0)
+			require.NoError(t, db.lc.validate())
+			require.Equal(t, 5, db.lc.levelTargets().baseLevel)
+
+			db.SetDiscardTs(10)
+			prio := staleOnlyPrio(db, 5)
+			require.NotNil(t, prio, "level 5 holds only deletion markers but is not picked")
+			require.NoError(t, db.lc.doCompact(-1, *prio))
+			require.Zero(t, db.lc.levels[5].numTables())
+			require.Zero(t, db.lc.levels[6].numTables())
+			require.Nil(t, staleOnlyPrio(db, 5))
+		})
+	})
+	t.Run("markers above discardTs", func(t *testing.T) {
+		open(t, func(t *testing.T, db *DB) {
+			addValuesTable(t, db, 6, n)
+			addMarkersTable(t, db, 0)
+			db.SetDiscardTs(1)
+			require.Nil(t, staleOnlyPrio(db, 5))
+		})
+	})
+	t.Run("mostly live data", func(t *testing.T) {
+		open(t, func(t *testing.T, db *DB) {
+			addValuesTable(t, db, 6, n)
+			addMarkersTable(t, db, 4*n)
+			db.SetDiscardTs(10)
+			require.Nil(t, staleOnlyPrio(db, 5))
+		})
+	})
+	t.Run("regular compaction due", func(t *testing.T) {
+		open(t, func(t *testing.T, db *DB) {
+			addValuesTable(t, db, 6, n)
+			addMarkersTable(t, db, 0)
+			for i := 0; i < db.opt.NumLevelZeroTables; i++ {
+				require.NoError(t, db.lc.addLevel0Table(createEmptyTable(db)))
+			}
+			db.SetDiscardTs(10)
+			require.Nil(t, staleOnlyPrio(db, 5))
+		})
+	})
+}
+
+// Deletion markers flushed to L0 must be pushed down while the DB is idle too,
+// not only once L0 holds NumLevelZeroTables tables.
+func TestPushDownStaleL0Table(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.NumCompactors = 0
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		const n = 2000
+		addValuesTable(t, db, 6, n)
+
+		sl := skl.NewSkiplist(arenaSize(db.opt))
+		defer sl.DecrRef()
+		for i := 0; i < n; i++ {
+			sl.Put(y.KeyWithTs(pushDownTestKey(i), 2), y.ValueStruct{Meta: bitDelete})
+		}
+		b := buildL0Table(sl.NewUniIterator(false), nil, buildTableOptions(db))
+		defer b.Close()
+		tab, err := table.CreateTable(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), b)
+		require.NoError(t, err)
+		require.NotZero(t, tab.StaleDataSize())
+		require.NoError(t, db.lc.addLevel0Table(tab))
+		require.NoError(t, db.lc.validate())
+
+		db.SetDiscardTs(1)
+		require.Nil(t, staleOnlyPrio(db, 0))
+
+		db.SetDiscardTs(10)
+		prio := staleOnlyPrio(db, 0)
+		require.NotNil(t, prio, "L0 holds only deletion markers but is not picked")
+		require.NoError(t, db.lc.doCompact(-1, *prio))
+		require.Zero(t, db.lc.levels[0].numTables())
+		for i := 1; i < len(db.lc.levels); i++ {
+			require.Zero(t, db.lc.levels[i].numTables(), "level %d", i)
+		}
+	})
+}
+
+// buildL0Table must record deletion markers, expired entries and the versions
+// they shadow as stale, and nothing else.
+func TestBuildL0TableStaleData(t *testing.T) {
+	opt := DefaultOptions("")
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		val := make([]byte, 100)
+		build := func(entries map[string][]y.ValueStruct) *table.Table {
+			sl := skl.NewSkiplist(arenaSize(db.opt))
+			defer sl.DecrRef()
+			for k, versions := range entries {
+				for i, vs := range versions {
+					// The first version given is the latest one.
+					sl.Put(y.KeyWithTs([]byte(k), uint64(len(versions)-i)), vs)
+				}
+			}
+			b := buildL0Table(sl.NewUniIterator(false), nil, buildTableOptions(db))
+			defer b.Close()
+			tab, err := table.OpenInMemoryTable(b.Finish(), 1, b.Opts())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, tab.DecrRef()) })
+			return tab
+		}
+
+		live := build(map[string][]y.ValueStruct{
+			"a": {{Value: val}, {Value: val}},
+			"b": {{Value: val, Meta: bitMergeEntry}, {Value: val, Meta: bitMergeEntry}},
+			"c": {{Value: val, ExpiresAt: math.MaxUint32}},
+		})
+		require.Zero(t, live.StaleDataSize())
+
+		stale := []map[string][]y.ValueStruct{
+			{"a": {{Meta: bitDelete}}},
+			{"a": {{Value: val, ExpiresAt: 1}}},
+			{"a": {{Value: val, Meta: bitDiscardEarlierVersions}, {Value: val}}},
+		}
+		for _, entries := range stale {
+			require.NotZero(t, build(entries).StaleDataSize(), "%+v", entries)
+		}
+
+		// The versions shadowed by a deletion marker are stale too.
+		one := build(map[string][]y.ValueStruct{"a": {{Meta: bitDelete}}})
+		two := build(map[string][]y.ValueStruct{"a": {{Meta: bitDelete}, {Value: val}}})
+		require.Greater(t, two.StaleDataSize(), one.StaleDataSize()+uint32(len(val)))
+	})
+}
+
+// A version carrying bitDiscardEarlierVersions is never dropped for it, so a
+// compaction must not count it as stale. Otherwise tables of live data written
+// with the bit would be pushed down to the last level while the DB is idle.
+func TestCompactionStaleDataDiscardEarlierVersions(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.NumCompactors = 0
+	opt.managedTxns = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		var l5, l6 []keyValVersion
+		for i := 0; i < 100; i++ {
+			k := string(pushDownTestKey(i))
+			l5 = append(l5, keyValVersion{k, "new", 2, bitDiscardEarlierVersions})
+			l6 = append(l6, keyValVersion{k, "old", 1, 0})
+		}
+		createAndOpen(db, l5, 5)
+		createAndOpen(db, l6, 6)
+		require.NoError(t, db.lc.validate())
+
+		db.SetDiscardTs(10)
+		cdef := compactDef{
+			thisLevel: db.lc.levels[5],
+			nextLevel: db.lc.levels[6],
+			top:       db.lc.levels[5].tables,
+			bot:       db.lc.levels[6].tables,
+			t:         db.lc.levelTargets(),
+		}
+		cdef.t.baseLevel = 1
+		require.NoError(t, db.lc.runCompactDef(-1, 5, cdef))
+		require.NoError(t, db.lc.validate())
+
+		require.Zero(t, db.lc.levels[5].numTables())
+		require.Equal(t, 1, db.lc.levels[6].numTables())
+		tab := db.lc.levels[6].tables[0]
+		require.Zero(t, tab.StaleDataSize())
+		require.False(t, isPushableStaleTable(tab, 10))
+	})
 }
