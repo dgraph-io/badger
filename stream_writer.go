@@ -120,6 +120,10 @@ func (sw *StreamWriter) PrepareIncremental() error {
 		if err := sw.db.Flatten(3); err != nil {
 			return fmt.Errorf("error during flatten in StreamWriter: %w", err)
 		}
+		// Flatten resumes compactions when it returns. Stop them again: they
+		// must not run while the stream writer writes its tables, and Flush
+		// replaces the oracle they read the discard timestamp from.
+		sw.db.stopCompactions()
 		sw.prevLevel = len(sw.db.Levels()) - 1
 	}
 	return nil
