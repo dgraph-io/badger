@@ -157,6 +157,10 @@ func (e *Entry) estimateSizeAndSetThreshold(threshold int64) int64 {
 }
 
 func (e *Entry) skipVlogAndSetThreshold(threshold int64) bool {
+	// Finish markers never enter the LSM tree, and WAL replay needs their literal timestamp.
+	if e.meta&bitFinTxn != 0 {
+		return true
+	}
 	if e.valThreshold == 0 {
 		e.valThreshold = threshold
 	}
