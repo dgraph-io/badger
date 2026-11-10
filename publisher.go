@@ -123,8 +123,15 @@ func (p *publisher) newSubscriber(c *z.Closer, matches []pb.Match) (subscriber, 
 	s.active.Store(1)
 
 	p.subscribers[id] = s
-	for _, m := range matches {
-		if err := p.indexer.AddMatch(m, id); err != nil {
+	for i := range matches {
+		if err := p.indexer.AddMatch(matches[i], id); err != nil {
+			// Roll back only the matches registered before the failure.
+			// DeleteMatch walks the whole trie, so calling it for matches
+			// that were never added is wasteful while p.Mutex is held.
+			for j := 0; j < i; j++ {
+				_ = p.indexer.DeleteMatch(matches[j], id)
+			}
+			delete(p.subscribers, id)
 			return subscriber{}, err
 		}
 	}
