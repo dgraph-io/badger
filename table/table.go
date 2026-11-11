@@ -597,12 +597,15 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 	}
 
 	// Read meta data related to block.
+	if len(blk.data) < 4 {
+		return nil, errors.New("invalid block size: data is too small to contain checksum length")
+	}
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
 
-	// Checksum length greater than block size could happen if the table was compressed and
+	// Checksum length greater than remaining block size could happen if the table was compressed and
 	// it was opened with an incorrect compression algorithm (or the data was corrupted).
-	if blk.chkLen > len(blk.data) {
+	if blk.chkLen < 0 || blk.chkLen > readPos {
 		return nil, errors.New("invalid checksum length. Either the data is " +
 			"corrupted or the table options are incorrectly set")
 	}
@@ -611,10 +614,18 @@ func (t *Table) block(idx int, useCache bool) (*Block, error) {
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Move back and read numEntries in the block.
+	if readPos < 4 {
+		return nil, errors.New("invalid block size: data is too small to contain numEntries")
+	}
 	readPos -= 4
 	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
-	entriesIndexStart := readPos - (numEntries * 4)
-	entriesIndexEnd := entriesIndexStart + numEntries*4
+	entriesSize := numEntries * 4
+	if numEntries < 0 || entriesSize/4 != numEntries || readPos < entriesSize {
+		return nil, errors.New("invalid number of entries in block. Either the data is " +
+			"corrupted or the table options are incorrectly set")
+	}
+	entriesIndexStart := readPos - entriesSize
+	entriesIndexEnd := readPos
 
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
