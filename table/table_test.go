@@ -21,6 +21,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v4/fb"
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/v2"
@@ -932,4 +933,54 @@ func TestInMemoryTableFilename(t *testing.T) {
 		opt:      &Options{},
 	}
 	require.Equal(t, IDToFilename(777), tbl.Filename())
+}
+
+func TestTableBlockCorruptedBoundsNoPanic(t *testing.T) {
+	testCases := []struct {
+		name    string
+		corrupt func(data []byte, blkOffset, blkLen int)
+	}{
+		{
+			name: "chkLen exceeds readPos but within blkLen",
+			corrupt: func(data []byte, blkOffset, blkLen int) {
+				// Set chkLen = blkLen - 2 so readPos (blkLen - 4) - chkLen < 0
+				copy(data[blkOffset+blkLen-4:blkOffset+blkLen], y.U32ToBytes(uint32(blkLen-2)))
+			},
+		},
+		{
+			name: "numEntries exceeds remaining readPos",
+			corrupt: func(data []byte, blkOffset, blkLen int) {
+				// Set chkLen = 0
+				copy(data[blkOffset+blkLen-4:blkOffset+blkLen], y.U32ToBytes(0))
+				// Set numEntries = 0x3FFFFFFF so entriesIndexStart < 0
+				copy(data[blkOffset+blkLen-8:blkOffset+blkLen-4], y.U32ToBytes(0x3FFFFFFF))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := getTestTableOptions()
+			opts.Compression = options.None
+			src := buildTestTable(t, "key", 500, opts)
+
+			data := make([]byte, len(src.Data))
+			copy(data, src.Data)
+			srcID := src.ID()
+			require.NoError(t, src.DecrRef())
+
+			tbl, err := OpenInMemoryTable(data, srcID, &opts)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tbl.DecrRef()) }()
+
+			var ko fb.BlockOffset
+			require.True(t, tbl.offsets(&ko, 0))
+			tc.corrupt(data, int(ko.Offset()), int(ko.Len()))
+
+			require.NotPanics(t, func() {
+				_, err = tbl.block(0, false)
+			})
+			require.Error(t, err)
+		})
+	}
 }
