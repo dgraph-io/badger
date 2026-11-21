@@ -2056,11 +2056,13 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, matches 
 	}
 }
 
+var syncDirFunc = syncDir
+
 func (db *DB) syncDir(dir string) error {
 	if db.opt.InMemory {
 		return nil
 	}
-	return syncDir(dir)
+	return syncDirFunc(dir)
 }
 
 func createDirs(opt Options) error {

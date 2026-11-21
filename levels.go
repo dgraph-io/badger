@@ -1657,6 +1657,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// Add table to manifest file only if it is not opened in memory. We don't want to add a table
 	// to the manifest file if it exists only in memory.
 	if !t.IsInmemory {
+		// Ensure the new L0 table's directory entry is durable before recording it in MANIFEST.
+		if err := s.kv.syncDir(s.kv.opt.Dir); err != nil {
+			return err
+		}
 		// We update the manifest _before_ the table becomes part of a levelHandler, because at that
 		// point it could get used in some compaction.  This ensures the manifest file gets updated in
 		// the proper order. (That means this update happens before that of some compaction which
