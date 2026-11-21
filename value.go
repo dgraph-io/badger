@@ -537,6 +537,29 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 	if err != z.NewFile && err != nil {
 		return nil, err
 	}
+	cleanup := func(cause error) error {
+		delErr := lf.Delete()
+		if delErr == nil {
+			return cause
+		}
+		var closeErr error
+		if lf.Fd != nil {
+			if err := lf.Fd.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+				closeErr = err
+			}
+		}
+		rmErr := os.Remove(lf.path)
+		if errors.Is(rmErr, os.ErrNotExist) {
+			rmErr = nil
+		}
+		return errors.Join(cause, delErr, closeErr, rmErr)
+	}
+	if err := lf.Sync(); err != nil {
+		return nil, cleanup(errFile(err, lf.path, "Sync value log file"))
+	}
+	if err := vlog.db.syncDir(vlog.dirPath); err != nil {
+		return nil, cleanup(errFile(err, vlog.dirPath, "Sync value log dir"))
+	}
 
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
