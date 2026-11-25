@@ -1140,13 +1140,15 @@ func (db *DB) handleMemTableFlush(mt *memTable, dropPrefixes [][]byte) error {
 	if err != nil {
 		return y.Wrap(err, "error while creating table")
 	}
-	//FSync the current value log file when new keys are flushed into SST
+	// We own a ref on tbl.
+	defer func() {
+		_ = tbl.DecrRef() // Releases our ref.
+	}()
+	// fsync the current value log file when new keys are flushed into SST
 	if err := db.vlog.sync(); err != nil {
 		return y.Wrap(err, "error while fsyncing value log")
 	}
-	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
-	_ = tbl.DecrRef()               // Releases our ref.
 	return err
 }
 
