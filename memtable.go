@@ -405,11 +405,12 @@ func (lf *logFile) generateIV(offset uint32) []byte {
 	return iv
 }
 
+// vlogSyncFunc syncs a value log file. Tests replace it to observe the order of syncs.
+var vlogSyncFunc = func(lf *logFile) error { return lf.Sync() }
+
 func (lf *logFile) doneWriting(offset uint32) error {
-	if lf.opt.SyncWrites {
-		if err := lf.Sync(); err != nil {
-			return y.Wrapf(err, "Unable to sync value log: %q", lf.path)
-		}
+	if err := vlogSyncFunc(lf); err != nil {
+		return y.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
 	// Before we were acquiring a lock here on lf.lock, because we were invalidating the file

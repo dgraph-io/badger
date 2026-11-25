@@ -769,7 +769,7 @@ func (vlog *valueLog) sync() error {
 	curlf.lock.RLock()
 	vlog.filesLock.RUnlock()
 
-	err := curlf.Sync()
+	err := vlogSyncFunc(curlf)
 	curlf.lock.RUnlock()
 	return err
 }
