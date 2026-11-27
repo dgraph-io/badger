@@ -340,9 +340,11 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, 
 			b.staleDataSize += len(key) + 4 /* len */ + 4 /* offset */
 		}
 		b.finishBlock()
-		// Create a new block and start writing.
+		// Create a new block and start writing. A block usually holds about as
+		// many entries as the previous one, so size entryOffsets for that.
 		b.curBlock = &bblock{
-			data: b.alloc.Allocate(b.opts.BlockSize + padding),
+			data:         b.alloc.Allocate(b.opts.BlockSize + padding),
+			entryOffsets: make([]uint32, 0, len(b.curBlock.entryOffsets)),
 		}
 	}
 	b.addHelper(key, value, valueLen)
